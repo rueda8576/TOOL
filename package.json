@@ -1,0 +1,17 @@
+{
+  "name": "doctoral-platform",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm --filter @doctoral/api dev",
+    "dev:web": "pnpm --filter @doctoral/web dev",
+    "dev:worker": "pnpm --filter @doctoral/worker dev",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "format": "pnpm -r format",
+    "db:generate": "pnpm --filter @doctoral/db db:generate",
+    "db:migrate": "pnpm --filter @doctoral/db db:migrate"
+  }
+}

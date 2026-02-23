@@ -1,0 +1,501 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum GlobalRole {
+  ADMIN
+  EDITOR
+  READER
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+enum DocumentType {
+  PAPER
+  MANUAL
+  MODEL
+  DRAFT
+  MINUTES
+  OTHER
+}
+
+enum CompileStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  TIMEOUT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  DONE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum MeetingActionStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELED
+}
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELED
+}
+
+enum NotificationEventType {
+  PROJECT_INVITE
+  TASK_ASSIGNED
+  TASK_DUE
+  TASK_MENTION
+  DOC_COMPILED
+  PASSWORD_RESET
+}
+
+enum BackupStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model User {
+  id                     String                 @id @default(cuid())
+  email                  String                 @unique
+  passwordHash           String
+  name                   String
+  globalRole             GlobalRole             @default(READER)
+  timezone               String                 @default("Europe/Madrid")
+  isActive               Boolean                @default(true)
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  deletedAt              DateTime?
+  sessions               Session[]
+  invitesSent            Invite[]               @relation("InviteSender")
+  invitesAccepted        Invite[]               @relation("InviteAccepter")
+  projectMemberships     ProjectMember[]
+  createdProjects        Project[]              @relation("ProjectCreator")
+  createdDocuments       Document[]             @relation("DocumentCreator")
+  createdDocumentBranches DocumentBranch[]      @relation("DocumentBranchCreator")
+  createdDocumentVersions DocumentVersion[]     @relation("DocumentVersionCreator")
+  createdWikiPages       WikiPage[]             @relation("WikiPageCreator")
+  createdWikiRevisions   WikiRevision[]         @relation("WikiRevisionCreator")
+  assignedTasks          Task[]                 @relation("TaskAssignee")
+  createdTasks           Task[]                 @relation("TaskCreator")
+  createdTaskDeps        TaskDependency[]       @relation("TaskDependencyCreator")
+  createdMeetings        Meeting[]              @relation("MeetingCreator")
+  meetingAttendeeEntries MeetingAttendee[]
+  ownedMeetingActions    MeetingAction[]        @relation("MeetingActionOwner")
+  notificationPreference NotificationPreference?
+  notificationEvents     NotificationEvent[]    @relation("NotificationRecipient")
+  uploadedFiles          FileObject[]           @relation("FileUploader")
+  auditLogs              AuditLog[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Invite {
+  id           String      @id @default(cuid())
+  email        String
+  tokenHash    String      @unique
+  globalRole   GlobalRole  @default(READER)
+  senderId     String
+  acceptedById String?
+  projectId    String?
+  status       InviteStatus @default(PENDING)
+  expiresAt    DateTime
+  createdAt    DateTime    @default(now())
+  acceptedAt   DateTime?
+
+  sender     User    @relation("InviteSender", fields: [senderId], references: [id], onDelete: Restrict)
+  acceptedBy User?   @relation("InviteAccepter", fields: [acceptedById], references: [id], onDelete: SetNull)
+  project    Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([email, status])
+  @@index([projectId])
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  key         String        @unique
+  name        String
+  description String?
+  createdById String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+
+  createdBy User            @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  members   ProjectMember[]
+  documents Document[]
+  wikiPages WikiPage[]
+  tasks     Task[]
+  meetings  Meeting[]
+  invites   Invite[]
+  auditLogs AuditLog[]
+}
+
+model ProjectMember {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model FileObject {
+  id           String   @id @default(cuid())
+  storagePath  String   @unique
+  originalName String
+  mimeType     String
+  sizeBytes    BigInt
+  checksum     String?
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  uploadedBy User? @relation("FileUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  pdfUploadedVersions      DocumentVersion[] @relation("UploadedPdfFile")
+  latexUploadedVersions    DocumentVersion[] @relation("UploadedLatexBundleFile")
+  compiledPdfForVersions   DocumentVersion[] @relation("CompiledPdfFile")
+}
+
+model Document {
+  id          String       @id @default(cuid())
+  projectId   String
+  title       String
+  type        DocumentType @default(OTHER)
+  authors     String[]
+  tags        String[]
+  publishedAt DateTime?
+  createdById String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  deletedAt   DateTime?
+
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User             @relation("DocumentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  branches  DocumentBranch[]
+  versions  DocumentVersion[]
+
+  @@index([projectId])
+}
+
+model DocumentBranch {
+  id            String    @id @default(cuid())
+  documentId    String
+  name          String
+  baseVersionId String?
+  createdById   String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  document    Document          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  baseVersion DocumentVersion?  @relation("BranchBaseVersion", fields: [baseVersionId], references: [id], onDelete: SetNull)
+  createdBy   User              @relation("DocumentBranchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  versions    DocumentVersion[] @relation("BranchVersions")
+
+  @@unique([documentId, name])
+  @@index([documentId])
+}
+
+model DocumentVersion {
+  id                String        @id @default(cuid())
+  documentId        String
+  branchId          String
+  versionNumber     Int
+  notes             String?
+  latexEntryFile    String?
+  latexWorkspacePath String?
+  pdfFileId         String?
+  latexBundleFileId String?
+  compiledPdfFileId String?
+  compileStatus     CompileStatus @default(PENDING)
+  compileLog        String?
+  createdById       String
+  createdAt         DateTime      @default(now())
+  deletedAt         DateTime?
+
+  document       Document           @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  branch         DocumentBranch     @relation("BranchVersions", fields: [branchId], references: [id], onDelete: Restrict)
+  createdBy      User               @relation("DocumentVersionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  pdfFile        FileObject?        @relation("UploadedPdfFile", fields: [pdfFileId], references: [id], onDelete: SetNull)
+  latexBundleFile FileObject?       @relation("UploadedLatexBundleFile", fields: [latexBundleFileId], references: [id], onDelete: SetNull)
+  compiledPdfFile FileObject?       @relation("CompiledPdfFile", fields: [compiledPdfFileId], references: [id], onDelete: SetNull)
+  baseForBranches DocumentBranch[]  @relation("BranchBaseVersion")
+  compileJobs    DocumentCompileJob[]
+
+  @@unique([branchId, versionNumber])
+  @@index([documentId, createdAt])
+}
+
+model DocumentCompileJob {
+  id                String        @id @default(cuid())
+  documentVersionId String
+  queueJobId        String?
+  status            CompileStatus @default(PENDING)
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  errorMessage      String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  documentVersion DocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
+
+  @@index([documentVersionId])
+  @@index([status])
+}
+
+model WikiPage {
+  id                String    @id @default(cuid())
+  projectId         String
+  title             String
+  slug              String
+  templateType      String?
+  createdById       String
+  currentRevisionId String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy       User          @relation("WikiPageCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  currentRevision WikiRevision? @relation("CurrentWikiRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
+  revisions       WikiRevision[]
+
+  @@unique([projectId, slug])
+  @@index([projectId])
+}
+
+model WikiRevision {
+  id              String   @id @default(cuid())
+  pageId          String
+  revisionNumber  Int
+  contentMarkdown String
+  changeNote      String?
+  createdById     String
+  createdAt       DateTime @default(now())
+
+  page       WikiPage   @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  createdBy  User       @relation("WikiRevisionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  currentFor WikiPage[] @relation("CurrentWikiRevision")
+
+  @@unique([pageId, revisionNumber])
+  @@index([pageId, createdAt])
+}
+
+model Task {
+  id           String       @id @default(cuid())
+  projectId    String
+  title        String
+  description  String?
+  status       TaskStatus   @default(TODO)
+  priority     TaskPriority @default(MEDIUM)
+  startDate    DateTime?
+  dueDate      DateTime?
+  assigneeId   String?
+  createdById  String
+  parentTaskId String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+
+  project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee     User?            @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy    User             @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  parentTask   Task?            @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: SetNull)
+  subtasks     Task[]           @relation("TaskSubtasks")
+  labels       TaskLabel[]
+  dependencies TaskDependency[] @relation("TaskDependsOn")
+  blockedBy    TaskDependency[] @relation("TaskBlockedBy")
+  meetingActions MeetingAction[]
+  auditLogs    AuditLog[]
+
+  @@index([projectId, status])
+  @@index([projectId, dueDate])
+}
+
+model TaskDependency {
+  id              String   @id @default(cuid())
+  taskId          String
+  dependsOnTaskId String
+  createdById     String
+  createdAt       DateTime @default(now())
+
+  task          Task @relation("TaskDependsOn", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOnTask Task @relation("TaskBlockedBy", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+  createdBy     User @relation("TaskDependencyCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([taskId, dependsOnTaskId])
+  @@index([dependsOnTaskId])
+}
+
+model TaskLabel {
+  id        String   @id @default(cuid())
+  taskId    String
+  label     String
+  color     String?
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, label])
+}
+
+model Meeting {
+  id             String   @id @default(cuid())
+  projectId      String
+  title          String
+  scheduledAt    DateTime
+  location       String?
+  doneMarkdown   String?
+  toDiscussMarkdown String?
+  toDoMarkdown   String?
+  createdById    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User              @relation("MeetingCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  attendees MeetingAttendee[]
+  actions   MeetingAction[]
+
+  @@index([projectId, scheduledAt])
+}
+
+model MeetingAttendee {
+  id            String   @id @default(cuid())
+  meetingId     String
+  userId        String?
+  externalEmail String?
+  externalName  String?
+  createdAt     DateTime @default(now())
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([meetingId])
+}
+
+model MeetingAction {
+  id           String              @id @default(cuid())
+  meetingId    String
+  title        String
+  description  String?
+  status       MeetingActionStatus @default(OPEN)
+  ownerId      String?
+  dueDate      DateTime?
+  linkedTaskId String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  meeting    Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  owner      User?   @relation("MeetingActionOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  linkedTask Task?   @relation(fields: [linkedTaskId], references: [id], onDelete: SetNull)
+
+  @@index([meetingId])
+}
+
+model NotificationPreference {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  emailEnabled          Boolean  @default(true)
+  taskAssigned          Boolean  @default(true)
+  taskDue               Boolean  @default(true)
+  taskDueLeadHours      Int      @default(24)
+  mentionInWiki         Boolean  @default(true)
+  mentionInTaskComments Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model NotificationEvent {
+  id           String                @id @default(cuid())
+  userId       String
+  type         NotificationEventType
+  channel      NotificationChannel   @default(EMAIL)
+  payload      Json
+  scheduledAt  DateTime?
+  sentAt       DateTime?
+  status       NotificationStatus    @default(PENDING)
+  errorMessage String?
+  createdAt    DateTime              @default(now())
+
+  user User @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([scheduledAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  projectId  String?
+  taskId     String?
+  entityType String
+  entityId   String
+  action     String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  task    Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model BackupRun {
+  id             String       @id @default(cuid())
+  status         BackupStatus @default(RUNNING)
+  startedAt      DateTime     @default(now())
+  completedAt    DateTime?
+  retentionUntil DateTime?
+  details        Json?
+}

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PDF Preview</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #eef3fb;
+        color: #172133;
+        font: 13px/1.4 "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+      }
+      #status {
+        min-height: 34px;
+        padding: 8px 12px;
+        border-bottom: 1px solid #d8e0ec;
+        background: #f8fbff;
+        color: #5b6980;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      #pages {
+        flex: 1;
+        overflow: auto;
+        padding: 12px;
+        display: grid;
+        gap: 12px;
+      }
+      .page-wrap {
+        width: 100%;
+        border: 1px solid #d8e0ec;
+        background: #ffffff;
+        box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+      }
+      .page-canvas {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status">Loading PDF...</div>
+    <main id="pages" aria-live="polite"></main>
+    <script src="../build/pdf.js"></script>
+    <script src="./viewer-init.js"></script>
+  </body>
+</html>

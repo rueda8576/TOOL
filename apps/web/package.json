@@ -1,0 +1,26 @@
+{
+  "name": "@doctoral/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "pdfjs:sync": "node scripts/sync-pdfjs-viewer.mjs",
+    "prebuild": "pnpm run pdfjs:sync",
+    "build": "next build",
+    "dev": "next dev -p 3000",
+    "start": "next start -p 3000",
+    "lint": "echo 'No lint configured for @doctoral/web'",
+    "test": "echo 'No tests configured for @doctoral/web'"
+  },
+  "dependencies": {
+    "next": "^14.2.20",
+    "pdfjs-dist": "3.11.174",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.7.3"
+  }
+}

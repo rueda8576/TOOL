@@ -1,0 +1,10 @@
+node_modules
+.pnpm-store
+.git
+.gitignore
+.next
+dist
+coverage
+storage
+tmp
+.env
