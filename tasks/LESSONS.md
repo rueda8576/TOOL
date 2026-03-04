@@ -93,3 +93,6 @@
 - Keep product naming aligned across visible UI brand labels and metadata title to avoid split identity between sidebar and browser tab.
 - In project-scoped navigation, the sidebar brand can switch from global product name to operational project identifier (`project.key`) while preserving a stable fallback (`WorkMesh`) when context/token fetch fails.
 - Keep deployment naming consistent end-to-end (`/opt/<brand>`, `/var/lib/<brand>/storage`, nginx site name) to avoid mixed legacy identifiers during infrastructure migration.
+
+## Monorepo Docker builds
+- In multi-stage Dockerfiles for PNPM workspaces, do not assume copying only root `node_modules` is enough for build scripts; ensure filtered dependencies are installed in the build stage before running `pnpm --filter <pkg> build` to avoid missing local binaries like `tsc`.

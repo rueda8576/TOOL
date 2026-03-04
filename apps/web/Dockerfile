@@ -12,6 +12,7 @@ ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+RUN pnpm install --filter @doctoral/web... --frozen-lockfile=false
 RUN pnpm --filter @doctoral/web build
 
 FROM node:22-alpine AS runtime

@@ -11,6 +11,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+RUN pnpm install --filter @doctoral/worker... --frozen-lockfile=false
+RUN pnpm --filter @doctoral/db db:generate
 RUN pnpm --filter @doctoral/worker build
 
 FROM node:22-alpine AS runtime
