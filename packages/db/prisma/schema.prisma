@@ -100,12 +100,15 @@ model User {
   invitesSent            Invite[]               @relation("InviteSender")
   invitesAccepted        Invite[]               @relation("InviteAccepter")
   projectMemberships     ProjectMember[]
+  pinnedProjects         UserPinnedProject[]
   createdProjects        Project[]              @relation("ProjectCreator")
   createdDocuments       Document[]             @relation("DocumentCreator")
   createdDocumentBranches DocumentBranch[]      @relation("DocumentBranchCreator")
   createdDocumentVersions DocumentVersion[]     @relation("DocumentVersionCreator")
   createdWikiPages       WikiPage[]             @relation("WikiPageCreator")
   createdWikiRevisions   WikiRevision[]         @relation("WikiRevisionCreator")
+  updatedWikiDrafts      WikiDraft[]            @relation("WikiDraftUpdater")
+  uploadedWikiAssets     WikiAsset[]            @relation("WikiAssetUploader")
   assignedTasks          Task[]                 @relation("TaskAssignee")
   createdTasks           Task[]                 @relation("TaskCreator")
   createdTaskDeps        TaskDependency[]       @relation("TaskDependencyCreator")
@@ -163,12 +166,28 @@ model Project {
 
   createdBy User            @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Restrict)
   members   ProjectMember[]
+  pinnedByUsers UserPinnedProject[]
   documents Document[]
   wikiPages WikiPage[]
+  wikiAssets WikiAsset[]
   tasks     Task[]
   meetings  Meeting[]
   invites   Invite[]
   auditLogs AuditLog[]
+}
+
+model UserPinnedProject {
+  id        String   @id @default(cuid())
+  userId    String
+  projectId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, projectId])
+  @@index([userId])
+  @@index([projectId])
 }
 
 model ProjectMember {
@@ -199,6 +218,7 @@ model FileObject {
   pdfUploadedVersions      DocumentVersion[] @relation("UploadedPdfFile")
   latexUploadedVersions    DocumentVersion[] @relation("UploadedLatexBundleFile")
   compiledPdfForVersions   DocumentVersion[] @relation("CompiledPdfFile")
+  wikiAssets               WikiAsset[]
 }
 
 model Document {
@@ -293,6 +313,8 @@ model WikiPage {
   projectId         String
   title             String
   slug              String
+  folderPath        String    @default("")
+  path              String
   templateType      String?
   createdById       String
   currentRevisionId String?
@@ -304,8 +326,11 @@ model WikiPage {
   createdBy       User          @relation("WikiPageCreator", fields: [createdById], references: [id], onDelete: Restrict)
   currentRevision WikiRevision? @relation("CurrentWikiRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
   revisions       WikiRevision[]
+  draft           WikiDraft?
+  outgoingLinks   WikiLink[]    @relation("WikiLinkFrom")
+  incomingLinks   WikiLink[]    @relation("WikiLinkTo")
 
-  @@unique([projectId, slug])
+  @@unique([projectId, path])
   @@index([projectId])
 }
 
@@ -324,6 +349,52 @@ model WikiRevision {
 
   @@unique([pageId, revisionNumber])
   @@index([pageId, createdAt])
+}
+
+model WikiDraft {
+  id              String   @id @default(cuid())
+  pageId          String   @unique
+  title           String
+  contentMarkdown String
+  draftVersion    Int      @default(1)
+  updatedById     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  page      WikiPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  updatedBy User     @relation("WikiDraftUpdater", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@index([updatedAt])
+}
+
+model WikiLink {
+  id         String   @id @default(cuid())
+  fromPageId String
+  toPath     String
+  toPageId   String?
+  createdAt  DateTime @default(now())
+
+  fromPage WikiPage  @relation("WikiLinkFrom", fields: [fromPageId], references: [id], onDelete: Cascade)
+  toPage   WikiPage? @relation("WikiLinkTo", fields: [toPageId], references: [id], onDelete: SetNull)
+
+  @@unique([fromPageId, toPath])
+  @@index([toPageId])
+  @@index([toPath])
+}
+
+model WikiAsset {
+  id           String   @id @default(cuid())
+  projectId    String
+  fileObjectId String
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fileObject FileObject @relation(fields: [fileObjectId], references: [id], onDelete: Cascade)
+  uploadedBy User       @relation("WikiAssetUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@unique([fileObjectId])
+  @@index([projectId, createdAt])
 }
 
 model Task {

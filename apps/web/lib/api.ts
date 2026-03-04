@@ -23,4 +23,6 @@ export type ProjectSummary = {
   key: string;
   name: string;
   description: string | null;
+  createdAt: string;
+  isPinned: boolean;
 };

@@ -1,7 +1,9 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { AppShell } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
@@ -32,6 +34,8 @@ type TextTransformResult = {
 };
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DEFAULT_MARKDOWN_LIST_ITEM = "- ";
+const INDENT_SIZE = 2;
 
 function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
   if (!rawUser) {
@@ -51,6 +55,34 @@ function dayKeyFromDate(date: Date): string {
 
 function parseDayKey(dayKey: string): Date {
   return new Date(`${dayKey}T12:00:00.000Z`);
+}
+
+function normalizeDayKey(rawDayKey: string | null): string | null {
+  if (!rawDayKey || !/^\d{4}-\d{2}-\d{2}$/.test(rawDayKey)) {
+    return null;
+  }
+
+  const parsed = parseDayKey(rawDayKey);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString().slice(0, 10) === rawDayKey ? rawDayKey : null;
+}
+
+function parseMonthKey(rawMonthKey: string | null): Date | null {
+  if (!rawMonthKey || !/^\d{4}-\d{2}$/.test(rawMonthKey)) {
+    return null;
+  }
+
+  const [yearRaw, monthRaw] = rawMonthKey.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return null;
+  }
+
+  return new Date(Date.UTC(year, month - 1, 1));
 }
 
 function toIsoFromDay(dayKey: string): string {
@@ -103,15 +135,97 @@ function displayDay(dayKey: string): string {
   return parseDayKey(dayKey).toLocaleDateString();
 }
 
-function sectionSnippet(content: string | null, maxLength = 140): string | null {
-  if (!content) {
+function withDefaultListSeed(content: string | null): string {
+  if (!content || content.trim().length === 0) {
+    return DEFAULT_MARKDOWN_LIST_ITEM;
+  }
+  return content;
+}
+
+type ListMarkerInfo = {
+  indent: string;
+  marker: string;
+  content: string;
+};
+
+function extractListMarker(line: string): ListMarkerInfo | null {
+  const checklistMatch = line.match(/^(\s*)-\s\[(?: |x|X)\]\s?(.*)$/);
+  if (checklistMatch) {
+    return {
+      indent: checklistMatch[1] ?? "",
+      marker: "- [ ] ",
+      content: checklistMatch[2] ?? ""
+    };
+  }
+
+  const unorderedMatch = line.match(/^(\s*)([-+*])\s(.*)$/);
+  if (unorderedMatch) {
+    return {
+      indent: unorderedMatch[1] ?? "",
+      marker: `${unorderedMatch[2]} `,
+      content: unorderedMatch[3] ?? ""
+    };
+  }
+
+  const orderedMatch = line.match(/^(\s*)\d+\.\s(.*)$/);
+  if (orderedMatch) {
+    return {
+      indent: orderedMatch[1] ?? "",
+      marker: "1. ",
+      content: orderedMatch[2] ?? ""
+    };
+  }
+
+  return null;
+}
+
+function buildListContinuationOnEnter(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number
+): TextTransformResult | null {
+  if (selectionStart !== selectionEnd) {
     return null;
   }
-  const compact = content.replace(/\s+/g, " ").trim();
-  if (!compact) {
+
+  const safeCursor = Math.max(0, Math.min(selectionStart, value.length));
+  const lineStart = value.lastIndexOf("\n", Math.max(0, safeCursor - 1)) + 1;
+  const lineEndIndex = value.indexOf("\n", safeCursor);
+  const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex;
+  const line = value.slice(lineStart, lineEnd);
+  const markerInfo = extractListMarker(line);
+  if (!markerInfo) {
     return null;
   }
-  return compact.length > maxLength ? `${compact.slice(0, maxLength)}...` : compact;
+
+  const hasContent = markerInfo.content.trim().length > 0;
+  const nextIndent = hasContent
+    ? markerInfo.indent
+    : markerInfo.indent.length >= INDENT_SIZE
+      ? markerInfo.indent.slice(0, markerInfo.indent.length - INDENT_SIZE)
+      : "";
+  const insertText = hasContent || markerInfo.indent.length >= INDENT_SIZE ? `\n${nextIndent}${markerInfo.marker}` : "\n";
+
+  return {
+    nextValue: `${value.slice(0, safeCursor)}${insertText}${value.slice(safeCursor)}`,
+    nextSelectionStart: safeCursor + insertText.length,
+    nextSelectionEnd: safeCursor + insertText.length
+  };
+}
+
+function renderMarkdownSection(label: string, content: string | null): JSX.Element | null {
+  if (!content || content.trim().length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="minutes-markdown-section">
+      <p className="minutes-markdown-label">{label}</p>
+      <div className="minutes-markdown-content">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      </div>
+    </section>
+  );
 }
 
 function transformSelectedLines(
@@ -161,6 +275,8 @@ export default function ProjectMeetingsPage({
   params: { projectId: string };
 }): JSX.Element {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const searchParamsValue = searchParams.toString();
   const doneRef = useRef<HTMLTextAreaElement>(null);
   const toDiscussRef = useRef<HTMLTextAreaElement>(null);
   const toDoRef = useRef<HTMLTextAreaElement>(null);
@@ -242,6 +358,31 @@ export default function ProjectMeetingsPage({
     void loadMeetings(storedToken);
   }, [loadMeetings, router]);
 
+  useEffect(() => {
+    const currentSearchParams = new URLSearchParams(searchParamsValue);
+    const requestedView = currentSearchParams.get("view");
+    if (requestedView === "calendar" || requestedView === "list") {
+      setViewMode(requestedView);
+    }
+
+    const requestedDate = normalizeDayKey(currentSearchParams.get("date"));
+    let requestedMonthCursor = parseMonthKey(currentSearchParams.get("month"));
+
+    if (requestedDate) {
+      setSelectedCalendarDate(requestedDate);
+      if (!requestedMonthCursor) {
+        const requestedDateParsed = parseDayKey(requestedDate);
+        requestedMonthCursor = new Date(
+          Date.UTC(requestedDateParsed.getUTCFullYear(), requestedDateParsed.getUTCMonth(), 1)
+        );
+      }
+    }
+
+    if (requestedMonthCursor) {
+      setMonthCursor(requestedMonthCursor);
+    }
+  }, [searchParamsValue]);
+
   const sortedMeetings = useMemo(
     () =>
       [...meetings].sort((left, right) => {
@@ -276,9 +417,9 @@ export default function ProjectMeetingsPage({
     setDateInput(today);
     setTitle(autoTitleForDay(today));
     setLocation("");
-    setDoneMarkdown("");
-    setToDiscussMarkdown("");
-    setToDoMarkdown("");
+    setDoneMarkdown(DEFAULT_MARKDOWN_LIST_ITEM);
+    setToDiscussMarkdown(DEFAULT_MARKDOWN_LIST_ITEM);
+    setToDoMarkdown(DEFAULT_MARKDOWN_LIST_ITEM);
     setTitleManuallyEdited(false);
     setEditingMeetingId(null);
     setFormMode("create");
@@ -297,14 +438,30 @@ export default function ProjectMeetingsPage({
     setDateInput(meeting.scheduledDate);
     setTitle(meeting.title);
     setLocation(meeting.location ?? "");
-    setDoneMarkdown(meeting.doneMarkdown ?? "");
-    setToDiscussMarkdown(meeting.toDiscussMarkdown ?? "");
-    setToDoMarkdown(meeting.toDoMarkdown ?? "");
+    setDoneMarkdown(withDefaultListSeed(meeting.doneMarkdown));
+    setToDiscussMarkdown(withDefaultListSeed(meeting.toDiscussMarkdown));
+    setToDoMarkdown(withDefaultListSeed(meeting.toDoMarkdown));
     setTitleManuallyEdited(true);
     setShowForm(true);
     setError(null);
     setSuccess(null);
   };
+
+  const applyMarkdownTransform = useCallback(
+    (section: MarkdownSectionKey, transformed: TextTransformResult): void => {
+      setMarkdownSectionValue(section, transformed.nextValue);
+
+      requestAnimationFrame(() => {
+        const refreshedRef = markdownSectionRefs[section].current;
+        if (!refreshedRef) {
+          return;
+        }
+        refreshedRef.focus();
+        refreshedRef.setSelectionRange(transformed.nextSelectionStart, transformed.nextSelectionEnd);
+      });
+    },
+    [markdownSectionRefs, setMarkdownSectionValue]
+  );
 
   const applyMarkdownAction = useCallback(
     (section: MarkdownSectionKey, action: MarkdownAction): void => {
@@ -329,29 +486,40 @@ export default function ProjectMeetingsPage({
         transformed = transformSelectedLines(sectionValue, selectionStart, selectionEnd, (line) => outdentLine(line));
       }
 
-      setMarkdownSectionValue(section, transformed.nextValue);
-
-      requestAnimationFrame(() => {
-        const refreshedRef = markdownSectionRefs[section].current;
-        if (!refreshedRef) {
-          return;
-        }
-        refreshedRef.focus();
-        refreshedRef.setSelectionRange(transformed.nextSelectionStart, transformed.nextSelectionEnd);
-      });
+      applyMarkdownTransform(section, transformed);
     },
-    [markdownSectionRefs, markdownSectionValues, setMarkdownSectionValue]
+    [applyMarkdownTransform, markdownSectionRefs, markdownSectionValues]
   );
 
   const onMarkdownKeyDown = useCallback(
     (section: MarkdownSectionKey, event: KeyboardEvent<HTMLTextAreaElement>): void => {
-      if (event.key !== "Tab") {
+      if (event.key === "Tab") {
+        event.preventDefault();
+        applyMarkdownAction(section, event.shiftKey ? "outdent" : "indent");
         return;
       }
+
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      const textareaRef = markdownSectionRefs[section].current;
+      if (!textareaRef) {
+        return;
+      }
+      const transformed = buildListContinuationOnEnter(
+        markdownSectionValues[section],
+        textareaRef.selectionStart,
+        textareaRef.selectionEnd
+      );
+      if (!transformed) {
+        return;
+      }
+
       event.preventDefault();
-      applyMarkdownAction(section, event.shiftKey ? "outdent" : "indent");
+      applyMarkdownTransform(section, transformed);
     },
-    [applyMarkdownAction]
+    [applyMarkdownAction, applyMarkdownTransform, markdownSectionRefs, markdownSectionValues]
   );
 
   const renderMarkdownToolbar = (section: MarkdownSectionKey): JSX.Element => (
@@ -420,63 +588,87 @@ export default function ProjectMeetingsPage({
     openCreateForm();
   };
 
-  const submitMeeting = async (event: FormEvent): Promise<void> => {
-    event.preventDefault();
-
-    if (!token) {
-      setError("Missing session token. Please sign in again.");
+  const closeForm = useCallback((): void => {
+    if (submitting) {
       return;
     }
+    setShowForm(false);
+    resetForm();
+  }, [resetForm, submitting]);
 
-    if (isReader) {
-      setError("Reader role cannot modify minutes.");
-      return;
-    }
+  const submitMeeting = useCallback(
+    async (event: FormEvent): Promise<void> => {
+      event.preventDefault();
 
-    const trimmedTitle = title.trim();
-    if (!trimmedTitle || !dateInput) {
-      setError("Date and title are required.");
-      return;
-    }
-
-    setSubmitting(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const trimmedLocation = location.trim();
-
-      if (formMode === "edit" && editingMeetingId) {
-        await updateMeeting(editingMeetingId, token, {
-          title: trimmedTitle,
-          scheduledAt: toIsoFromDay(dateInput),
-          location: trimmedLocation,
-          doneMarkdown,
-          toDiscussMarkdown,
-          toDoMarkdown
-        });
-        setSuccess("Minute updated successfully.");
-      } else {
-        await createProjectMeeting(params.projectId, token, {
-          title: trimmedTitle,
-          scheduledAt: toIsoFromDay(dateInput),
-          location: trimmedLocation.length > 0 ? trimmedLocation : undefined,
-          doneMarkdown: doneMarkdown.trim().length > 0 ? doneMarkdown : undefined,
-          toDiscussMarkdown: toDiscussMarkdown.trim().length > 0 ? toDiscussMarkdown : undefined,
-          toDoMarkdown: toDoMarkdown.trim().length > 0 ? toDoMarkdown : undefined
-        });
-        setSuccess("Minute created successfully.");
+      if (!token) {
+        setError("Missing session token. Please sign in again.");
+        return;
       }
 
-      await loadMeetings(token);
-      setShowForm(false);
-      resetForm();
-    } catch (saveError) {
-      setError((saveError as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+      if (isReader) {
+        setError("Reader role cannot modify minutes.");
+        return;
+      }
+
+      const trimmedTitle = title.trim();
+      if (!trimmedTitle || !dateInput) {
+        setError("Date and title are required.");
+        return;
+      }
+
+      setSubmitting(true);
+      setError(null);
+      setSuccess(null);
+
+      try {
+        const trimmedLocation = location.trim();
+
+        if (formMode === "edit" && editingMeetingId) {
+          await updateMeeting(editingMeetingId, token, {
+            title: trimmedTitle,
+            scheduledAt: toIsoFromDay(dateInput),
+            location: trimmedLocation,
+            doneMarkdown,
+            toDiscussMarkdown,
+            toDoMarkdown
+          });
+          setSuccess("Minute updated successfully.");
+        } else {
+          await createProjectMeeting(params.projectId, token, {
+            title: trimmedTitle,
+            scheduledAt: toIsoFromDay(dateInput),
+            location: trimmedLocation.length > 0 ? trimmedLocation : undefined,
+            doneMarkdown: doneMarkdown.trim().length > 0 ? doneMarkdown : undefined,
+            toDiscussMarkdown: toDiscussMarkdown.trim().length > 0 ? toDiscussMarkdown : undefined,
+            toDoMarkdown: toDoMarkdown.trim().length > 0 ? toDoMarkdown : undefined
+          });
+          setSuccess("Minute created successfully.");
+        }
+
+        await loadMeetings(token);
+        closeForm();
+      } catch (saveError) {
+        setError((saveError as Error).message);
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [
+      closeForm,
+      dateInput,
+      doneMarkdown,
+      editingMeetingId,
+      formMode,
+      isReader,
+      loadMeetings,
+      location,
+      params.projectId,
+      title,
+      toDiscussMarkdown,
+      toDoMarkdown,
+      token
+    ]
+  );
 
   const deleteMinute = async (meetingId: string): Promise<void> => {
     if (!token) {
@@ -542,103 +734,110 @@ export default function ProjectMeetingsPage({
       </section>
 
       {showForm ? (
-        <section className="panel meetings-form-drawer">
-          <h3 className="section-heading">{formMode === "edit" ? "Edit minute" : "Create minute"}</h3>
-          <form className="form-grid" onSubmit={submitMeeting}>
-            <div className="grid cols-2 grid-tight">
+        <div className="meetings-editor-modal-backdrop" onClick={closeForm}>
+          <section
+            className="panel meetings-editor-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="meetings-editor-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="meetings-editor-modal-header">
+              <h3 id="meetings-editor-title" className="section-heading">
+                {formMode === "edit" ? "Edit minute" : "Create minute"}
+              </h3>
+              <button className="button button-secondary" type="button" onClick={closeForm} disabled={submitting}>
+                Close
+              </button>
+            </div>
+            <form className="form-grid meetings-editor-modal-body" onSubmit={submitMeeting}>
+              <div className="grid cols-2 grid-tight">
+                <label>
+                  Meeting date
+                  <input
+                    className="input"
+                    type="date"
+                    value={dateInput}
+                    onChange={(event) => onDateInputChange(event.target.value)}
+                    required
+                    disabled={isReader || submitting}
+                  />
+                </label>
+                <label>
+                  Location
+                  <input
+                    className="input"
+                    value={location}
+                    onChange={(event) => setLocation(event.target.value)}
+                    maxLength={300}
+                    disabled={isReader || submitting}
+                  />
+                </label>
+              </div>
               <label>
-                Meeting date
+                Title
                 <input
                   className="input"
-                  type="date"
-                  value={dateInput}
-                  onChange={(event) => onDateInputChange(event.target.value)}
+                  value={title}
+                  onChange={(event) => {
+                    setTitle(event.target.value);
+                    setTitleManuallyEdited(true);
+                  }}
+                  maxLength={300}
                   required
                   disabled={isReader || submitting}
                 />
               </label>
               <label>
-                Location
-                <input
-                  className="input"
-                  value={location}
-                  onChange={(event) => setLocation(event.target.value)}
-                  maxLength={300}
+                Done (Markdown)
+                {renderMarkdownToolbar("done")}
+                <textarea
+                  ref={doneRef}
+                  className="input textarea-sm"
+                  value={doneMarkdown}
+                  onChange={(event) => setDoneMarkdown(event.target.value)}
+                  onKeyDown={(event) => onMarkdownKeyDown("done", event)}
+                  maxLength={20_000}
                   disabled={isReader || submitting}
                 />
               </label>
-            </div>
-            <label>
-              Title
-              <input
-                className="input"
-                value={title}
-                onChange={(event) => {
-                  setTitle(event.target.value);
-                  setTitleManuallyEdited(true);
-                }}
-                maxLength={300}
-                required
-                disabled={isReader || submitting}
-              />
-            </label>
-            <label>
-              Done (Markdown)
-              {renderMarkdownToolbar("done")}
-              <textarea
-                ref={doneRef}
-                className="input textarea-sm"
-                value={doneMarkdown}
-                onChange={(event) => setDoneMarkdown(event.target.value)}
-                onKeyDown={(event) => onMarkdownKeyDown("done", event)}
-                maxLength={20_000}
-                disabled={isReader || submitting}
-              />
-            </label>
-            <label>
-              To discuss (Markdown)
-              {renderMarkdownToolbar("toDiscuss")}
-              <textarea
-                ref={toDiscussRef}
-                className="input textarea-sm"
-                value={toDiscussMarkdown}
-                onChange={(event) => setToDiscussMarkdown(event.target.value)}
-                onKeyDown={(event) => onMarkdownKeyDown("toDiscuss", event)}
-                maxLength={20_000}
-                disabled={isReader || submitting}
-              />
-            </label>
-            <label>
-              To do (Markdown)
-              {renderMarkdownToolbar("toDo")}
-              <textarea
-                ref={toDoRef}
-                className="input textarea-md"
-                value={toDoMarkdown}
-                onChange={(event) => setToDoMarkdown(event.target.value)}
-                onKeyDown={(event) => onMarkdownKeyDown("toDo", event)}
-                maxLength={50_000}
-                disabled={isReader || submitting}
-              />
-            </label>
-            <div className="task-form-actions">
-              <button className="button" type="submit" disabled={isReader || submitting}>
-                {submitting ? "Saving..." : formMode === "edit" ? "Save changes" : "Create minute"}
-              </button>
-              <button
-                className="button button-secondary"
-                type="button"
-                disabled={submitting}
-                onClick={() => {
-                  setShowForm(false);
-                  resetForm();
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </section>
+              <label>
+                To discuss (Markdown)
+                {renderMarkdownToolbar("toDiscuss")}
+                <textarea
+                  ref={toDiscussRef}
+                  className="input textarea-sm"
+                  value={toDiscussMarkdown}
+                  onChange={(event) => setToDiscussMarkdown(event.target.value)}
+                  onKeyDown={(event) => onMarkdownKeyDown("toDiscuss", event)}
+                  maxLength={20_000}
+                  disabled={isReader || submitting}
+                />
+              </label>
+              <label>
+                To do (Markdown)
+                {renderMarkdownToolbar("toDo")}
+                <textarea
+                  ref={toDoRef}
+                  className="input textarea-md"
+                  value={toDoMarkdown}
+                  onChange={(event) => setToDoMarkdown(event.target.value)}
+                  onKeyDown={(event) => onMarkdownKeyDown("toDo", event)}
+                  maxLength={50_000}
+                  disabled={isReader || submitting}
+                />
+              </label>
+              <div className="meetings-editor-modal-footer">
+                <button className="button" type="submit" disabled={isReader || submitting}>
+                  {submitting ? "Saving..." : formMode === "edit" ? "Save changes" : "Create minute"}
+                </button>
+                <button className="button button-secondary" type="button" disabled={submitting} onClick={closeForm}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
       ) : null}
 
       {loading ? <p className="alert alert-info">Loading minutes...</p> : null}
@@ -658,9 +857,9 @@ export default function ProjectMeetingsPage({
                         {meeting.location ? `Location: ${meeting.location}` : "Location: not set"} | Actions:{" "}
                         {meeting.actionsCount}
                       </p>
-                      {sectionSnippet(meeting.doneMarkdown) ? <p>Done: {sectionSnippet(meeting.doneMarkdown)}</p> : null}
-                      {sectionSnippet(meeting.toDiscussMarkdown) ? <p>To discuss: {sectionSnippet(meeting.toDiscussMarkdown)}</p> : null}
-                      {sectionSnippet(meeting.toDoMarkdown) ? <p>To do: {sectionSnippet(meeting.toDoMarkdown)}</p> : null}
+                      {renderMarkdownSection("Done", meeting.doneMarkdown)}
+                      {renderMarkdownSection("To discuss", meeting.toDiscussMarkdown)}
+                      {renderMarkdownSection("To do", meeting.toDoMarkdown)}
                     </div>
                     {!isReader ? (
                       <div className="minutes-list-item-actions">
@@ -748,9 +947,9 @@ export default function ProjectMeetingsPage({
                   <div key={meeting.id} className="list-item">
                     <strong>{meeting.title}</strong>
                     <p>{meeting.location ? `Location: ${meeting.location}` : "Location: not set"}</p>
-                    {sectionSnippet(meeting.doneMarkdown, 90) ? <p>Done: {sectionSnippet(meeting.doneMarkdown, 90)}</p> : null}
-                    {sectionSnippet(meeting.toDiscussMarkdown, 90) ? <p>To discuss: {sectionSnippet(meeting.toDiscussMarkdown, 90)}</p> : null}
-                    {sectionSnippet(meeting.toDoMarkdown, 90) ? <p>To do: {sectionSnippet(meeting.toDoMarkdown, 90)}</p> : null}
+                    {renderMarkdownSection("Done", meeting.doneMarkdown)}
+                    {renderMarkdownSection("To discuss", meeting.toDiscussMarkdown)}
+                    {renderMarkdownSection("To do", meeting.toDoMarkdown)}
                     {!isReader ? (
                       <div className="minutes-list-item-actions">
                         <button className="button button-secondary" type="button" onClick={() => openEditForm(meeting)}>

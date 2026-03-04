@@ -1,13 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../components/app-shell";
-import { StatusCard } from "../../components/status-card";
 import { authFetch, LoginResponse } from "../../lib/client-api";
 import { ProjectSummary } from "../../lib/api";
+
+type ProjectOrderBy = "newest" | "key" | "name";
+
+type CreateProjectResponse = {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+};
 
 function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
   if (!rawUser) {
@@ -21,6 +29,41 @@ function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
   }
 }
 
+function parseProjectCreatedAt(project: ProjectSummary): number {
+  const timestamp = Date.parse(project.createdAt);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function compareProjectsWithinGroup(left: ProjectSummary, right: ProjectSummary, orderBy: ProjectOrderBy): number {
+  if (orderBy === "newest") {
+    const newestFirst = parseProjectCreatedAt(right) - parseProjectCreatedAt(left);
+    if (newestFirst !== 0) {
+      return newestFirst;
+    }
+  }
+
+  if (orderBy === "key") {
+    const byKey = left.key.localeCompare(right.key, undefined, { sensitivity: "base" });
+    if (byKey !== 0) {
+      return byKey;
+    }
+  }
+
+  if (orderBy === "name") {
+    const byName = left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+    if (byName !== 0) {
+      return byName;
+    }
+  }
+
+  const fallbackNewest = parseProjectCreatedAt(right) - parseProjectCreatedAt(left);
+  if (fallbackNewest !== 0) {
+    return fallbackNewest;
+  }
+
+  return left.key.localeCompare(right.key, undefined, { sensitivity: "base" });
+}
+
 export default function ProjectsPage(): JSX.Element {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
@@ -28,12 +71,16 @@ export default function ProjectsPage(): JSX.Element {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+  const [orderBy, setOrderBy] = useState<ProjectOrderBy>("newest");
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [projectKey, setProjectKey] = useState("");
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
+  const [pinBusyProjectId, setPinBusyProjectId] = useState<string | null>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
 
   const loadProjects = useCallback(
     async (authToken: string): Promise<void> => {
@@ -67,6 +114,18 @@ export default function ProjectsPage(): JSX.Element {
 
   const isReader = userRole === "reader";
 
+  const sortedProjects = useMemo(
+    () =>
+      [...projects].sort((left, right) => {
+        if (left.isPinned !== right.isPinned) {
+          return left.isPinned ? -1 : 1;
+        }
+
+        return compareProjectsWithinGroup(left, right, orderBy);
+      }),
+    [orderBy, projects]
+  );
+
   const onCreateProject = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
 
@@ -99,7 +158,7 @@ export default function ProjectsPage(): JSX.Element {
     setCreateSuccess(null);
 
     try {
-      await authFetch<ProjectSummary>("/projects", {
+      await authFetch<CreateProjectResponse>("/projects", {
         token,
         init: {
           method: "POST",
@@ -115,6 +174,7 @@ export default function ProjectsPage(): JSX.Element {
       setProjectName("");
       setProjectDescription("");
       setCreateSuccess("Project created successfully.");
+      setIsCreateOpen(false);
       await loadProjects(token);
     } catch (submitError) {
       setCreateError((submitError as Error).message);
@@ -123,85 +183,145 @@ export default function ProjectsPage(): JSX.Element {
     }
   };
 
-  return (
-    <AppShell title="Projects" subtitle="Private-by-assignment workspace for doctoral collaboration.">
-      <section className="grid cols-3">
-        <StatusCard title="Visible Projects" value={loading ? "..." : `${projects.length}`} helper="Filtered by membership and role." />
-        <StatusCard title="Delivery Mode" value="Weekly" helper="Sprint-based iteration cadence." />
-        <StatusCard title="Infrastructure" value="Self-hosted" helper="VPS + PostgreSQL + Redis + SMTP." />
-      </section>
+  const onTogglePin = async (project: ProjectSummary): Promise<void> => {
+    if (!token || pinBusyProjectId) {
+      return;
+    }
 
-      <section className="panel">
-        <h2 className="section-heading">Create project</h2>
-        <form className="form-grid" onSubmit={onCreateProject}>
-          <div className="grid cols-2 grid-tight">
-            <label>
-              Key
-              <input
-                className="input"
-                value={projectKey}
-                onChange={(event) => setProjectKey(event.target.value.toUpperCase())}
-                placeholder="PHD1"
-                maxLength={20}
-                required
-                disabled={isReader || creating}
-              />
-            </label>
-            <label>
-              Name
-              <input
-                className="input"
-                value={projectName}
-                onChange={(event) => setProjectName(event.target.value)}
-                maxLength={150}
-                required
-                disabled={isReader || creating}
-              />
-            </label>
+    setPinBusyProjectId(project.id);
+    setPinError(null);
+
+    try {
+      await authFetch<{ projectId: string; pinned: boolean }>(`/projects/${project.id}/pin`, {
+        token,
+        init: {
+          method: project.isPinned ? "DELETE" : "POST"
+        }
+      });
+      await loadProjects(token);
+    } catch (error) {
+      setPinError((error as Error).message);
+    } finally {
+      setPinBusyProjectId(null);
+    }
+  };
+
+  return (
+    <AppShell title="Projects" subtitle="Browse, pin, and open your research workspaces.">
+      <section className="panel projects-directory-panel">
+        <div className="projects-toolbar-row">
+          <div>
+            <h2 className="section-heading">Project directory</h2>
+            <p className="projects-toolbar-helper">Pinned projects always stay at the top.</p>
           </div>
-          <label>
-            Description
-            <textarea
-              className="input textarea-sm"
-              value={projectDescription}
-              onChange={(event) => setProjectDescription(event.target.value)}
-              maxLength={5000}
-              disabled={isReader || creating}
-            />
-          </label>
-          <button className="button" type="submit" disabled={isReader || creating}>
-            {creating ? "Creating..." : "Create project"}
-          </button>
-        </form>
-        {isReader ? <p className="alert alert-info">Reader role can view projects but cannot create them.</p> : null}
+          <div className="projects-toolbar-actions">
+            <label className="projects-order-control">
+              Order by
+              <select className="input" value={orderBy} onChange={(event) => setOrderBy(event.target.value as ProjectOrderBy)}>
+                <option value="newest">Newest</option>
+                <option value="key">Key</option>
+                <option value="name">Name</option>
+              </select>
+            </label>
+            <button
+              className="button"
+              type="button"
+              onClick={() => {
+                setCreateSuccess(null);
+                setCreateError(null);
+                setIsCreateOpen((current) => !current);
+              }}
+              disabled={isReader}
+            >
+              {isCreateOpen ? "Close" : "New project"}
+            </button>
+          </div>
+        </div>
+
+        {isReader ? <p className="alert alert-info">Reader role can view and pin projects but cannot create new ones.</p> : null}
         {createSuccess ? <p className="alert alert-success">{createSuccess}</p> : null}
         {createError ? <p className="alert alert-error">{createError}</p> : null}
-      </section>
-
-      <section className="panel">
-        <h2 className="section-heading">Project directory</h2>
-
-        {loading ? <p className="alert alert-info">Loading projects...</p> : null}
+        {pinError ? <p className="alert alert-error">{pinError}</p> : null}
         {listError ? (
           <p className="alert alert-error">
             {listError}. Please <Link href="/login">sign in again</Link>.
           </p>
         ) : null}
 
+        {isCreateOpen && !isReader ? (
+          <div className="projects-create-collapsible">
+            <h3 className="section-heading">Create project</h3>
+            <form className="form-grid" onSubmit={onCreateProject}>
+              <div className="grid cols-2 grid-tight">
+                <label>
+                  Key
+                  <input
+                    className="input"
+                    value={projectKey}
+                    onChange={(event) => setProjectKey(event.target.value.toUpperCase())}
+                    placeholder="PHD1"
+                    maxLength={20}
+                    required
+                    disabled={creating}
+                  />
+                </label>
+                <label>
+                  Name
+                  <input className="input" value={projectName} onChange={(event) => setProjectName(event.target.value)} maxLength={150} required disabled={creating} />
+                </label>
+              </div>
+              <label>
+                Description
+                <textarea
+                  className="input textarea-sm"
+                  value={projectDescription}
+                  onChange={(event) => setProjectDescription(event.target.value)}
+                  maxLength={5000}
+                  disabled={creating}
+                />
+              </label>
+              <button className="button" type="submit" disabled={creating}>
+                {creating ? "Creating..." : "Create project"}
+              </button>
+            </form>
+          </div>
+        ) : null}
+
+        {loading ? <p className="alert alert-info">Loading projects...</p> : null}
+
         {!loading && !listError ? (
-          <ul className="list">
-            {projects.map((project) => (
-              <li className="list-item" key={project.id}>
-                <strong>
-                  {project.key} - {project.name}
-                </strong>
-                <p>{project.description ?? "No description"}</p>
-                <Link className="badge" href={`/projects/${project.id}`}>
-                  Open project
-                </Link>
-              </li>
-            ))}
-          </ul>
+          sortedProjects.length > 0 ? (
+            <ul className="list projects-directory-list">
+              {sortedProjects.map((project) => (
+                <li className="list-item" key={project.id}>
+                  <div className="projects-list-header">
+                    <strong>
+                      {project.key} - {project.name}
+                    </strong>
+                    {project.isPinned ? <span className="badge projects-pinned-badge">Pinned</span> : null}
+                  </div>
+                  <p>{project.description ?? "No description"}</p>
+                  <div className="projects-list-actions">
+                    <Link className="button button-secondary" href={`/projects/${project.id}`}>
+                      Open project
+                    </Link>
+                    <button
+                      className="button button-ghost"
+                      type="button"
+                      disabled={pinBusyProjectId === project.id}
+                      onClick={() => {
+                        void onTogglePin(project);
+                      }}
+                    >
+                      {pinBusyProjectId === project.id ? "Saving..." : project.isPinned ? "Unpin" : "Pin"}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="alert alert-info">No projects found.</p>
+          )
         ) : null}
       </section>
     </AppShell>

@@ -10,7 +10,7 @@ export function ProjectSubtitle({
   suffix
 }: {
   projectId: string;
-  suffix: string;
+  suffix?: string;
 }): JSX.Element {
   const [projectLabel, setProjectLabel] = useState(projectId);
 
@@ -47,6 +47,10 @@ export function ProjectSubtitle({
       mounted = false;
     };
   }, [projectId]);
+
+  if (!suffix || suffix.trim().length === 0) {
+    return <>{projectLabel}</>;
+  }
 
   return <>{`${projectLabel} - ${suffix}`}</>;
 }

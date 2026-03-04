@@ -67,7 +67,14 @@ export class ProjectsService {
     return project;
   }
 
-  async listProjects(user: AuthenticatedUser): Promise<Array<{ id: string; key: string; name: string; description: string | null }>> {
+  async listProjects(user: AuthenticatedUser): Promise<Array<{
+    id: string;
+    key: string;
+    name: string;
+    description: string | null;
+    createdAt: string;
+    isPinned: boolean;
+  }>> {
     const where = user.globalRole === "admin"
       ? { deletedAt: null }
       : {
@@ -79,16 +86,94 @@ export class ProjectsService {
           }
         };
 
-    return this.prisma.project.findMany({
+    const projects = await this.prisma.project.findMany({
       where,
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
         key: true,
         name: true,
-        description: true
+        description: true,
+        createdAt: true,
+        pinnedByUsers: {
+          where: {
+            userId: user.userId
+          },
+          select: {
+            id: true
+          }
+        }
       }
     });
+
+    return projects.map((project) => ({
+      id: project.id,
+      key: project.key,
+      name: project.name,
+      description: project.description,
+      createdAt: project.createdAt.toISOString(),
+      isPinned: project.pinnedByUsers.length > 0
+    }));
+  }
+
+  async pinProject(projectId: string, user: AuthenticatedUser): Promise<{ projectId: string; pinned: true; pinnedAt: string }> {
+    await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
+
+    const pinned = await this.prisma.userPinnedProject.upsert({
+      where: {
+        userId_projectId: {
+          userId: user.userId,
+          projectId
+        }
+      },
+      create: {
+        userId: user.userId,
+        projectId
+      },
+      update: {},
+      select: {
+        projectId: true,
+        createdAt: true
+      }
+    });
+
+    await this.auditService.log({
+      userId: user.userId,
+      projectId,
+      entityType: "project_pin",
+      entityId: `${projectId}:${user.userId}`,
+      action: "project.pin"
+    });
+
+    return {
+      projectId: pinned.projectId,
+      pinned: true,
+      pinnedAt: pinned.createdAt.toISOString()
+    };
+  }
+
+  async unpinProject(projectId: string, user: AuthenticatedUser): Promise<{ projectId: string; pinned: false }> {
+    await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
+
+    await this.prisma.userPinnedProject.deleteMany({
+      where: {
+        userId: user.userId,
+        projectId
+      }
+    });
+
+    await this.auditService.log({
+      userId: user.userId,
+      projectId,
+      entityType: "project_pin",
+      entityId: `${projectId}:${user.userId}`,
+      action: "project.unpin"
+    });
+
+    return {
+      projectId,
+      pinned: false
+    };
   }
 
   async listMembers(projectId: string, user: AuthenticatedUser): Promise<Array<{ userId: string; name: string; email: string }>> {

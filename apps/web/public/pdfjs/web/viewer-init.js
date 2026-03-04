@@ -2,13 +2,26 @@
   const status = document.getElementById("status");
   const pagesRoot = document.getElementById("pages");
   const pdfjsLib = window.pdfjsLib;
+  const PDF_HIGHLIGHT_EVENT = "doctoral:pdf-highlight-word";
+  const PDF_WORD_PICKED_EVENT = "doctoral:pdf-word-picked";
+  const DEFAULT_HIGHLIGHT_DURATION_MS = 1500;
+  const ZOOM_IN_FACTOR = 1.1;
+  const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR;
+  const MIN_ZOOM_SCALE = 0.25;
+  const MAX_ZOOM_SCALE = 4;
 
   if (!status || !pagesRoot) {
     return;
   }
 
+  const setStatus = (message) => {
+    const text = String(message || "").trim();
+    status.textContent = text;
+    status.classList.toggle("is-hidden", text.length === 0);
+  };
+
   if (!pdfjsLib) {
-    status.textContent = "PDF.js runtime is unavailable.";
+    setStatus("PDF.js runtime is unavailable.");
     return;
   }
 
@@ -21,12 +34,36 @@
   const zoomParam = (hashParams.get("zoom") || "page-width").toLowerCase();
 
   if (!fileUrl) {
-    status.textContent = "Missing PDF source.";
+    setStatus("Missing PDF source.");
     return;
   }
 
   let documentRef = null;
   let renderToken = 0;
+  let highlightTimeout = null;
+  let manualScale = null;
+  let effectiveScale = null;
+  const pageViews = [];
+
+  const clearHighlights = () => {
+    if (highlightTimeout) {
+      window.clearTimeout(highlightTimeout);
+      highlightTimeout = null;
+    }
+
+    for (const pageView of pageViews) {
+      for (const span of pageView.textSpans) {
+        span.classList.remove("pdf-word-highlight");
+      }
+    }
+  };
+
+  const escapeRegExp = (value) => value.replace(/[.*+?^$(){}|[\]\\]/g, "\\$&");
+
+  const normalizeWordToken = (rawValue) =>
+    String(rawValue || "")
+      .trim()
+      .replace(/^[^A-Za-z0-9_]+|[^A-Za-z0-9_]+$/g, "");
 
   const triggerDownload = () => {
     const anchor = document.createElement("a");
@@ -38,18 +75,78 @@
     anchor.remove();
   };
 
-  const resolveScale = (page, containerWidth) => {
-    const baseViewport = page.getViewport({ scale: 1 });
-    if (zoomParam === "page-width") {
-      const targetWidth = Math.max(containerWidth - 2, 1);
-      return Math.max(targetWidth / baseViewport.width, 0.1);
+  const clampScale = (value) => {
+    if (!Number.isFinite(value)) {
+      return 1;
     }
+    return Math.min(Math.max(value, MIN_ZOOM_SCALE), MAX_ZOOM_SCALE);
+  };
 
+  if (zoomParam !== "page-width") {
     const percent = Number.parseFloat(zoomParam);
     if (Number.isFinite(percent) && percent > 0) {
-      return percent / 100;
+      manualScale = clampScale(percent / 100);
     }
-    return 1;
+  }
+
+  const resolveScale = (page, containerWidth) => {
+    const baseViewport = page.getViewport({ scale: 1 });
+    const targetWidth = Math.max(containerWidth - 2, 1);
+    const pageWidthScale = Math.max(targetWidth / baseViewport.width, 0.1);
+    if (manualScale !== null) {
+      return clampScale(manualScale);
+    }
+    return pageWidthScale;
+  };
+
+  const highlightWord = (rawWord, durationMs = DEFAULT_HIGHLIGHT_DURATION_MS) => {
+    clearHighlights();
+
+    const normalizedWord = normalizeWordToken(rawWord);
+    if (!normalizedWord) {
+      return;
+    }
+
+    const escapedWord = escapeRegExp(normalizedWord);
+    const matcher = new RegExp("(^|[^A-Za-z0-9_])" + escapedWord + "([^A-Za-z0-9_]|$)", "i");
+
+    const matches = [];
+    for (const pageView of pageViews) {
+      for (const span of pageView.textSpans) {
+        const text = span.textContent || "";
+        if (!matcher.test(text)) {
+          continue;
+        }
+        span.classList.add("pdf-word-highlight");
+        matches.push(span);
+      }
+    }
+
+    if (matches.length > 0) {
+      matches[0].scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    }
+
+    if (durationMs > 0) {
+      highlightTimeout = window.setTimeout(() => {
+        clearHighlights();
+      }, durationMs);
+    }
+  };
+
+  const postPickedWord = (word) => {
+    if (!window.parent || window.parent === window) {
+      return;
+    }
+
+    window.parent.postMessage(
+      {
+        type: PDF_WORD_PICKED_EVENT,
+        payload: {
+          word
+        }
+      },
+      window.location.origin
+    );
   };
 
   const renderDocument = async () => {
@@ -59,7 +156,10 @@
 
     const thisRender = ++renderToken;
     pagesRoot.innerHTML = "";
-    status.textContent = "Rendering PDF...";
+    pageViews.length = 0;
+    clearHighlights();
+    setStatus("Rendering PDF...");
+    effectiveScale = null;
 
     for (let pageNumber = 1; pageNumber <= documentRef.numPages; pageNumber += 1) {
       if (thisRender !== renderToken) {
@@ -68,6 +168,9 @@
 
       const page = await documentRef.getPage(pageNumber);
       const scale = resolveScale(page, pagesRoot.clientWidth);
+      if (pageNumber === 1) {
+        effectiveScale = scale;
+      }
       const viewport = page.getViewport({ scale });
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
@@ -79,16 +182,33 @@
       canvas.height = Math.ceil(viewport.height);
       canvas.className = "page-canvas";
 
+      const textLayer = document.createElement("div");
+      textLayer.className = "page-text-layer";
+
       const wrap = document.createElement("section");
       wrap.className = "page-wrap";
+      wrap.style.width = String(canvas.width) + "px";
       wrap.appendChild(canvas);
+      wrap.appendChild(textLayer);
       pagesRoot.appendChild(wrap);
 
-      await page.render({ canvasContext: context, viewport }).promise;
+      const renderTask = page.render({ canvasContext: context, viewport });
+      const textContent = await page.getTextContent();
+      const textLayerTask = pdfjsLib.renderTextLayer({
+        textContentSource: textContent,
+        container: textLayer,
+        viewport,
+        textDivs: []
+      });
+
+      await Promise.all([renderTask.promise, textLayerTask.promise || Promise.resolve()]);
+
+      const textSpans = Array.from(textLayer.querySelectorAll("span"));
+      pageViews.push({ pageNumber, textSpans });
     }
 
     if (thisRender === renderToken) {
-      status.textContent = "PDF rendered.";
+      setStatus("");
     }
   };
 
@@ -105,18 +225,117 @@
     };
   })();
 
+  const zoomByFactor = (factor) => {
+    const baseScale = manualScale !== null ? manualScale : effectiveScale !== null ? effectiveScale : 1;
+    manualScale = clampScale(baseScale * factor);
+    requestRender();
+  };
+
+  const resetZoomToPageWidth = () => {
+    manualScale = null;
+    requestRender();
+  };
+
+  pagesRoot.addEventListener("dblclick", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    if (!target.closest(".page-text-layer")) {
+      return;
+    }
+
+    const selectionText = window.getSelection()?.toString() || "";
+    const normalizedWord = normalizeWordToken(selectionText || target.textContent || "");
+    if (!normalizedWord) {
+      return;
+    }
+
+    highlightWord(normalizedWord, DEFAULT_HIGHLIGHT_DURATION_MS);
+    postPickedWord(normalizedWord);
+  });
+
+  pagesRoot.addEventListener(
+    "wheel",
+    (event) => {
+      if (!(event.ctrlKey || event.metaKey)) {
+        return;
+      }
+
+      event.preventDefault();
+      if (event.deltaY < 0) {
+        zoomByFactor(ZOOM_IN_FACTOR);
+        return;
+      }
+
+      if (event.deltaY > 0) {
+        zoomByFactor(ZOOM_OUT_FACTOR);
+      }
+    },
+    { passive: false }
+  );
+
+  window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin) {
+      return;
+    }
+
+    const message = event.data;
+    if (!message || typeof message !== "object") {
+      return;
+    }
+
+    if (message.type !== PDF_HIGHLIGHT_EVENT) {
+      return;
+    }
+
+    const payload = message.payload;
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+
+    const word = normalizeWordToken(payload.word);
+    if (!word) {
+      return;
+    }
+
+    const durationMs = Number.isFinite(payload.durationMs) ? Math.max(0, Number(payload.durationMs)) : DEFAULT_HIGHLIGHT_DURATION_MS;
+    highlightWord(word, durationMs);
+  });
+
   window.addEventListener("resize", requestRender);
   window.addEventListener("keydown", (event) => {
     if (!(event.ctrlKey || event.metaKey)) {
       return;
     }
-    if (event.key.toLowerCase() !== "s") {
+
+    const key = event.key.toLowerCase();
+    if (key === "s") {
+      event.preventDefault();
+      triggerDownload();
       return;
     }
-    event.preventDefault();
-    triggerDownload();
+
+    if (key === "+" || key === "=" || key === "add") {
+      event.preventDefault();
+      zoomByFactor(ZOOM_IN_FACTOR);
+      return;
+    }
+
+    if (key === "-" || key === "_" || key === "subtract") {
+      event.preventDefault();
+      zoomByFactor(ZOOM_OUT_FACTOR);
+      return;
+    }
+
+    if (key === "0") {
+      event.preventDefault();
+      resetZoomToPageWidth();
+    }
   });
 
+  setStatus("Loading PDF...");
   const loadingTask = pdfjsLib.getDocument({
     url: fileUrl
   });
@@ -124,11 +343,10 @@
   loadingTask.promise
     .then((pdf) => {
       documentRef = pdf;
-      status.textContent = "PDF loaded.";
       return renderDocument();
     })
     .catch((error) => {
-      status.textContent = "Failed to load PDF.";
+      setStatus("Failed to load PDF.");
       const message = error instanceof Error ? error.message : String(error);
       const details = document.createElement("pre");
       details.style.margin = "0";

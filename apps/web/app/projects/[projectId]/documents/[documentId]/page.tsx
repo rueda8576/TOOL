@@ -15,6 +15,10 @@ import {
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../../components/app-shell";
+import {
+  LatexMonacoEditor,
+  LatexMonacoEditorHandle
+} from "../../../../../components/latex-monaco-editor";
 import { LoginResponse } from "../../../../../lib/client-api";
 import {
   compileDocumentVersion,
@@ -28,6 +32,8 @@ import {
   loadDocumentPdfBlobUrl,
   updateLatexFile
 } from "../../../../../lib/documents";
+import { inferMonacoDocumentLanguage } from "../../../../../lib/monaco-languages";
+import { useUnsavedChangesGuard } from "../../../../../lib/use-unsaved-changes-guard";
 
 type LatexTreeEntry = { path: string; isDirectory: boolean };
 type LatexTreeNode = { name: string; path: string; isDirectory: boolean; children: LatexTreeNode[] };
@@ -38,6 +44,9 @@ const SPLITTER_SIZE_PX = 20;
 const MIN_DOCUMENT_PANE_WIDTH_PX = 380;
 const SPLITTER_KEYBOARD_STEP_PX = 24;
 const DOCUMENT_SPLIT_MIN_VIEWPORT_PX = 768;
+const DOCUMENT_PDF_HIGHLIGHT_EVENT = "doctoral:pdf-highlight-word";
+const DOCUMENT_PDF_WORD_PICKED_EVENT = "doctoral:pdf-word-picked";
+const DOCUMENT_WORD_HIGHLIGHT_DURATION_MS = 1500;
 
 function clampLeftPaneWidth(nextWidth: number, containerWidth: number, fixedColumnsWidth: number): number {
   const availableWidth = containerWidth - fixedColumnsWidth;
@@ -76,6 +85,10 @@ function sanitizePdfFilename(title?: string): string {
     .replace(/^-+|-+$/g, "");
 
   return `${normalized.length > 0 ? normalized : "document"}-latest.pdf`;
+}
+
+function normalizeWordToken(rawValue: string): string {
+  return rawValue.trim().replace(/^[^A-Za-z0-9_]+|[^A-Za-z0-9_]+$/g, "");
 }
 
 function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
@@ -234,9 +247,12 @@ export default function DocumentDetailPage({
 }): JSX.Element {
   const router = useRouter();
   const firstVersionFolderInputRef = useRef<HTMLInputElement>(null);
+  const pdfPreviewFrameRef = useRef<HTMLIFrameElement>(null);
+  const monacoEditorRef = useRef<LatexMonacoEditorHandle | null>(null);
   const workspaceRef = useRef<HTMLElement>(null);
   const editorPaneRef = useRef<HTMLElement>(null);
   const splitDragStartRef = useRef<{ clientX: number; leftWidth: number } | null>(null);
+  const autoCompileVersionRef = useRef<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<LoginResponse["user"]["globalRole"] | null>(null);
   const [documentDetail, setDocumentDetail] = useState<DocumentDetail | null>(null);
@@ -249,6 +265,7 @@ export default function DocumentDetailPage({
   const [latexTree, setLatexTree] = useState<LatexTreeEntry[]>([]);
   const [selectedLatexPath, setSelectedLatexPath] = useState<string>("");
   const [latexContent, setLatexContent] = useState("");
+  const [savedLatexContent, setSavedLatexContent] = useState("");
   const [loadingLatexFile, setLoadingLatexFile] = useState(false);
   const [savingLatexFile, setSavingLatexFile] = useState(false);
   const [compileStatus, setCompileStatus] = useState<string | null>(null);
@@ -261,6 +278,7 @@ export default function DocumentDetailPage({
   const [submittingFirstVersion, setSubmittingFirstVersion] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [isTreeCollapsed, setIsTreeCollapsed] = useState(false);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [treePreferenceLoaded, setTreePreferenceLoaded] = useState(false);
   const [isDesktopWorkspace, setIsDesktopWorkspace] = useState(false);
   const [leftPaneWidthPx, setLeftPaneWidthPx] = useState<number | null>(null);
@@ -308,6 +326,7 @@ export default function DocumentDetailPage({
         const file = await getLatexFile(versionId, filePath, authToken);
         setSelectedLatexPath(file.path);
         setLatexContent(file.content);
+        setSavedLatexContent(file.content);
         setError(null);
       } catch (fileError) {
         setError((fileError as Error).message);
@@ -324,6 +343,7 @@ export default function DocumentDetailPage({
         setLatexTree([]);
         setSelectedLatexPath("");
         setLatexContent("");
+        setSavedLatexContent("");
         return;
       }
 
@@ -341,6 +361,7 @@ export default function DocumentDetailPage({
         } else {
           setSelectedLatexPath("");
           setLatexContent("");
+          setSavedLatexContent("");
         }
       } catch (workspaceError) {
         setError((workspaceError as Error).message);
@@ -366,6 +387,7 @@ export default function DocumentDetailPage({
           setLatexTree([]);
           setSelectedLatexPath("");
           setLatexContent("");
+          setSavedLatexContent("");
           setCompileLog(null);
         }
       } catch (detailError) {
@@ -449,6 +471,11 @@ export default function DocumentDetailPage({
     void loadDocumentDetail(storedToken);
   }, [loadDocumentDetail, router]);
 
+  useEffect(() => {
+    setIsEditorOpen(false);
+    autoCompileVersionRef.current = null;
+  }, [params.documentId]);
+
   useEffect(
     () => () => {
       if (pdfUrl) {
@@ -462,21 +489,37 @@ export default function DocumentDetailPage({
   const hasLatex = Boolean(currentVersion?.hasLatex);
   const hasPdf = Boolean(currentVersion?.hasPdf);
   const hasEditableLatex = hasLatex && !isReader;
+  const showLatexWorkspace = hasLatex && isEditorOpen;
   const downloadFileName = useMemo(() => sanitizePdfFilename(documentDetail?.title), [documentDetail?.title]);
   const directoryPaths = useMemo(() => collectDirectoryPaths(latexTree), [latexTree]);
   const latexTreeNodes = useMemo(() => buildLatexTree(latexTree), [latexTree]);
+  const monacoLanguage = useMemo(() => inferMonacoDocumentLanguage(selectedLatexPath), [selectedLatexPath]);
   const pdfViewerSrc = useMemo(
     () =>
       pdfUrl
-        ? `/pdfjs/web/viewer.html?file=${encodeURIComponent(pdfUrl)}&filename=${encodeURIComponent(downloadFileName)}#zoom=page-width`
+        ? `/pdfjs/web/viewer.html?file=${encodeURIComponent(pdfUrl)}&filename=${encodeURIComponent(downloadFileName)}#zoom=${
+            showLatexWorkspace ? "page-width" : "page-fit"
+          }`
         : null,
-    [downloadFileName, pdfUrl]
+    [downloadFileName, pdfUrl, showLatexWorkspace]
   );
-  const showResizableWorkspace = isDesktopWorkspace && hasLatex && leftPaneWidthPx !== null;
+  const showResizableWorkspace = isDesktopWorkspace && showLatexWorkspace && leftPaneWidthPx !== null;
   const workspaceStyle = useMemo(
     () => (showResizableWorkspace ? { gridTemplateColumns: `${leftPaneWidthPx}px ${SPLITTER_SIZE_PX}px minmax(0, 1fr)` } : undefined),
     [leftPaneWidthPx, showResizableWorkspace]
   );
+  const hasUnsavedLatexChanges = useMemo(
+    () =>
+      showLatexWorkspace &&
+      hasEditableLatex &&
+      selectedLatexPath.length > 0 &&
+      latexContent !== savedLatexContent,
+    [hasEditableLatex, latexContent, savedLatexContent, selectedLatexPath, showLatexWorkspace]
+  );
+  const { requestExitProject } = useUnsavedChangesGuard({
+    isDirty: hasUnsavedLatexChanges,
+    confirmMessage: "You have unsaved LaTeX changes. Exit project anyway?"
+  });
 
   useEffect(() => {
     if ((compileStatus === "failed" || compileStatus === "timeout") && compileLog) {
@@ -485,7 +528,7 @@ export default function DocumentDetailPage({
   }, [compileLog, compileStatus]);
 
   useEffect(() => {
-    if (!isDesktopWorkspace || !hasLatex) {
+    if (!isDesktopWorkspace || !showLatexWorkspace) {
       return;
     }
 
@@ -506,7 +549,7 @@ export default function DocumentDetailPage({
     return () => {
       window.removeEventListener("resize", syncSplitWidth);
     };
-  }, [hasLatex, isDesktopWorkspace]);
+  }, [isDesktopWorkspace, showLatexWorkspace]);
 
   useEffect(() => {
     if (directoryPaths.length === 0) {
@@ -560,6 +603,7 @@ export default function DocumentDetailPage({
     setSuccess(null);
     try {
       await updateLatexFile(currentVersion.id, selectedLatexPath, latexContent, token);
+      setSavedLatexContent(latexContent);
       setCompileStatus("pending");
       setSuccess("LaTeX file saved.");
       return true;
@@ -571,7 +615,7 @@ export default function DocumentDetailPage({
     }
   }, [currentVersion, isReader, latexContent, selectedLatexPath, token]);
 
-  const compileLatex = useCallback(async (): Promise<boolean> => {
+  const compileLatex = useCallback(async (options?: { silent?: boolean }): Promise<boolean> => {
     if (!token || !currentVersion) {
       setError("Missing document version.");
       return false;
@@ -590,7 +634,9 @@ export default function DocumentDetailPage({
       await compileDocumentVersion(currentVersion.id, token);
       setCompileStatus("pending");
       setCompileLog("Compile queued...");
-      setSuccess("Compile queued successfully.");
+      if (!options?.silent) {
+        setSuccess("Compile queued successfully.");
+      }
 
       let finalLog: { compileStatus: string; compileLog: string | null } | null = null;
       for (let attempt = 0; attempt < 15; attempt += 1) {
@@ -630,6 +676,19 @@ export default function DocumentDetailPage({
     await compileLatex();
   }, [compileBusy, compileLatex, saveLatexChanges, savingLatexFile]);
 
+  useEffect(() => {
+    if (!token || !currentVersion || !hasLatex || isReader) {
+      return;
+    }
+
+    if (autoCompileVersionRef.current === currentVersion.id) {
+      return;
+    }
+
+    autoCompileVersionRef.current = currentVersion.id;
+    void compileLatex({ silent: true });
+  }, [compileLatex, currentVersion, hasLatex, isReader, token]);
+
   const toggleTreeCollapsed = useCallback((): void => {
     setIsTreeCollapsed((current) => !current);
   }, []);
@@ -647,6 +706,29 @@ export default function DocumentDetailPage({
     anchor.click();
     anchor.remove();
   }, [downloadFileName, pdfUrl]);
+
+  const highlightWordInPdf = useCallback((rawWord: string): void => {
+    const word = normalizeWordToken(rawWord);
+    if (!word) {
+      return;
+    }
+
+    const targetWindow = pdfPreviewFrameRef.current?.contentWindow;
+    if (!targetWindow) {
+      return;
+    }
+
+    targetWindow.postMessage(
+      {
+        type: DOCUMENT_PDF_HIGHLIGHT_EVENT,
+        payload: {
+          word,
+          durationMs: DOCUMENT_WORD_HIGHLIGHT_DURATION_MS
+        }
+      },
+      window.location.origin
+    );
+  }, []);
 
   const nudgeSplitter = useCallback((deltaPx: number): void => {
     const metrics = getResizableWorkspaceMetrics(workspaceRef.current);
@@ -767,13 +849,17 @@ export default function DocumentDetailPage({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented) {
+        return;
+      }
+
       if (!(event.ctrlKey || event.metaKey)) {
         return;
       }
 
       const pressedKey = event.key.toLowerCase();
       if (pressedKey === "b") {
-        if (!hasEditableLatex || !currentVersion) {
+        if (!hasEditableLatex || !currentVersion || !showLatexWorkspace) {
           return;
         }
         event.preventDefault();
@@ -783,7 +869,7 @@ export default function DocumentDetailPage({
 
       if (pressedKey === "s") {
         event.preventDefault();
-        if (hasEditableLatex && currentVersion) {
+        if (showLatexWorkspace && hasEditableLatex && currentVersion) {
           void runSaveThenCompile();
           return;
         }
@@ -798,7 +884,43 @@ export default function DocumentDetailPage({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [currentVersion, downloadCurrentPdf, hasEditableLatex, hasPdf, pdfUrl, runSaveThenCompile, toggleTreeCollapsed]);
+  }, [currentVersion, downloadCurrentPdf, hasEditableLatex, hasPdf, pdfUrl, runSaveThenCompile, showLatexWorkspace, toggleTreeCollapsed]);
+
+  useEffect(() => {
+    const handlePdfMessage = (event: MessageEvent): void => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+
+      const message = event.data;
+      if (!message || typeof message !== "object") {
+        return;
+      }
+
+      const messageType = (message as { type?: unknown }).type;
+      if (messageType !== DOCUMENT_PDF_WORD_PICKED_EVENT) {
+        return;
+      }
+
+      const payload = (message as { payload?: unknown }).payload;
+      const rawWord = typeof payload === "object" && payload !== null ? (payload as { word?: unknown }).word : undefined;
+      if (typeof rawWord !== "string") {
+        return;
+      }
+
+      const word = normalizeWordToken(rawWord);
+      if (!word) {
+        return;
+      }
+
+      monacoEditorRef.current?.highlightWord(word, DOCUMENT_WORD_HIGHLIGHT_DURATION_MS);
+    };
+
+    window.addEventListener("message", handlePdfMessage);
+    return () => {
+      window.removeEventListener("message", handlePdfMessage);
+    };
+  }, []);
 
   const renderTreeNodes = useCallback(
     (nodes: LatexTreeNode[], depth = 0): JSX.Element[] =>
@@ -890,7 +1012,13 @@ export default function DocumentDetailPage({
   };
 
   return (
-    <AppShell title="Documents" projectId={params.projectId} hideHeader fullWidth>
+    <AppShell
+      title="Documents"
+      projectId={params.projectId}
+      hideHeader
+      fullWidth
+      onExitProjectRequest={requestExitProject}
+    >
       <section className="documents-detail-topbar">
         <div className="documents-detail-meta">
           <h2>{documentDetail?.title ?? "Loading document..."}</h2>
@@ -907,14 +1035,25 @@ export default function DocumentDetailPage({
           )}
         </div>
         <div className="documents-detail-actions">
+          {hasLatex ? (
+            <button
+              className={showLatexWorkspace ? "button button-secondary" : "button"}
+              type="button"
+              onClick={() => {
+                setIsEditorOpen((current) => !current);
+              }}
+            >
+              {showLatexWorkspace ? "Close editor" : "Edit"}
+            </button>
+          ) : null}
+          {hasLatex && !isReader && !showLatexWorkspace ? (
+            <button className="button button-secondary" type="button" onClick={() => void compileLatex()} disabled={compileBusy}>
+              {compileBusy ? "Compiling..." : "Compile"}
+            </button>
+          ) : null}
           {hasPdf ? (
             <button className="button button-secondary" type="button" onClick={downloadCurrentPdf} disabled={loadingPdf || !pdfUrl}>
               Download PDF
-            </button>
-          ) : null}
-          {hasLatex ? (
-            <button className="button button-secondary" type="button" onClick={toggleTreeCollapsed}>
-              {isTreeCollapsed ? "Show tree" : "Hide tree"} (Ctrl+B)
             </button>
           ) : null}
           <Link className="button button-secondary" href={`/projects/${params.projectId}/documents`}>
@@ -966,7 +1105,7 @@ export default function DocumentDetailPage({
       ) : null}
 
       {!loadingDocument && documentDetail && currentVersion ? (
-        hasLatex ? (
+        showLatexWorkspace ? (
           <section
             ref={workspaceRef}
             className={[
@@ -990,6 +1129,9 @@ export default function DocumentDetailPage({
                   <div className="code-toolbar">
                     <span>Editing: {selectedLatexPath || "No file selected"}</span>
                     <div className="inline-actions">
+                      <button className="button button-secondary" type="button" onClick={toggleTreeCollapsed}>
+                        {isTreeCollapsed ? "Show tree" : "Hide tree"}
+                      </button>
                       {compileLog ? (
                         <button
                           className="button button-secondary"
@@ -1021,11 +1163,30 @@ export default function DocumentDetailPage({
                       </button>
                     </div>
                   </div>
-                  <textarea
-                    className="input documents-code-editor"
+                  <LatexMonacoEditor
+                    ref={monacoEditorRef}
+                    className="documents-code-editor"
                     value={latexContent}
-                    onChange={(event) => setLatexContent(event.target.value)}
-                    disabled={!selectedLatexPath || loadingLatexFile || savingLatexFile || isReader}
+                    language={monacoLanguage}
+                    readOnly={!selectedLatexPath || loadingLatexFile || savingLatexFile || isReader}
+                    onChange={(nextContent) => {
+                      setLatexContent(nextContent);
+                    }}
+                    onWordDoubleClick={(word) => {
+                      highlightWordInPdf(word);
+                    }}
+                    onSaveShortcut={() => {
+                      if (!hasEditableLatex || !currentVersion) {
+                        return;
+                      }
+                      void runSaveThenCompile();
+                    }}
+                    onToggleTreeShortcut={() => {
+                      if (!hasEditableLatex || !currentVersion) {
+                        return;
+                      }
+                      toggleTreeCollapsed();
+                    }}
                   />
                   {compileLog && isCompileLogOpen ? (
                     <div className="documents-compile-log">
@@ -1057,7 +1218,7 @@ export default function DocumentDetailPage({
                 {pdfError ? <p className="alert alert-error">{pdfError}</p> : null}
                 {!loadingPdf && !hasPdf ? <p className="alert alert-info">No PDF available yet. Compile to generate preview.</p> : null}
                 {!loadingPdf && hasPdf && pdfViewerSrc ? (
-                  <iframe key={pdfViewerSrc} className="pdf-frame" src={pdfViewerSrc} title="Compiled PDF preview" />
+                  <iframe ref={pdfPreviewFrameRef} key={pdfViewerSrc} className="pdf-frame" src={pdfViewerSrc} title="Compiled PDF preview" />
                 ) : null}
               </div>
             </article>
@@ -1072,16 +1233,22 @@ export default function DocumentDetailPage({
             ) : null}
           </section>
         ) : (
-          <section className="panel documents-preview-pane documents-preview-full documents-preview-pane-full">
-            <div className="documents-preview-body">
-              {loadingPdf ? <p className="alert alert-info">Loading PDF preview...</p> : null}
-              {pdfError ? <p className="alert alert-error">{pdfError}</p> : null}
-              {!loadingPdf && !hasPdf ? <p className="alert alert-info">No PDF available for this document version.</p> : null}
-              {!loadingPdf && hasPdf && pdfViewerSrc ? (
-                <iframe key={pdfViewerSrc} className="pdf-frame" src={pdfViewerSrc} title="Document PDF preview" />
-              ) : null}
-            </div>
-          </section>
+          <div className="documents-preview-only-wrap">
+            <section className="panel documents-preview-pane documents-preview-pane-full documents-preview-only">
+              <div className="documents-preview-body">
+                {loadingPdf ? <p className="alert alert-info">Loading PDF preview...</p> : null}
+                {pdfError ? <p className="alert alert-error">{pdfError}</p> : null}
+                {!loadingPdf && !hasPdf ? (
+                  <p className="alert alert-info">
+                    {hasLatex ? "No PDF available yet. Compile to generate preview." : "No PDF available for this document version."}
+                  </p>
+                ) : null}
+                {!loadingPdf && hasPdf && pdfViewerSrc ? (
+                  <iframe ref={pdfPreviewFrameRef} key={pdfViewerSrc} className="pdf-frame" src={pdfViewerSrc} title="Document PDF preview" />
+                ) : null}
+              </div>
+            </section>
+          </div>
         )
       ) : null}
     </AppShell>
