@@ -1,4 +1,4 @@
-# Doctoral Platform (v1 bootstrap)
+# Atlasium Platform (v1 bootstrap)
 
 Web platform for doctoral work management: projects, wiki, documents (PDF + LaTeX), tasks, meetings, notifications, and operational tooling.
 
@@ -71,7 +71,7 @@ Web platform for doctoral work management: projects, wiki, documents (PDF + LaTe
 
 ## Notes
 
-- Default storage root is `./storage` in dev and `/var/lib/doctoral-platform/storage` in production.
+- Default storage root is `./storage` in dev and `/var/lib/atlasium/storage` in production.
 - LaTeX compile is queued and executed asynchronously by the worker.
 - Document branching in v1 is linear per branch (no merge).
 - Gantt is planned for v1.1 on top of task dependencies.

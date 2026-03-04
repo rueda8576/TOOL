@@ -282,6 +282,14 @@
 - [x] Add modal + markdown section styles in `globals.css` with desktop/mobile responsive behavior.
 - [x] Validate with `pnpm --filter @doctoral/web build`.
 
+## Atlasium Go-Live Prep (2026-03-04)
+- [x] Update infrastructure naming from `doctoral-platform` paths to `atlasium` paths in docs/scripts.
+- [x] Add production-ready Nginx template for `atlasium.info` + `www` redirect + `/api` reverse proxy.
+- [x] Add explicit go-live runbook (`infra/GO_LIVE_ATLASIUM.md`) with bootstrap, deploy, migrations, TLS, and rollback.
+- [x] Align Docker setup to mount storage at `/var/lib/atlasium/storage` in API/worker containers.
+- [x] Add web build arg wiring for `NEXT_PUBLIC_API_BASE_URL` and document production value `/api`.
+- [x] Validate with `pnpm --filter @doctoral/web build`.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -320,3 +328,4 @@
 - 2026-03-04: Updated sidebar branding to show project `KEY` in project context, removed `Collaboration Workspace`, and kept `WorkMesh` fallback outside project scope.
 - 2026-03-04: Tuned document detail closed mode for readability by centering preview with max-width and switching initial PDF zoom to `page-fit` outside editor mode.
 - 2026-03-04: Reworked Meetings editing UX to a centered modal and added natural hierarchical Markdown list behavior with real rendered section output in list/calendar views.
+- 2026-03-04: Added Atlasium production deployment prep: updated infra naming/paths, added `atlasium.info` nginx template, created go-live runbook, and aligned container storage/API-base env wiring for direct-VPS HTTPS setup.

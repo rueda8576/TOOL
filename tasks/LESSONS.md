@@ -92,3 +92,4 @@
 - Avoid demo-like descriptive copy in production headers; project headers should prioritize concise identity context (e.g., `KEY - Name`) over marketing text.
 - Keep product naming aligned across visible UI brand labels and metadata title to avoid split identity between sidebar and browser tab.
 - In project-scoped navigation, the sidebar brand can switch from global product name to operational project identifier (`project.key`) while preserving a stable fallback (`WorkMesh`) when context/token fetch fails.
+- Keep deployment naming consistent end-to-end (`/opt/<brand>`, `/var/lib/<brand>/storage`, nginx site name) to avoid mixed legacy identifiers during infrastructure migration.
