@@ -110,3 +110,4 @@
 - For CD on containerized stacks, run migrations via a dedicated one-shot compose service (`migrate`) instead of piggybacking app service commands; it keeps deploy order explicit and prevents hidden runtime coupling.
 - If runtime starts from compiled files under `apps/<service>/dist`, keep module resolution anchored to package-local `apps/<service>/node_modules` (and shared `.pnpm` store) instead of flattening to `/app/dist`.
 - In Debian/Node 22 containers using Prisma 5, install `openssl` in build/runtime stages so Prisma generates and runs `debian-openssl-3.0.x` engines; otherwise `migrate deploy` can fail at runtime with `libssl.so.1.1` errors.
+- In runtime smoke/deploy scripts, do not hardcode Prisma at `apps/api/node_modules/.bin/prisma`; container layouts vary in monorepos, so resolve Prisma CLI dynamically from the `.pnpm` store (or run through a dedicated migrate service command).

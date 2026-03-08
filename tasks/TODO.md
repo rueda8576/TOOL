@@ -329,6 +329,11 @@
 - [x] Add runtime smoke checks in `build-and-push` for published images (`reflect-metadata`, `dotenv`, `next/package.json`).
 - [x] Validate locally with image builds + runtime smoke `docker run`.
 
+## CD Fix - Prisma smoke path in published API image (2026-03-08)
+- [x] Replace hardcoded `apps/api/node_modules/.bin/prisma` in `deploy.yml` smoke test.
+- [x] Resolve Prisma CLI dynamically from `/app/node_modules/.pnpm/*/node_modules/prisma/build/index.js`.
+- [x] Keep deploy migration execution aligned with the same runtime-safe Prisma resolution strategy.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -375,3 +380,4 @@
 - 2026-03-08: Fixed CI compile failure `TS2307` in `wiki/documents` by un-ignoring and versioning `apps/api/src/storage/*`; root cause was broad `.gitignore` pattern `storage/`.
 - 2026-03-08: Fixed deploy pipeline/runtime packaging by hoisting PNPM linker in Docker builds, introducing `migrate` compose service, and gating deploy with runtime smoke checks for API/Worker/Web images.
 - 2026-03-08: Hardened container runtime compatibility by moving service entrypoints to package-local `node_modules`, adding missing `multer` runtime dependency, and installing OpenSSL so Prisma CLI/engines work during deploy migrations.
+- 2026-03-08: Fixed `build-and-push` smoke failure by removing hardcoded Prisma binary path in `deploy.yml` and resolving Prisma CLI dynamically from `.pnpm` store, aligned with `migrate` runtime command.

@@ -101,7 +101,12 @@ jobs:
           docker pull "${WEB_IMAGE}:${IMAGE_TAG}"
 
           docker run --rm "${API_IMAGE}:${IMAGE_TAG}" node -e "require('./apps/api/node_modules/reflect-metadata')"
-          docker run --rm "${API_IMAGE}:${IMAGE_TAG}" sh -lc "apps/api/node_modules/.bin/prisma --version"
+          docker run --rm "${API_IMAGE}:${IMAGE_TAG}" sh -lc '
+            set -eu
+            PRISMA_CLI="$(find /app/node_modules/.pnpm -path "*/node_modules/prisma/build/index.js" | head -n 1)"
+            test -n "${PRISMA_CLI}"
+            node "${PRISMA_CLI}" --version
+          '
           docker run --rm "${WORKER_IMAGE}:${IMAGE_TAG}" node -e "require('./apps/worker/node_modules/dotenv')"
           docker run --rm "${WEB_IMAGE}:${IMAGE_TAG}" node -e "require('./apps/web/node_modules/next/package.json')"
 
