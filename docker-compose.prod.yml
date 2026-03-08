@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: doctoral_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+
+  mailpit:
+    image: axllent/mailpit:latest
+
+  api:
+    image: ghcr.io/rueda8576/atlasium-api:${IMAGE_TAG:-main}
+    env_file:
+      - .env
+    environment:
+      STORAGE_ROOT: /var/lib/atlasium/storage
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "4000:4000"
+    volumes:
+      - ${ATLASIUM_STORAGE_HOST_PATH:-/var/lib/atlasium/storage}:/var/lib/atlasium/storage
+
+  web:
+    image: ghcr.io/rueda8576/atlasium-web:${IMAGE_TAG:-main}
+    env_file:
+      - .env
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+  worker:
+    image: ghcr.io/rueda8576/atlasium-worker:${IMAGE_TAG:-main}
+    env_file:
+      - .env
+    environment:
+      STORAGE_ROOT: /var/lib/atlasium/storage
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ${ATLASIUM_STORAGE_HOST_PATH:-/var/lib/atlasium/storage}:/var/lib/atlasium/storage
+
+volumes:
+  postgres_data:

@@ -1,32 +1,180 @@
-name: Deploy VPS
+name: Deploy Atlasium
 
 on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
   workflow_dispatch:
-  push:
-    branches: [main]
+    inputs:
+      image_tag:
+        description: "Tag to deploy (example: sha-abc123def456)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  API_IMAGE: ghcr.io/${{ github.repository_owner }}/atlasium-api
+  WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/atlasium-web
+  WORKER_IMAGE: ghcr.io/${{ github.repository_owner }}/atlasium-worker
+
+concurrency:
+  group: atlasium-production-deploy
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  build-and-push:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+      deploy_sha: ${{ steps.vars.outputs.deploy_sha }}
+    steps:
+      - name: Checkout commit from successful CI run
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Compute deploy metadata
+        id: vars
+        run: |
+          set -euo pipefail
+          SHA="${{ github.event.workflow_run.head_sha }}"
+          SHORT_SHA="$(echo "${SHA}" | cut -c1-12)"
+          echo "image_tag=sha-${SHORT_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "deploy_sha=${SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.API_IMAGE }}:${{ steps.vars.outputs.image_tag }}
+            ${{ env.API_IMAGE }}:main
+
+      - name: Build and push Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=/api
+          push: true
+          tags: |
+            ${{ env.WEB_IMAGE }}:${{ steps.vars.outputs.image_tag }}
+            ${{ env.WEB_IMAGE }}:main
+
+      - name: Build and push Worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/worker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.WORKER_IMAGE }}:${{ steps.vars.outputs.image_tag }}
+            ${{ env.WORKER_IMAGE }}:main
+
+  deploy-auto:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Sync repository to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: "."
-          target: "/opt/doctoral-platform"
-
-      - name: Restart stack on VPS
+      - name: Deploy to VPS (auto)
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          DEPLOY_SHA: ${{ needs.build-and-push.outputs.deploy_sha }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
+          envs: GHCR_USERNAME,GHCR_READ_TOKEN,IMAGE_TAG,DEPLOY_SHA
           script: |
-            cd /opt/doctoral-platform
-            docker compose pull || true
-            docker compose up -d --build
+            set -euo pipefail
+            cd /opt/atlasium
+            git fetch --all --prune
+            git reset --hard "${DEPLOY_SHA}"
+            git clean -fd
+
+            echo "${GHCR_READ_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml pull
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d postgres redis
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml run --rm api sh -lc "node_modules/.bin/prisma migrate deploy --schema packages/db/prisma/schema.prisma"
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --no-build
+            docker compose -f docker-compose.prod.yml ps
+
+      - name: Healthcheck
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            if curl -fsS https://atlasium.info/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Healthcheck failed after deploy" >&2
+          exit 1
+
+  deploy-manual:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy selected tag to VPS (manual rollback/promote)
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
+          envs: GHCR_USERNAME,GHCR_READ_TOKEN,IMAGE_TAG
+          script: |
+            set -euo pipefail
+            cd /opt/atlasium
+            git fetch --all --prune
+            git reset --hard origin/main
+            git clean -fd
+
+            echo "${GHCR_READ_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml pull
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d postgres redis
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml run --rm api sh -lc "node_modules/.bin/prisma migrate deploy --schema packages/db/prisma/schema.prisma"
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --no-build
+            docker compose -f docker-compose.prod.yml ps
+
+      - name: Healthcheck
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            if curl -fsS https://atlasium.info/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Healthcheck failed after deploy" >&2
+          exit 1

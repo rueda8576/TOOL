@@ -36,6 +36,7 @@ VPS bootstrap complete.
 Next steps:
 1) Copy repository to /opt/atlasium
 2) Configure .env with production values
-3) Run: docker compose up -d --build
-4) Configure reverse proxy and TLS using infra/nginx/atlasium.conf
+3) Login to GHCR: docker login ghcr.io -u <GHCR_USERNAME>
+4) Run: IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d
+5) Configure reverse proxy and TLS using infra/nginx/atlasium.conf
 MSG

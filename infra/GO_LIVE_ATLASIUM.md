@@ -83,19 +83,24 @@ NEXT_PUBLIC_API_BASE_URL=/api
 
 ```bash
 cd /opt/atlasium
-docker compose up -d --build
-docker compose ps
-docker compose logs --tail=200 api web worker
+docker login ghcr.io -u <GHCR_USERNAME>
+IMAGE_TAG=main docker compose -f docker-compose.prod.yml pull
+IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d postgres redis
+IMAGE_TAG=main docker compose -f docker-compose.prod.yml run --rm api sh -lc "node_modules/.bin/prisma migrate deploy --schema packages/db/prisma/schema.prisma"
+IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --no-build
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs --tail=200 api web worker
 ```
 
-## 4) Run DB migrations and seed admin
+## 4) Seed admin (first time only)
 
 ```bash
 cd /opt/atlasium
 pnpm install
-pnpm db:generate
-pnpm db:migrate
-ADMIN_EMAIL=<your-email> ADMIN_PASSWORD='<strong-password>' pnpm --filter @doctoral/api seed:admin
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/doctoral_platform?schema=public \
+ADMIN_EMAIL=<your-email> \
+ADMIN_PASSWORD='<strong-password>' \
+pnpm --filter @doctoral/api seed:admin
 ```
 
 ## 5) Configure Nginx reverse proxy
@@ -136,7 +141,7 @@ Manual smoke test:
 Live logs:
 
 ```bash
-docker compose logs -f api web worker
+docker compose -f docker-compose.prod.yml logs -f api web worker
 tail -f /var/log/nginx/error.log
 ```
 
@@ -146,14 +151,16 @@ If deployment fails:
 
 ```bash
 cd /opt/atlasium
-git checkout <last-known-good-tag-or-commit>
-docker compose up -d --build
+git fetch --all --prune
+git reset --hard origin/main
+IMAGE_TAG=<previous-sha-tag> docker compose -f docker-compose.prod.yml pull
+IMAGE_TAG=<previous-sha-tag> docker compose -f docker-compose.prod.yml up -d --no-build
 ```
 
 If migration fails:
 
 ```bash
-pnpm --filter @doctoral/db exec prisma migrate status
+IMAGE_TAG=main docker compose -f docker-compose.prod.yml run --rm api sh -lc "node_modules/.bin/prisma migrate status --schema packages/db/prisma/schema.prisma"
 ```
 
 Fix migration state before retrying.

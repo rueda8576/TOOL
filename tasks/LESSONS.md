@@ -96,3 +96,9 @@
 
 ## Monorepo Docker builds
 - In multi-stage Dockerfiles for PNPM workspaces, do not assume copying only root `node_modules` is enough for build scripts; ensure filtered dependencies are installed in the build stage before running `pnpm --filter <pkg> build` to avoid missing local binaries like `tsc`.
+- If a workspace package executes another workspace script at build time (e.g., `@doctoral/api` or `@doctoral/worker` calling `@doctoral/db db:generate`), include both filters in install steps (`--filter <service>... --filter @doctoral/db...`) so CLI binaries like `prisma` are available.
+
+## CI/CD deployment model
+- Prefer registry-based deploys (GHCR images + immutable `sha-*` tags) over SCP-ing source code and rebuilding on VPS; it is more deterministic and avoids server-specific build drift.
+- For automatic promotion to production, trigger deploy from successful CI completion (`workflow_run`) on `main` so CD cannot bypass failed tests/builds.
+- In containerized deploy pipelines, run migrations from a container that contains the Prisma schema/migrations artifacts, not from ad-hoc host state.

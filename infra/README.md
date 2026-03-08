@@ -7,6 +7,7 @@
 - Worker: BullMQ worker (`apps/worker`).
 - Data: PostgreSQL + Redis.
 - Storage: local filesystem mounted at `/var/lib/atlasium/storage`.
+- Production orchestration: `docker-compose.prod.yml` with GHCR images.
 
 ## Production checklist
 1. Create VPS user and harden SSH.
@@ -21,6 +22,13 @@
 - App root: `/opt/atlasium`
 - Runtime storage: `/var/lib/atlasium/storage`
 - Backups: `/var/lib/atlasium/storage/backups`
+
+## CI/CD deployment model
+- CI runs on GitHub Actions (`.github/workflows/ci.yml`).
+- CD publishes images to GHCR and deploys to VPS (`.github/workflows/deploy.yml`).
+- VPS deploy command shape:
+  - `IMAGE_TAG=sha-<commit> docker compose -f docker-compose.prod.yml pull`
+  - `IMAGE_TAG=sha-<commit> docker compose -f docker-compose.prod.yml up -d --no-build`
 
 ## Atlasium go-live defaults
 - Domain: `atlasium.info` (`www.atlasium.info` redirected to apex).
