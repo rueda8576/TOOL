@@ -24,5 +24,7 @@ Thumbs.db
 .idea/
 
 # runtime storage
-storage/
-tmp/
+/storage/
+/apps/api/storage/
+/apps/worker/storage/
+/tmp/

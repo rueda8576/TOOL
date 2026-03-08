@@ -105,3 +105,4 @@
 - In GitHub Actions, do not pin `pnpm/action-setup` version if `package.json` already defines `packageManager`; duplicate version sources can fail CI with `ERR_PNPM_BAD_PM_VERSION`.
 - In CI, force install of dev dependencies (`pnpm install --prod=false`) before running tests to avoid hidden `NODE_ENV=production` behavior that drops tools like `jest`.
 - Prefer explicit test target in monorepos (`pnpm --filter @doctoral/api test`) when only one package owns real test suites; it reduces noise and makes failures easier to diagnose.
+- Avoid broad `.gitignore` folder patterns like `storage/` in monorepos; they can unintentionally ignore source folders such as `apps/api/src/storage`, causing CI-only compile failures.

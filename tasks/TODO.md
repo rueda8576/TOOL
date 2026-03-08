@@ -312,6 +312,12 @@
 - [x] Scope CI test step to real suite owner (`pnpm --filter @doctoral/api test`) for deterministic runtime and clearer failures.
 - [x] Add CI diagnostic step for test environment (`NODE_ENV` + `which jest`) before running tests.
 
+## CI Fix - Missing StorageService in GitHub runner (2026-03-08)
+- [x] Identify root cause from CI logs: `apps/api/src/storage/*` ignored by broad `.gitignore` rule (`storage/`).
+- [x] Narrow runtime ignore patterns in `.gitignore` to anchored paths (`/storage/`, `/apps/api/storage/`, `/apps/worker/storage/`, `/tmp/`).
+- [x] Add missing tracked API storage source files (`storage.module.ts`, `storage.service.ts`) to git.
+- [x] Revalidate locally with `pnpm --filter @doctoral/api test` and `pnpm build`.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -355,3 +361,4 @@
 - 2026-03-08: Replaced deploy pipeline with GHCR-based CI/CD (auto deploy on successful CI for `main` + manual rollback by image tag), added `docker-compose.prod.yml`, fixed Prisma availability in API/worker Docker builds, and aligned runbooks to `/opt/atlasium` production rollout.
 - 2026-03-08: Fixed CI failure `ERR_PNPM_BAD_PM_VERSION` by removing duplicated pnpm version pin from GitHub Actions and deferring to `packageManager`.
 - 2026-03-08: Hardened CI against fast test-step crashes by forcing dev dependency install, narrowing test execution to `@doctoral/api`, and logging `NODE_ENV`/`jest` path for diagnostics.
+- 2026-03-08: Fixed CI compile failure `TS2307` in `wiki/documents` by un-ignoring and versioning `apps/api/src/storage/*`; root cause was broad `.gitignore` pattern `storage/`.
