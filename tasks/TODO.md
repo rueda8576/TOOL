@@ -307,6 +307,11 @@
 ## CI Stabilization - pnpm version source mismatch (2026-03-08)
 - [x] Remove explicit `pnpm` version pin from `ci.yml` to avoid conflict with `packageManager` (`pnpm@9.15.4`) in `package.json`.
 
+## CI Stabilization - Fast test crash in GitHub Actions (2026-03-08)
+- [x] Force dev dependencies install in CI (`pnpm install --prod=false`) to avoid environment-driven missing test tools.
+- [x] Scope CI test step to real suite owner (`pnpm --filter @doctoral/api test`) for deterministic runtime and clearer failures.
+- [x] Add CI diagnostic step for test environment (`NODE_ENV` + `which jest`) before running tests.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -349,3 +354,4 @@
 - 2026-03-04: Fixed deployment-time Docker build failure (`tsc: not found`) by ensuring PNPM filtered dependencies are installed during each build stage in monorepo Dockerfiles.
 - 2026-03-08: Replaced deploy pipeline with GHCR-based CI/CD (auto deploy on successful CI for `main` + manual rollback by image tag), added `docker-compose.prod.yml`, fixed Prisma availability in API/worker Docker builds, and aligned runbooks to `/opt/atlasium` production rollout.
 - 2026-03-08: Fixed CI failure `ERR_PNPM_BAD_PM_VERSION` by removing duplicated pnpm version pin from GitHub Actions and deferring to `packageManager`.
+- 2026-03-08: Hardened CI against fast test-step crashes by forcing dev dependency install, narrowing test execution to `@doctoral/api`, and logging `NODE_ENV`/`jest` path for diagnostics.

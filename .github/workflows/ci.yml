@@ -16,12 +16,16 @@ jobs:
           node-version: 22
           cache: pnpm
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile=false
+        run: pnpm install --frozen-lockfile=false --prod=false
       - name: Generate Prisma client
         run: pnpm db:generate
       - name: Lint
         run: pnpm lint
+      - name: Diagnose test environment
+        run: |
+          echo "NODE_ENV=${NODE_ENV:-<unset>}"
+          pnpm --filter @doctoral/api exec which jest
       - name: Test
-        run: pnpm test
+        run: pnpm --filter @doctoral/api test
       - name: Build
         run: pnpm build

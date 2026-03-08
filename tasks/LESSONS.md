@@ -103,3 +103,5 @@
 - For automatic promotion to production, trigger deploy from successful CI completion (`workflow_run`) on `main` so CD cannot bypass failed tests/builds.
 - In containerized deploy pipelines, run migrations from a container that contains the Prisma schema/migrations artifacts, not from ad-hoc host state.
 - In GitHub Actions, do not pin `pnpm/action-setup` version if `package.json` already defines `packageManager`; duplicate version sources can fail CI with `ERR_PNPM_BAD_PM_VERSION`.
+- In CI, force install of dev dependencies (`pnpm install --prod=false`) before running tests to avoid hidden `NODE_ENV=production` behavior that drops tools like `jest`.
+- Prefer explicit test target in monorepos (`pnpm --filter @doctoral/api test`) when only one package owns real test suites; it reduces noise and makes failures easier to diagnose.
