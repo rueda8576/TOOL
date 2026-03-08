@@ -5,6 +5,11 @@ services:
       POSTGRES_DB: doctoral_platform
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d doctoral_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -21,12 +26,24 @@ services:
     environment:
       STORAGE_ROOT: /var/lib/atlasium/storage
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     ports:
       - "4000:4000"
     volumes:
       - ${ATLASIUM_STORAGE_HOST_PATH:-/var/lib/atlasium/storage}:/var/lib/atlasium/storage
+
+  migrate:
+    image: ghcr.io/rueda8576/atlasium-api:${IMAGE_TAG:-main}
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["apps/api/node_modules/.bin/prisma", "migrate", "deploy", "--schema", "packages/db/prisma/schema.prisma"]
+    restart: "no"
 
   web:
     image: ghcr.io/rueda8576/atlasium-web:${IMAGE_TAG:-main}
@@ -44,8 +61,10 @@ services:
     environment:
       STORAGE_ROOT: /var/lib/atlasium/storage
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       - ${ATLASIUM_STORAGE_HOST_PATH:-/var/lib/atlasium/storage}:/var/lib/atlasium/storage
 

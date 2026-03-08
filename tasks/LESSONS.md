@@ -106,3 +106,7 @@
 - In CI, force install of dev dependencies (`pnpm install --prod=false`) before running tests to avoid hidden `NODE_ENV=production` behavior that drops tools like `jest`.
 - Prefer explicit test target in monorepos (`pnpm --filter @doctoral/api test`) when only one package owns real test suites; it reduces noise and makes failures easier to diagnose.
 - Avoid broad `.gitignore` folder patterns like `storage/` in monorepos; they can unintentionally ignore source folders such as `apps/api/src/storage`, causing CI-only compile failures.
+- In PNPM monorepo Docker runtime images, `node-linker=isolated` plus filtered installs can leave runtime containers without resolvable top-level modules; set Docker build stages to `PNPM_NODE_LINKER=hoisted` (or use `pnpm deploy`) and verify runtime with `docker run node -e "require(...)"`.
+- For CD on containerized stacks, run migrations via a dedicated one-shot compose service (`migrate`) instead of piggybacking app service commands; it keeps deploy order explicit and prevents hidden runtime coupling.
+- If runtime starts from compiled files under `apps/<service>/dist`, keep module resolution anchored to package-local `apps/<service>/node_modules` (and shared `.pnpm` store) instead of flattening to `/app/dist`.
+- In Debian/Node 22 containers using Prisma 5, install `openssl` in build/runtime stages so Prisma generates and runs `debian-openssl-3.0.x` engines; otherwise `migrate deploy` can fail at runtime with `libssl.so.1.1` errors.

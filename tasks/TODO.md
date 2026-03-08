@@ -318,6 +318,17 @@
 - [x] Add missing tracked API storage source files (`storage.module.ts`, `storage.service.ts`) to git.
 - [x] Revalidate locally with `pnpm --filter @doctoral/api test` and `pnpm build`.
 
+## CD Fix - Runtime images + migrate service (2026-03-08)
+- [x] Set `PNPM_NODE_LINKER=hoisted` in API/Worker/Web Docker build stages to produce runtime-resolvable dependencies.
+- [x] Rework runtime layout to run each app from `apps/<service>` with package-local `node_modules` + shared `.pnpm` store copy.
+- [x] Add missing runtime dependency `multer` to `@doctoral/api` (controllers import it directly).
+- [x] Install `openssl` in API/Worker Docker stages so Prisma engines resolve `debian-openssl-3.0.x` correctly at runtime/migrate.
+- [x] Add `migrate` one-shot service in `docker-compose.prod.yml` and postgres healthcheck.
+- [x] Update deploy workflow scripts to run `pull -> up --wait postgres/redis -> run migrate -> up api/web/worker`.
+- [x] Add failure diagnostics in remote deploy (`docker compose logs --tail=200 migrate api web worker postgres`).
+- [x] Add runtime smoke checks in `build-and-push` for published images (`reflect-metadata`, `dotenv`, `next/package.json`).
+- [x] Validate locally with image builds + runtime smoke `docker run`.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -362,3 +373,5 @@
 - 2026-03-08: Fixed CI failure `ERR_PNPM_BAD_PM_VERSION` by removing duplicated pnpm version pin from GitHub Actions and deferring to `packageManager`.
 - 2026-03-08: Hardened CI against fast test-step crashes by forcing dev dependency install, narrowing test execution to `@doctoral/api`, and logging `NODE_ENV`/`jest` path for diagnostics.
 - 2026-03-08: Fixed CI compile failure `TS2307` in `wiki/documents` by un-ignoring and versioning `apps/api/src/storage/*`; root cause was broad `.gitignore` pattern `storage/`.
+- 2026-03-08: Fixed deploy pipeline/runtime packaging by hoisting PNPM linker in Docker builds, introducing `migrate` compose service, and gating deploy with runtime smoke checks for API/Worker/Web images.
+- 2026-03-08: Hardened container runtime compatibility by moving service entrypoints to package-local `node_modules`, adding missing `multer` runtime dependency, and installing OpenSSL so Prisma CLI/engines work during deploy migrations.

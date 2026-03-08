@@ -85,9 +85,9 @@ NEXT_PUBLIC_API_BASE_URL=/api
 cd /opt/atlasium
 docker login ghcr.io -u <GHCR_USERNAME>
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml pull
-IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d postgres redis
-IMAGE_TAG=main docker compose -f docker-compose.prod.yml run --rm api sh -lc "node_modules/.bin/prisma migrate deploy --schema packages/db/prisma/schema.prisma"
-IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --no-build
+IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --wait postgres redis
+IMAGE_TAG=main docker compose -f docker-compose.prod.yml run --rm migrate
+IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --no-build api worker web
 docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs --tail=200 api web worker
 ```
@@ -154,13 +154,15 @@ cd /opt/atlasium
 git fetch --all --prune
 git reset --hard origin/main
 IMAGE_TAG=<previous-sha-tag> docker compose -f docker-compose.prod.yml pull
-IMAGE_TAG=<previous-sha-tag> docker compose -f docker-compose.prod.yml up -d --no-build
+IMAGE_TAG=<previous-sha-tag> docker compose -f docker-compose.prod.yml up -d --wait postgres redis
+IMAGE_TAG=<previous-sha-tag> docker compose -f docker-compose.prod.yml run --rm migrate
+IMAGE_TAG=<previous-sha-tag> docker compose -f docker-compose.prod.yml up -d --no-build api worker web
 ```
 
 If migration fails:
 
 ```bash
-IMAGE_TAG=main docker compose -f docker-compose.prod.yml run --rm api sh -lc "node_modules/.bin/prisma migrate status --schema packages/db/prisma/schema.prisma"
+IMAGE_TAG=main docker compose -f docker-compose.prod.yml run --rm migrate
 ```
 
 Fix migration state before retrying.

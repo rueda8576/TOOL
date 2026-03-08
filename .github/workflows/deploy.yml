@@ -91,6 +91,20 @@ jobs:
             ${{ env.WORKER_IMAGE }}:${{ steps.vars.outputs.image_tag }}
             ${{ env.WORKER_IMAGE }}:main
 
+      - name: Smoke test published runtime images
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${{ steps.vars.outputs.image_tag }}"
+
+          docker pull "${API_IMAGE}:${IMAGE_TAG}"
+          docker pull "${WORKER_IMAGE}:${IMAGE_TAG}"
+          docker pull "${WEB_IMAGE}:${IMAGE_TAG}"
+
+          docker run --rm "${API_IMAGE}:${IMAGE_TAG}" node -e "require('./apps/api/node_modules/reflect-metadata')"
+          docker run --rm "${API_IMAGE}:${IMAGE_TAG}" sh -lc "apps/api/node_modules/.bin/prisma --version"
+          docker run --rm "${WORKER_IMAGE}:${IMAGE_TAG}" node -e "require('./apps/worker/node_modules/dotenv')"
+          docker run --rm "${WEB_IMAGE}:${IMAGE_TAG}" node -e "require('./apps/web/node_modules/next/package.json')"
+
   deploy-auto:
     if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
     needs: build-and-push
@@ -111,6 +125,10 @@ jobs:
           envs: GHCR_USERNAME,GHCR_READ_TOKEN,IMAGE_TAG,DEPLOY_SHA
           script: |
             set -euo pipefail
+            on_error() {
+              IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml logs --tail=200 migrate api web worker postgres || true
+            }
+            trap on_error ERR
             cd /opt/atlasium
             git fetch --all --prune
             git reset --hard "${DEPLOY_SHA}"
@@ -119,9 +137,9 @@ jobs:
             echo "${GHCR_READ_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml pull
-            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d postgres redis
-            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml run --rm api sh -lc "node_modules/.bin/prisma migrate deploy --schema packages/db/prisma/schema.prisma"
-            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --no-build
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --wait postgres redis
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml run --rm migrate
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --no-build api worker web
             docker compose -f docker-compose.prod.yml ps
 
       - name: Healthcheck
@@ -154,6 +172,10 @@ jobs:
           envs: GHCR_USERNAME,GHCR_READ_TOKEN,IMAGE_TAG
           script: |
             set -euo pipefail
+            on_error() {
+              IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml logs --tail=200 migrate api web worker postgres || true
+            }
+            trap on_error ERR
             cd /opt/atlasium
             git fetch --all --prune
             git reset --hard origin/main
@@ -162,9 +184,9 @@ jobs:
             echo "${GHCR_READ_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml pull
-            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d postgres redis
-            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml run --rm api sh -lc "node_modules/.bin/prisma migrate deploy --schema packages/db/prisma/schema.prisma"
-            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --no-build
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --wait postgres redis
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml run --rm migrate
+            IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --no-build api worker web
             docker compose -f docker-compose.prod.yml ps
 
       - name: Healthcheck
