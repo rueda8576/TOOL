@@ -115,5 +115,7 @@
 - For production container entrypoints, ensure TypeScript build output path is deterministic from clean checkout builds (avoid relying on stale local `dist` artifacts). Align `tsconfig` `rootDir/include` with intended runtime file path.
 - In `docker-compose` command strings, escape shell variables as `$$VAR`; otherwise Compose interpolates `$VAR` at parse-time and can silently pass empty values to runtime commands.
 - If migration history is incomplete (no initial migration in repo), `migrate deploy` on a fresh DB can hard-fail; deploy pipelines need a one-time bootstrap path that initializes schema (`db push`) and baselines `_prisma_migrations` (`migrate resolve`) before normal migrations.
+- Treat `_prisma_migrations` rows with `finished_at IS NULL AND rolled_back_at IS NULL` as failed state, not valid baseline; resolve them (`migrate resolve --rolled-back`) before running `migrate deploy` or bootstrap logic.
+- Baseline detection must require at least one successful migration row (`finished_at IS NOT NULL`), not just table existence or row count, otherwise `P3009` can recur forever on fresh environments.
 - For long multi-layer deploy commands (GitHub Actions YAML -> SSH shell -> Docker shell -> SQL), avoid inline nested quoting entirely; move logic into a versioned script on the repo and invoke it from the workflow.
 - In SSH-based deploys, invoke repo scripts with `sh <script>` (or enforce `chmod +x` explicitly in deploy) because executable bits can be lost or inconsistent across server checkouts and cause `Permission denied`.

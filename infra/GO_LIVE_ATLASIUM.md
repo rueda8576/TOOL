@@ -86,7 +86,7 @@ cd /opt/atlasium
 docker login ghcr.io -u <GHCR_USERNAME>
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml pull
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --wait postgres redis
-# Runs one-time bootstrap automatically on fresh DBs, then always executes migrate deploy.
+# Runs one-time bootstrap automatically on fresh DBs, auto-recovers failed migration records, then executes migrate deploy.
 sh ./infra/scripts/deploy-prisma-bootstrap.sh main
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --no-build api worker web
 docker compose -f docker-compose.prod.yml ps

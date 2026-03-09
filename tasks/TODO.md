@@ -359,6 +359,11 @@
 - [x] Apply the same permission-safe invocation in both `deploy-auto` and `deploy-manual`.
 - [x] Update go-live runbook command examples to use shell invocation and avoid executable-bit drift between environments.
 
+## CD Fix - Prisma failed migration recovery (`P3009`) (2026-03-09)
+- [x] Harden Prisma deploy script to detect failed migration rows (`finished_at IS NULL AND rolled_back_at IS NULL`) and auto-resolve them as rolled back before `migrate deploy`.
+- [x] Improve bootstrap detection to require at least one successful migration row (`finished_at IS NOT NULL`) instead of any row count.
+- [x] Handle stale `_prisma_migrations` tables with no successful baseline by truncating stale rows before one-time bootstrap (`db push` + `migrate resolve --applied`).
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -411,3 +416,4 @@
 - 2026-03-09: Fixed deploy migration deadlock on fresh databases by adding automatic Prisma bootstrap (`db push` + `migrate resolve`) when `_prisma_migrations` is absent/empty, while preserving `migrate deploy` as default path.
 - 2026-03-09: Hardened deploy shell reliability by extracting Prisma bootstrap/migrate into a dedicated script and removing nested quoting from workflow inline commands.
 - 2026-03-09: Fixed `Permission denied` in deploy bootstrap step by invoking `infra/scripts/deploy-prisma-bootstrap.sh` with `sh` in workflows/runbook, removing dependency on executable-bit preservation on VPS checkouts.
+- 2026-03-09: Fixed deploy failure `P3009` by auto-resolving failed Prisma migration records and baselining only from successful migration history, including stale-table cleanup before bootstrap.
