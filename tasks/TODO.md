@@ -349,6 +349,11 @@
 - [x] Keep `migrate deploy` as standard post-bootstrap step for normal forward migration behavior.
 - [x] Update go-live runbook with fresh-DB bootstrap commands before first `migrate` execution.
 
+## CD Hardening - Deploy quoting/shell robustness (2026-03-09)
+- [x] Move Prisma bootstrap+migrate logic from inline workflow shell to versioned script (`infra/scripts/deploy-prisma-bootstrap.sh`).
+- [x] Replace fragile nested SQL/quote interpolation in `deploy.yml` (auto/manual) with script invocation to eliminate `Syntax error: "(" unexpected` class failures.
+- [x] Enforce POSIX-safe options (`set -eu`) inside `sh -lc` blocks and keep workflow YAML parsed clean.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -399,3 +404,4 @@
 - 2026-03-08: Fixed deploy false-negatives on fresh servers by making VPS-local API healthcheck mandatory and public HTTPS check advisory until Nginx/TLS is fully configured.
 - 2026-03-09: Fixed deploy runtime crash (`Cannot find module /app/apps/api/dist/main.js`) by making API build output path deterministic in `tsconfig`, and fixed compose `migrate` command variable escaping (`$$PRISMA_CLI`) to prevent parse-time blank substitution.
 - 2026-03-09: Fixed deploy migration deadlock on fresh databases by adding automatic Prisma bootstrap (`db push` + `migrate resolve`) when `_prisma_migrations` is absent/empty, while preserving `migrate deploy` as default path.
+- 2026-03-09: Hardened deploy shell reliability by extracting Prisma bootstrap/migrate into a dedicated script and removing nested quoting from workflow inline commands.

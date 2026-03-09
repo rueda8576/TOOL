@@ -115,3 +115,4 @@
 - For production container entrypoints, ensure TypeScript build output path is deterministic from clean checkout builds (avoid relying on stale local `dist` artifacts). Align `tsconfig` `rootDir/include` with intended runtime file path.
 - In `docker-compose` command strings, escape shell variables as `$$VAR`; otherwise Compose interpolates `$VAR` at parse-time and can silently pass empty values to runtime commands.
 - If migration history is incomplete (no initial migration in repo), `migrate deploy` on a fresh DB can hard-fail; deploy pipelines need a one-time bootstrap path that initializes schema (`db push`) and baselines `_prisma_migrations` (`migrate resolve`) before normal migrations.
+- For long multi-layer deploy commands (GitHub Actions YAML -> SSH shell -> Docker shell -> SQL), avoid inline nested quoting entirely; move logic into a versioned script on the repo and invoke it from the workflow.
