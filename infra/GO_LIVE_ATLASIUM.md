@@ -87,7 +87,7 @@ docker login ghcr.io -u <GHCR_USERNAME>
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml pull
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --wait postgres redis
 # Runs one-time bootstrap automatically on fresh DBs, then always executes migrate deploy.
-./infra/scripts/deploy-prisma-bootstrap.sh main
+sh ./infra/scripts/deploy-prisma-bootstrap.sh main
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --no-build api worker web
 docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs --tail=200 api web worker
