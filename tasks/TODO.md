@@ -344,6 +344,11 @@
 - [x] Fix compose shell interpolation in `migrate` command by escaping runtime variables (`$$PRISMA_CLI`) to avoid parse-time substitution.
 - [x] Revalidate API build + API container runtime entrypoint presence and compose config interpolation warnings.
 
+## CD Recovery - Prisma bootstrap for fresh DB (2026-03-09)
+- [x] Add conditional DB bootstrap in deploy workflow (auto + manual): detect empty/missing `_prisma_migrations`, run `db push`, then `migrate resolve --applied` for tracked migrations.
+- [x] Keep `migrate deploy` as standard post-bootstrap step for normal forward migration behavior.
+- [x] Update go-live runbook with fresh-DB bootstrap commands before first `migrate` execution.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -393,3 +398,4 @@
 - 2026-03-08: Fixed `build-and-push` smoke failure by removing hardcoded Prisma binary path in `deploy.yml` and resolving Prisma CLI dynamically from `.pnpm` store, aligned with `migrate` runtime command.
 - 2026-03-08: Fixed deploy false-negatives on fresh servers by making VPS-local API healthcheck mandatory and public HTTPS check advisory until Nginx/TLS is fully configured.
 - 2026-03-09: Fixed deploy runtime crash (`Cannot find module /app/apps/api/dist/main.js`) by making API build output path deterministic in `tsconfig`, and fixed compose `migrate` command variable escaping (`$$PRISMA_CLI`) to prevent parse-time blank substitution.
+- 2026-03-09: Fixed deploy migration deadlock on fresh databases by adding automatic Prisma bootstrap (`db push` + `migrate resolve`) when `_prisma_migrations` is absent/empty, while preserving `migrate deploy` as default path.

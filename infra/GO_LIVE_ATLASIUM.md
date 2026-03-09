@@ -86,6 +86,23 @@ cd /opt/atlasium
 docker login ghcr.io -u <GHCR_USERNAME>
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml pull
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --wait postgres redis
+# Fresh DB bootstrap (one-time only): initialize schema and baseline migrations.
+# Skip this block if _prisma_migrations already exists with rows.
+NEEDS_BOOTSTRAP="$(IMAGE_TAG=main docker compose -f docker-compose.prod.yml exec -T postgres sh -lc \
+  "psql -U postgres -d doctoral_platform -tAc \"SELECT CASE WHEN to_regclass('public._prisma_migrations') IS NULL THEN 1 WHEN (SELECT COUNT(*) FROM public._prisma_migrations)=0 THEN 1 ELSE 0 END;\"")"
+if [ "${NEEDS_BOOTSTRAP}" = "1" ]; then
+  IMAGE_TAG=main docker compose -f docker-compose.prod.yml run --rm api sh -lc '
+    set -euo pipefail
+    PRISMA_CLI="$(find /app/node_modules/.pnpm -path "*/node_modules/prisma/build/index.js" | head -n 1)"
+    test -n "${PRISMA_CLI}"
+    node "${PRISMA_CLI}" db push --schema packages/db/prisma/schema.prisma --skip-generate
+    for d in packages/db/prisma/migrations/*; do
+      [ -d "${d}" ] || continue
+      name="$(basename "${d}")"
+      node "${PRISMA_CLI}" migrate resolve --applied "${name}" --schema packages/db/prisma/schema.prisma || true
+    done
+  '
+fi
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml run --rm migrate
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --no-build api worker web
 docker compose -f docker-compose.prod.yml ps

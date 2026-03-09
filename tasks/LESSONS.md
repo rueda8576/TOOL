@@ -114,3 +114,4 @@
 - In CI/CD healthchecks for new VPS environments, make container-local API health mandatory (`127.0.0.1:4000/health`) and treat public HTTPS checks as a separate probe; otherwise deploys fail due to pending Nginx/TLS rather than app health.
 - For production container entrypoints, ensure TypeScript build output path is deterministic from clean checkout builds (avoid relying on stale local `dist` artifacts). Align `tsconfig` `rootDir/include` with intended runtime file path.
 - In `docker-compose` command strings, escape shell variables as `$$VAR`; otherwise Compose interpolates `$VAR` at parse-time and can silently pass empty values to runtime commands.
+- If migration history is incomplete (no initial migration in repo), `migrate deploy` on a fresh DB can hard-fail; deploy pipelines need a one-time bootstrap path that initializes schema (`db push`) and baselines `_prisma_migrations` (`migrate resolve`) before normal migrations.
