@@ -84,6 +84,7 @@ NEXT_PUBLIC_API_BASE_URL=/api
 ```bash
 cd /opt/atlasium
 docker login ghcr.io -u <GHCR_USERNAME>
+sh ./infra/scripts/validate-prod-env.sh .env
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml pull
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --wait postgres redis
 # Runs one-time bootstrap automatically on fresh DBs, auto-recovers failed migration records, then executes migrate deploy.

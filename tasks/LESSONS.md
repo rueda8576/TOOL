@@ -119,3 +119,4 @@
 - Baseline detection must require at least one successful migration row (`finished_at IS NOT NULL`), not just table existence or row count, otherwise `P3009` can recur forever on fresh environments.
 - For long multi-layer deploy commands (GitHub Actions YAML -> SSH shell -> Docker shell -> SQL), avoid inline nested quoting entirely; move logic into a versioned script on the repo and invoke it from the workflow.
 - In SSH-based deploys, invoke repo scripts with `sh <script>` (or enforce `chmod +x` explicitly in deploy) because executable bits can be lost or inconsistent across server checkouts and cause `Permission denied`.
+- Add deploy preflight validation for critical env vars (at minimum `JWT_SECRET` length) before `docker compose up`; otherwise failures appear later as healthcheck flakiness while API is actually crashing on config parsing.

@@ -138,6 +138,7 @@ jobs:
             git fetch --all --prune
             git reset --hard "${DEPLOY_SHA}"
             git clean -fd
+            sh ./infra/scripts/validate-prod-env.sh .env
 
             echo "${GHCR_READ_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
@@ -205,6 +206,7 @@ jobs:
             git fetch --all --prune
             git reset --hard origin/main
             git clean -fd
+            sh ./infra/scripts/validate-prod-env.sh .env
 
             echo "${GHCR_READ_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 

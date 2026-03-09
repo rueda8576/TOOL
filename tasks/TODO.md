@@ -364,6 +364,11 @@
 - [x] Improve bootstrap detection to require at least one successful migration row (`finished_at IS NOT NULL`) instead of any row count.
 - [x] Handle stale `_prisma_migrations` tables with no successful baseline by truncating stale rows before one-time bootstrap (`db push` + `migrate resolve --applied`).
 
+## CD Fix - Preflight env validation (`JWT_SECRET`) (2026-03-09)
+- [x] Add deploy-time env validator script (`infra/scripts/validate-prod-env.sh`) with explicit checks for required `JWT_SECRET` minimum length.
+- [x] Execute env validator in both `deploy-auto` and `deploy-manual` before docker pull/up.
+- [x] Update go-live runbook to include env validation step before startup/migrations.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -417,3 +422,4 @@
 - 2026-03-09: Hardened deploy shell reliability by extracting Prisma bootstrap/migrate into a dedicated script and removing nested quoting from workflow inline commands.
 - 2026-03-09: Fixed `Permission denied` in deploy bootstrap step by invoking `infra/scripts/deploy-prisma-bootstrap.sh` with `sh` in workflows/runbook, removing dependency on executable-bit preservation on VPS checkouts.
 - 2026-03-09: Fixed deploy failure `P3009` by auto-resolving failed Prisma migration records and baselining only from successful migration history, including stale-table cleanup before bootstrap.
+- 2026-03-09: Added deploy preflight validation for `.env` (`JWT_SECRET` min length) to prevent API crash/restart loops surfacing late in healthcheck.
