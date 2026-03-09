@@ -334,6 +334,11 @@
 - [x] Resolve Prisma CLI dynamically from `/app/node_modules/.pnpm/*/node_modules/prisma/build/index.js`.
 - [x] Keep deploy migration execution aligned with the same runtime-safe Prisma resolution strategy.
 
+## CD Fix - Healthcheck strategy for fresh VPS (2026-03-08)
+- [x] Replace runner-side blocking healthcheck to `https://atlasium.info/api/health` with VPS-local required check (`http://127.0.0.1:4000/health`).
+- [x] Keep public HTTPS probe as non-blocking diagnostic to surface pending Nginx/TLS setup without failing deploy.
+- [x] Add service logs dump on local healthcheck failure for faster incident triage.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -381,3 +386,4 @@
 - 2026-03-08: Fixed deploy pipeline/runtime packaging by hoisting PNPM linker in Docker builds, introducing `migrate` compose service, and gating deploy with runtime smoke checks for API/Worker/Web images.
 - 2026-03-08: Hardened container runtime compatibility by moving service entrypoints to package-local `node_modules`, adding missing `multer` runtime dependency, and installing OpenSSL so Prisma CLI/engines work during deploy migrations.
 - 2026-03-08: Fixed `build-and-push` smoke failure by removing hardcoded Prisma binary path in `deploy.yml` and resolving Prisma CLI dynamically from `.pnpm` store, aligned with `migrate` runtime command.
+- 2026-03-08: Fixed deploy false-negatives on fresh servers by making VPS-local API healthcheck mandatory and public HTTPS check advisory until Nginx/TLS is fully configured.

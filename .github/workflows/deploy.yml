@@ -147,17 +147,37 @@ jobs:
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --no-build api worker web
             docker compose -f docker-compose.prod.yml ps
 
-      - name: Healthcheck
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 20); do
-            if curl -fsS https://atlasium.info/api/health >/dev/null; then
-              exit 0
+      - name: Healthcheck (VPS local required + public HTTPS probe)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd /opt/atlasium
+
+            local_ok=0
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:4000/health >/dev/null; then
+                local_ok=1
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "${local_ok}" -ne 1 ]; then
+              echo "Local API healthcheck failed after deploy" >&2
+              docker compose -f docker-compose.prod.yml logs --tail=200 api web worker postgres || true
+              exit 1
             fi
-            sleep 3
-          done
-          echo "Healthcheck failed after deploy" >&2
-          exit 1
+
+            if curl -fsS https://atlasium.info/api/health >/dev/null; then
+              echo "Public HTTPS healthcheck OK"
+            else
+              echo "Public HTTPS healthcheck failed (likely nginx/tls pending). Deploy marked successful because local API is healthy."
+            fi
 
   deploy-manual:
     if: github.event_name == 'workflow_dispatch'
@@ -194,14 +214,34 @@ jobs:
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --no-build api worker web
             docker compose -f docker-compose.prod.yml ps
 
-      - name: Healthcheck
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 20); do
-            if curl -fsS https://atlasium.info/api/health >/dev/null; then
-              exit 0
+      - name: Healthcheck (VPS local required + public HTTPS probe)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd /opt/atlasium
+
+            local_ok=0
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:4000/health >/dev/null; then
+                local_ok=1
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "${local_ok}" -ne 1 ]; then
+              echo "Local API healthcheck failed after deploy" >&2
+              docker compose -f docker-compose.prod.yml logs --tail=200 api web worker postgres || true
+              exit 1
             fi
-            sleep 3
-          done
-          echo "Healthcheck failed after deploy" >&2
-          exit 1
+
+            if curl -fsS https://atlasium.info/api/health >/dev/null; then
+              echo "Public HTTPS healthcheck OK"
+            else
+              echo "Public HTTPS healthcheck failed (likely nginx/tls pending). Deploy marked successful because local API is healthy."
+            fi
