@@ -46,9 +46,9 @@ services:
       - sh
       - -lc
       - >
-        PRISMA_CLI="$(find /app/node_modules/.pnpm -path '*/node_modules/prisma/build/index.js' | head -n 1)";
-        test -n "$PRISMA_CLI";
-        node "$PRISMA_CLI" migrate deploy --schema packages/db/prisma/schema.prisma
+        PRISMA_CLI="$$(find /app/node_modules/.pnpm -path '*/node_modules/prisma/build/index.js' | head -n 1)";
+        test -n "$$PRISMA_CLI";
+        node "$$PRISMA_CLI" migrate deploy --schema packages/db/prisma/schema.prisma
     restart: "no"
 
   web:
