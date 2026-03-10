@@ -17,6 +17,16 @@ import { PasswordResetDto } from "./dto/password-reset.dto";
 @Injectable()
 export class AuthService {
   private readonly appBaseUrl = getEnv().APP_BASE_URL.replace(/\/+$/, "");
+  private readonly inviteExpiryFormatter = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "Europe/Madrid",
+    timeZoneName: "short"
+  });
 
   constructor(
     private readonly prisma: PrismaService,
@@ -111,10 +121,7 @@ export class AuthService {
     });
 
     const inviteUrl = `${this.appBaseUrl}/accept-invite?token=${encodeURIComponent(token)}`;
-    const scopeSummary =
-      access.accessMode === InviteAccessMode.ALL_CURRENT_PROJECTS
-        ? "all current projects at acceptance time"
-        : access.projects.map((project) => `${project.key} - ${project.name}`).join(", ");
+    const formattedExpiresAt = this.inviteExpiryFormatter.format(expiresAt);
 
     await this.queueService.enqueueEmail({
       directEmail: {
@@ -124,12 +131,9 @@ export class AuthService {
           "You have been invited to Atlasium.",
           "",
           `Accept invite: ${inviteUrl}`,
-          `Access scope: ${scopeSummary}`,
           "",
           `Invite token: ${token}`,
-          `Expires at: ${expiresAt.toISOString()}`,
-          "",
-          "You can also accept manually with POST /auth/accept-invite."
+          `Expires at: ${formattedExpiresAt}`
         ].join("\n")
       }
     });

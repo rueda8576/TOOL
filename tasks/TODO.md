@@ -379,6 +379,12 @@
 - [x] Add backend unit tests for invite creation/acceptance with mode validation and assignment behavior.
 - [x] Validate with `pnpm --filter @doctoral/db db:generate`, `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, and `pnpm --filter @doctoral/web build`.
 
+## Invite Email Hotfix - Copy cleanup + readable expiry (2026-03-10)
+- [x] Remove `Access scope` line from invite direct email copy.
+- [x] Remove API-manual fallback line from invite direct email copy.
+- [x] Format `Expires at` in readable English (`Intl.DateTimeFormat`) with `Europe/Madrid` timezone.
+- [x] Validate with `pnpm --filter @doctoral/api test` and `pnpm --filter @doctoral/api build`.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -434,3 +440,4 @@
 - 2026-03-09: Fixed deploy failure `P3009` by auto-resolving failed Prisma migration records and baselining only from successful migration history, including stale-table cleanup before bootstrap.
 - 2026-03-09: Added deploy preflight validation for `.env` (`JWT_SECRET` min length) to prevent API crash/restart loops surfacing late in healthcheck.
 - 2026-03-10: Implemented scoped invitations (all current projects or selected projects), added public `/accept-invite` web onboarding page, updated invite emails with accept-link + scope summary, and validated with db generate + API tests/build + web build.
+- 2026-03-10: Refined invitation email copy by removing access/manual API lines and formatting expiry to readable English timezone output for better recipient clarity.
