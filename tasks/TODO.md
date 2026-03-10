@@ -369,6 +369,16 @@
 - [x] Execute env validator in both `deploy-auto` and `deploy-manual` before docker pull/up.
 - [x] Update go-live runbook to include env validation step before startup/migrations.
 
+## Invites vNext - Project Scope + Web Accept Flow (2026-03-10)
+- [x] Extend Prisma invite model with scope mode (`ALL_CURRENT_PROJECTS` / `SELECTED_PROJECTS`) and selected-project join table while keeping legacy `projectId` compatibility.
+- [x] Update API invite contract (`accessMode`, `projectIds`) and validation rules, with temporary support for legacy `projectId`.
+- [x] Implement invite acceptance project resolution for both modes (`all current` snapshot or selected list), including legacy fallback and `projectIds` response.
+- [x] Update invite email content to include web accept link (`${APP_BASE_URL}/accept-invite?token=...`) and scope summary.
+- [x] Add admin-only invite UI block in `/projects` with access-mode selector and multi-project selection.
+- [x] Add public `/accept-invite` page in web app (token/name/password) with success redirect to `/login`.
+- [x] Add backend unit tests for invite creation/acceptance with mode validation and assignment behavior.
+- [x] Validate with `pnpm --filter @doctoral/db db:generate`, `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, and `pnpm --filter @doctoral/web build`.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -423,3 +433,4 @@
 - 2026-03-09: Fixed `Permission denied` in deploy bootstrap step by invoking `infra/scripts/deploy-prisma-bootstrap.sh` with `sh` in workflows/runbook, removing dependency on executable-bit preservation on VPS checkouts.
 - 2026-03-09: Fixed deploy failure `P3009` by auto-resolving failed Prisma migration records and baselining only from successful migration history, including stale-table cleanup before bootstrap.
 - 2026-03-09: Added deploy preflight validation for `.env` (`JWT_SECRET` min length) to prevent API crash/restart loops surfacing late in healthcheck.
+- 2026-03-10: Implemented scoped invitations (all current projects or selected projects), added public `/accept-invite` web onboarding page, updated invite emails with accept-link + scope summary, and validated with db generate + API tests/build + web build.

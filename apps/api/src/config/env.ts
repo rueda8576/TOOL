@@ -8,6 +8,7 @@ const EnvSchema = z.object({
     .default("postgresql://postgres:postgres@localhost:5432/doctoral_platform?schema=public"),
   REDIS_URL: z.string().default("redis://localhost:6379"),
   JWT_SECRET: z.string().min(16).default("change-me-in-production"),
+  APP_BASE_URL: z.string().url().default("http://localhost:3000"),
   API_PORT: z.coerce.number().int().default(4000),
   STORAGE_ROOT: z.string().default("./storage"),
   PDF_UPLOAD_LIMIT_BYTES: z.coerce.number().int().positive().default(1_073_741_824),

@@ -426,6 +426,40 @@ textarea {
   gap: 0.7rem;
 }
 
+.projects-invite-panel {
+  margin-top: 0.15rem;
+}
+
+.projects-invite-projects {
+  margin: 0;
+  padding: 0.6rem 0.64rem 0.66rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 0.52rem;
+}
+
+.projects-invite-projects legend {
+  padding: 0 0.3rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.projects-invite-checkboxes {
+  max-height: 200px;
+  overflow: auto;
+  padding-right: 0.22rem;
+  display: grid;
+  gap: 0.44rem;
+}
+
+.projects-invite-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--text);
+}
+
 .projects-directory-list {
   gap: 0.65rem;
 }

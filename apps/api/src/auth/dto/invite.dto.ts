@@ -1,4 +1,6 @@
-import { IsEmail, IsIn, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
+import { IsArray, IsEmail, IsIn, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
+
+export type InviteAccessModeInput = "all" | "selected";
 
 export class InviteDto {
   @IsEmail()
@@ -11,6 +13,15 @@ export class InviteDto {
   @IsOptional()
   @IsString()
   projectId?: string;
+
+  @IsOptional()
+  @IsIn(["all", "selected"])
+  accessMode?: InviteAccessModeInput;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  projectIds?: string[];
 
   @IsOptional()
   @IsInt()

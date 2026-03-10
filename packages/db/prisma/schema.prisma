@@ -20,6 +20,11 @@ enum InviteStatus {
   REVOKED
 }
 
+enum InviteAccessMode {
+  ALL_CURRENT_PROJECTS
+  SELECTED_PROJECTS
+}
+
 enum DocumentType {
   PAPER
   MANUAL
@@ -134,23 +139,38 @@ model Session {
 }
 
 model Invite {
-  id           String      @id @default(cuid())
-  email        String
-  tokenHash    String      @unique
-  globalRole   GlobalRole  @default(READER)
-  senderId     String
-  acceptedById String?
-  projectId    String?
-  status       InviteStatus @default(PENDING)
-  expiresAt    DateTime
-  createdAt    DateTime    @default(now())
-  acceptedAt   DateTime?
+  id            String           @id @default(cuid())
+  email         String
+  tokenHash     String           @unique
+  globalRole    GlobalRole       @default(READER)
+  accessMode    InviteAccessMode @default(SELECTED_PROJECTS)
+  senderId      String
+  acceptedById  String?
+  projectId     String?
+  status        InviteStatus     @default(PENDING)
+  expiresAt     DateTime
+  createdAt     DateTime         @default(now())
+  acceptedAt    DateTime?
 
-  sender     User    @relation("InviteSender", fields: [senderId], references: [id], onDelete: Restrict)
-  acceptedBy User?   @relation("InviteAccepter", fields: [acceptedById], references: [id], onDelete: SetNull)
-  project    Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  sender        User           @relation("InviteSender", fields: [senderId], references: [id], onDelete: Restrict)
+  acceptedBy    User?          @relation("InviteAccepter", fields: [acceptedById], references: [id], onDelete: SetNull)
+  project       Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  inviteProjects InviteProject[]
 
   @@index([email, status])
+  @@index([projectId])
+}
+
+model InviteProject {
+  id        String   @id @default(cuid())
+  inviteId  String
+  projectId String
+  createdAt DateTime @default(now())
+
+  invite  Invite  @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([inviteId, projectId])
   @@index([projectId])
 }
 
@@ -173,6 +193,7 @@ model Project {
   tasks     Task[]
   meetings  Meeting[]
   invites   Invite[]
+  inviteProjects InviteProject[]
   auditLogs AuditLog[]
 }
 

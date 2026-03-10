@@ -9,12 +9,19 @@ import { authFetch, LoginResponse } from "../../lib/client-api";
 import { ProjectSummary } from "../../lib/api";
 
 type ProjectOrderBy = "newest" | "key" | "name";
+type InviteAccessMode = "all" | "selected";
 
 type CreateProjectResponse = {
   id: string;
   key: string;
   name: string;
   description: string | null;
+};
+
+type InviteResponse = {
+  inviteId: string;
+  token: string;
+  expiresAt: string;
 };
 
 function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
@@ -81,6 +88,13 @@ export default function ProjectsPage(): JSX.Element {
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
   const [pinBusyProjectId, setPinBusyProjectId] = useState<string | null>(null);
   const [pinError, setPinError] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<LoginResponse["user"]["globalRole"]>("reader");
+  const [inviteAccessMode, setInviteAccessMode] = useState<InviteAccessMode>("all");
+  const [inviteProjectIds, setInviteProjectIds] = useState<string[]>([]);
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
 
   const loadProjects = useCallback(
     async (authToken: string): Promise<void> => {
@@ -113,6 +127,14 @@ export default function ProjectsPage(): JSX.Element {
   }, [loadProjects, router]);
 
   const isReader = userRole === "reader";
+  const isAdmin = userRole === "admin";
+
+  useEffect(() => {
+    setInviteProjectIds((current) => {
+      const availableProjectIds = new Set(projects.map((project) => project.id));
+      return current.filter((projectId) => availableProjectIds.has(projectId));
+    });
+  }, [projects]);
 
   const sortedProjects = useMemo(
     () =>
@@ -206,6 +228,69 @@ export default function ProjectsPage(): JSX.Element {
     }
   };
 
+  const onToggleInviteProject = (projectId: string): void => {
+    setInviteProjectIds((current) => {
+      if (current.includes(projectId)) {
+        return current.filter((id) => id !== projectId);
+      }
+      return [...current, projectId];
+    });
+  };
+
+  const onSendInvite = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+
+    if (!token) {
+      setInviteError("Missing session token. Please sign in again.");
+      return;
+    }
+
+    if (!isAdmin) {
+      setInviteError("Only admins can send invitations.");
+      return;
+    }
+
+    const email = inviteEmail.trim().toLowerCase();
+    if (!email) {
+      setInviteError("Email is required.");
+      return;
+    }
+
+    if (inviteAccessMode === "selected" && inviteProjectIds.length === 0) {
+      setInviteError("Select at least one project or choose all current projects.");
+      return;
+    }
+
+    setInviting(true);
+    setInviteError(null);
+    setInviteSuccess(null);
+
+    try {
+      await authFetch<InviteResponse>("/auth/invite", {
+        token,
+        init: {
+          method: "POST",
+          body: JSON.stringify({
+            email,
+            globalRole: inviteRole,
+            accessMode: inviteAccessMode,
+            projectIds: inviteAccessMode === "selected" ? inviteProjectIds : undefined
+          })
+        }
+      });
+
+      setInviteEmail("");
+      setInviteRole("reader");
+      setInviteAccessMode("all");
+      setInviteProjectIds([]);
+      setInviteSuccess(`Invitation sent to ${email}.`);
+    } catch (error) {
+      setInviteError((error as Error).message);
+    } finally {
+      setInviting(false);
+    }
+  };
+
   return (
     <AppShell title="Projects" subtitle="Browse, pin, and open your research workspaces.">
       <section className="panel projects-directory-panel">
@@ -242,6 +327,8 @@ export default function ProjectsPage(): JSX.Element {
         {createSuccess ? <p className="alert alert-success">{createSuccess}</p> : null}
         {createError ? <p className="alert alert-error">{createError}</p> : null}
         {pinError ? <p className="alert alert-error">{pinError}</p> : null}
+        {inviteSuccess ? <p className="alert alert-success">{inviteSuccess}</p> : null}
+        {inviteError ? <p className="alert alert-error">{inviteError}</p> : null}
         {listError ? (
           <p className="alert alert-error">
             {listError}. Please <Link href="/login">sign in again</Link>.
@@ -282,6 +369,87 @@ export default function ProjectsPage(): JSX.Element {
               </label>
               <button className="button" type="submit" disabled={creating}>
                 {creating ? "Creating..." : "Create project"}
+              </button>
+            </form>
+          </div>
+        ) : null}
+
+        {isAdmin ? (
+          <div className="projects-create-collapsible projects-invite-panel">
+            <h3 className="section-heading">Invite user</h3>
+            <form className="form-grid" onSubmit={onSendInvite}>
+              <div className="grid cols-2 grid-tight">
+                <label>
+                  Email
+                  <input
+                    className="input"
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(event) => setInviteEmail(event.target.value)}
+                    placeholder="user@example.com"
+                    required
+                    disabled={inviting}
+                  />
+                </label>
+                <label>
+                  Global role
+                  <select
+                    className="input"
+                    value={inviteRole}
+                    onChange={(event) => setInviteRole(event.target.value as LoginResponse["user"]["globalRole"])}
+                    disabled={inviting}
+                  >
+                    <option value="reader">Reader</option>
+                    <option value="editor">Editor</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </label>
+              </div>
+
+              <label>
+                Access mode
+                <select
+                  className="input"
+                  value={inviteAccessMode}
+                  onChange={(event) => setInviteAccessMode(event.target.value as InviteAccessMode)}
+                  disabled={inviting}
+                >
+                  <option value="all">All current projects</option>
+                  <option value="selected">Selected projects</option>
+                </select>
+              </label>
+
+              {inviteAccessMode === "selected" ? (
+                <fieldset className="projects-invite-projects">
+                  <legend>Select projects</legend>
+                  {sortedProjects.length === 0 ? (
+                    <p className="alert alert-info">No projects available.</p>
+                  ) : (
+                    <div className="projects-invite-checkboxes">
+                      {sortedProjects.map((project) => (
+                        <label className="projects-invite-checkbox" key={`invite-${project.id}`}>
+                          <input
+                            type="checkbox"
+                            checked={inviteProjectIds.includes(project.id)}
+                            onChange={() => onToggleInviteProject(project.id)}
+                            disabled={inviting}
+                          />
+                          <span>
+                            {project.key} - {project.name}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </fieldset>
+              ) : (
+                <p className="projects-toolbar-helper">
+                  The invited user will receive access to every current project when they accept the invite.
+                </p>
+              )}
+
+              <button className="button" type="submit" disabled={inviting}>
+                {inviting ? "Sending..." : "Send invitation"}
               </button>
             </form>
           </div>

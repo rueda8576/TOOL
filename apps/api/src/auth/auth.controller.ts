@@ -35,7 +35,9 @@ export class AuthController {
   }
 
   @Post("accept-invite")
-  acceptInvite(@Body() dto: AcceptInviteDto): Promise<{ token: string; userId: string; projectId?: string | null }> {
+  acceptInvite(
+    @Body() dto: AcceptInviteDto
+  ): Promise<{ token: string; userId: string; projectId?: string | null; projectIds: string[] }> {
     return this.authService.acceptInvite(dto);
   }
 

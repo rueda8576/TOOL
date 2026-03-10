@@ -1,11 +1,12 @@
 import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
-import { InviteStatus, NotificationEventType, NotificationStatus } from "@prisma/client";
+import { InviteAccessMode, InviteStatus, NotificationEventType, NotificationStatus } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { JwtService } from "@nestjs/jwt";
 
 import { AuditService } from "../audit/audit.service";
 import { generateSecureToken, hashValue } from "../common/crypto";
 import { apiRoleToPrismaRole, pickHigherRole, prismaRoleToApiRole } from "../common/role-map";
+import { getEnv } from "../config/env";
 import { PrismaService } from "../prisma/prisma.service";
 import { QueueService } from "../queues/queue.service";
 import { AcceptInviteDto } from "./dto/accept-invite.dto";
@@ -15,6 +16,8 @@ import { PasswordResetDto } from "./dto/password-reset.dto";
 
 @Injectable()
 export class AuthService {
+  private readonly appBaseUrl = getEnv().APP_BASE_URL.replace(/\/+$/, "");
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
@@ -85,52 +88,64 @@ export class AuthService {
     const token = generateSecureToken(24);
     const tokenHash = hashValue(token);
     const expiresAt = new Date(Date.now() + (dto.expiresInDays ?? 7) * 24 * 60 * 60 * 1000);
-
-    if (dto.projectId) {
-      const project = await this.prisma.project.findFirst({
-        where: { id: dto.projectId, deletedAt: null },
-        select: { id: true }
-      });
-
-      if (!project) {
-        throw new BadRequestException("Project not found");
-      }
-    }
+    const access = await this.resolveInviteAccess(dto);
+    const canonicalRole = dto.globalRole ?? "reader";
 
     const invite = await this.prisma.invite.create({
       data: {
         email: dto.email.toLowerCase(),
         tokenHash,
         senderId,
-        projectId: dto.projectId,
-        globalRole: apiRoleToPrismaRole(dto.globalRole ?? "reader"),
+        accessMode: access.accessMode,
+        projectId: access.projectIds.length === 1 ? access.projectIds[0] : undefined,
+        inviteProjects:
+          access.projectIds.length > 0
+            ? {
+                create: access.projectIds.map((projectId) => ({ projectId }))
+              }
+            : undefined,
+        globalRole: apiRoleToPrismaRole(canonicalRole),
         status: InviteStatus.PENDING,
         expiresAt
       }
     });
 
+    const inviteUrl = `${this.appBaseUrl}/accept-invite?token=${encodeURIComponent(token)}`;
+    const scopeSummary =
+      access.accessMode === InviteAccessMode.ALL_CURRENT_PROJECTS
+        ? "all current projects at acceptance time"
+        : access.projects.map((project) => `${project.key} - ${project.name}`).join(", ");
+
     await this.queueService.enqueueEmail({
       directEmail: {
         to: invite.email,
-        subject: "Doctoral Platform invitation",
+        subject: "Atlasium invitation",
         text: [
-          "You have been invited to Doctoral Platform.",
+          "You have been invited to Atlasium.",
+          "",
+          `Accept invite: ${inviteUrl}`,
+          `Access scope: ${scopeSummary}`,
           "",
           `Invite token: ${token}`,
           `Expires at: ${expiresAt.toISOString()}`,
           "",
-          "Use this token in POST /auth/accept-invite."
+          "You can also accept manually with POST /auth/accept-invite."
         ].join("\n")
       }
     });
 
     await this.auditService.log({
       userId: senderId,
-      projectId: dto.projectId,
+      projectId: access.projectIds.length === 1 ? access.projectIds[0] : undefined,
       entityType: "invite",
       entityId: invite.id,
       action: "auth.invite.create",
-      metadata: { email: invite.email, role: dto.globalRole ?? "reader" }
+      metadata: {
+        email: invite.email,
+        role: canonicalRole,
+        accessMode: access.accessMode,
+        projectIds: access.projectIds
+      }
     });
 
     return {
@@ -140,12 +155,24 @@ export class AuthService {
     };
   }
 
-  async acceptInvite(dto: AcceptInviteDto): Promise<{ token: string; userId: string; projectId?: string | null }> {
+  async acceptInvite(dto: AcceptInviteDto): Promise<{
+    token: string;
+    userId: string;
+    projectId?: string | null;
+    projectIds: string[];
+  }> {
     const now = new Date();
     const invite = await this.prisma.invite.findFirst({
       where: {
         tokenHash: hashValue(dto.token),
         status: InviteStatus.PENDING
+      },
+      include: {
+        inviteProjects: {
+          select: {
+            projectId: true
+          }
+        }
       }
     });
 
@@ -185,20 +212,25 @@ export class AuthService {
       });
     }
 
-    if (invite.projectId) {
-      await this.prisma.projectMember.upsert({
-        where: {
-          projectId_userId: {
-            projectId: invite.projectId,
-            userId: user.id
-          }
-        },
-        create: {
-          projectId: invite.projectId,
-          userId: user.id
-        },
-        update: {}
-      });
+    const targetProjectIds = await this.resolveInviteProjectAssignments(invite);
+    if (targetProjectIds.length > 0) {
+      await this.prisma.$transaction(
+        targetProjectIds.map((projectId) =>
+          this.prisma.projectMember.upsert({
+            where: {
+              projectId_userId: {
+                projectId,
+                userId: user.id
+              }
+            },
+            create: {
+              projectId,
+              userId: user.id
+            },
+            update: {}
+          })
+        )
+      );
     }
 
     await this.prisma.invite.update({
@@ -226,13 +258,17 @@ export class AuthService {
 
     await this.auditService.log({
       userId: user.id,
-      projectId: invite.projectId ?? undefined,
+      projectId: targetProjectIds[0] ?? invite.projectId ?? undefined,
       entityType: "invite",
       entityId: invite.id,
-      action: "auth.invite.accept"
+      action: "auth.invite.accept",
+      metadata: {
+        accessMode: invite.accessMode,
+        projectIds: targetProjectIds
+      }
     });
 
-    return { token, userId: user.id, projectId: invite.projectId };
+    return { token, userId: user.id, projectId: invite.projectId, projectIds: targetProjectIds };
   }
 
   async requestPasswordReset(dto: PasswordResetDto): Promise<{ accepted: true }> {
@@ -269,5 +305,112 @@ export class AuthService {
     });
 
     return { accepted: true };
+  }
+
+  private async resolveInviteAccess(dto: InviteDto): Promise<{
+    accessMode: InviteAccessMode;
+    projectIds: string[];
+    projects: Array<{ id: string; key: string; name: string }>;
+  }> {
+    const legacyProjectId = dto.projectId?.trim();
+    const projectIds = Array.from(new Set((dto.projectIds ?? []).map((projectId) => projectId.trim()).filter(Boolean)));
+
+    if (dto.accessMode === "all") {
+      if (legacyProjectId || projectIds.length > 0) {
+        throw new BadRequestException("accessMode 'all' does not accept projectId or projectIds");
+      }
+
+      return {
+        accessMode: InviteAccessMode.ALL_CURRENT_PROJECTS,
+        projectIds: [],
+        projects: []
+      };
+    }
+
+    const selectedProjectIds = [...projectIds];
+    if (legacyProjectId && !selectedProjectIds.includes(legacyProjectId)) {
+      selectedProjectIds.push(legacyProjectId);
+    }
+
+    if (dto.accessMode === "selected" && selectedProjectIds.length === 0) {
+      throw new BadRequestException("projectIds must contain at least one project when accessMode is 'selected'");
+    }
+
+    if (!dto.accessMode && selectedProjectIds.length === 0) {
+      throw new BadRequestException("accessMode is required and must be either 'all' or 'selected'");
+    }
+
+    if (selectedProjectIds.length === 0) {
+      throw new BadRequestException("projectIds must contain at least one project");
+    }
+
+    const projects = await this.prisma.project.findMany({
+      where: {
+        id: { in: selectedProjectIds },
+        deletedAt: null
+      },
+      select: {
+        id: true,
+        key: true,
+        name: true
+      }
+    });
+
+    if (projects.length !== selectedProjectIds.length) {
+      throw new BadRequestException("One or more selected projects are missing or archived");
+    }
+
+    const projectsById = new Map(projects.map((project) => [project.id, project]));
+    const orderedProjects = selectedProjectIds.map((projectId) => projectsById.get(projectId)).filter(Boolean) as Array<{
+      id: string;
+      key: string;
+      name: string;
+    }>;
+
+    return {
+      accessMode: InviteAccessMode.SELECTED_PROJECTS,
+      projectIds: selectedProjectIds,
+      projects: orderedProjects
+    };
+  }
+
+  private async resolveInviteProjectAssignments(invite: {
+    accessMode: InviteAccessMode;
+    projectId: string | null;
+    inviteProjects: Array<{ projectId: string }>;
+  }): Promise<string[]> {
+    if (invite.accessMode === InviteAccessMode.ALL_CURRENT_PROJECTS) {
+      const allProjects = await this.prisma.project.findMany({
+        where: {
+          deletedAt: null
+        },
+        select: {
+          id: true
+        }
+      });
+
+      return allProjects.map((project) => project.id);
+    }
+
+    const selectedProjectIds = Array.from(new Set(invite.inviteProjects.map((item) => item.projectId)));
+    if (selectedProjectIds.length === 0 && invite.projectId) {
+      selectedProjectIds.push(invite.projectId);
+    }
+    if (selectedProjectIds.length === 0) {
+      return [];
+    }
+
+    const activeProjects = await this.prisma.project.findMany({
+      where: {
+        id: { in: selectedProjectIds },
+        deletedAt: null
+      },
+      select: {
+        id: true
+      }
+    });
+
+    const activeProjectIds = new Set(activeProjects.map((project) => project.id));
+    return selectedProjectIds.filter((projectId) => activeProjectIds.has(projectId));
   }
 }
