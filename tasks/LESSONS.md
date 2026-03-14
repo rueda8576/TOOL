@@ -112,6 +112,8 @@
 - In Debian/Node 22 containers using Prisma 5, install `openssl` in build/runtime stages so Prisma generates and runs `debian-openssl-3.0.x` engines; otherwise `migrate deploy` can fail at runtime with `libssl.so.1.1` errors.
 - In runtime smoke/deploy scripts, do not hardcode Prisma at `apps/api/node_modules/.bin/prisma`; container layouts vary in monorepos, so resolve Prisma CLI dynamically from the `.pnpm` store (or run through a dedicated migrate service command).
 - In CI/CD healthchecks for new VPS environments, make container-local API health mandatory (`127.0.0.1:4000/health`) and treat public HTTPS checks as a separate probe; otherwise deploys fail due to pending Nginx/TLS rather than app health.
+- If worker jobs spawn system binaries (for example `pdflatex`, `biber`, `bibtex`), those tools must be installed inside the worker runtime image; do not assume host-level packages are available.
+- Add runtime smoke checks for critical worker binaries in CI image validation so missing compilers fail `build-and-push` before deployment.
 - For production container entrypoints, ensure TypeScript build output path is deterministic from clean checkout builds (avoid relying on stale local `dist` artifacts). Align `tsconfig` `rootDir/include` with intended runtime file path.
 - In `docker-compose` command strings, escape shell variables as `$$VAR`; otherwise Compose interpolates `$VAR` at parse-time and can silently pass empty values to runtime commands.
 - If migration history is incomplete (no initial migration in repo), `migrate deploy` on a fresh DB can hard-fail; deploy pipelines need a one-time bootstrap path that initializes schema (`db push`) and baselines `_prisma_migrations` (`migrate resolve`) before normal migrations.

@@ -140,6 +140,10 @@ Manual smoke test:
 3. Open Wiki/Documents/Tasks/Meetings.
 4. In Documents: create/upload/compile/preview.
 
+Note:
+- LaTeX compilation runs inside the `worker` container image.
+- The VPS host does not need a local TeX installation (`pdflatex`, `biber`, etc.).
+
 Live logs:
 
 ```bash

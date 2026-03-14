@@ -401,6 +401,12 @@
 - [x] Adjust `/projects` toolbar styles so invite action aligns with existing controls on desktop/mobile.
 - [x] Validate with `pnpm --filter @doctoral/web build`.
 
+## LaTeX Production Hotfix - Worker toolchain + CD smoke (2026-03-14)
+- [x] Install full TeX toolchain in worker runtime image (`texlive-full`) while keeping existing runtime dependencies.
+- [x] Add worker runtime smoke checks in deploy pipeline (`pdflatex --version`, `biber --version`, `bibtex --version`) to fail early on missing compiler binaries.
+- [x] Update go-live runbook to clarify LaTeX compilation happens inside worker container and does not require host TeX install.
+- [ ] Validate end-to-end via CI `build-and-push` and production compile job after deploy.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.

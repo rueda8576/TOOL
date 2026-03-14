@@ -108,6 +108,9 @@ jobs:
             node "${PRISMA_CLI}" --version
           '
           docker run --rm "${WORKER_IMAGE}:${IMAGE_TAG}" node -e "require('./apps/worker/node_modules/dotenv')"
+          docker run --rm "${WORKER_IMAGE}:${IMAGE_TAG}" pdflatex --version
+          docker run --rm "${WORKER_IMAGE}:${IMAGE_TAG}" biber --version
+          docker run --rm "${WORKER_IMAGE}:${IMAGE_TAG}" bibtex --version
           docker run --rm "${WEB_IMAGE}:${IMAGE_TAG}" node -e "require('./apps/web/node_modules/next/package.json')"
 
   deploy-auto:
