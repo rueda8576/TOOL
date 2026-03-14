@@ -46,7 +46,7 @@ export default function LoginPage(): JSX.Element {
       <section className="panel login-panel">
         <div className="login-header">
           <h1 className="section-heading">Sign in</h1>
-          <p>Use your invited account to access assigned doctoral projects.</p>
+          <p>Use your invited account to access Atlasium.</p>
         </div>
 
         <form className="form-grid" onSubmit={handleSubmit}>

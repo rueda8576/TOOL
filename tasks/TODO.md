@@ -385,6 +385,13 @@
 - [x] Format `Expires at` in readable English (`Intl.DateTimeFormat`) with `Europe/Madrid` timezone.
 - [x] Validate with `pnpm --filter @doctoral/api test` and `pnpm --filter @doctoral/api build`.
 
+## Onboarding UI Cleanup - Atlasium login-first entry (2026-03-14)
+- [x] Simplify `/` to a minimal Atlasium hero with a single `Sign in` CTA.
+- [x] Remove legacy/demo copy and technical showcase cards from the landing screen.
+- [x] Keep login flow logic intact and update `/login` secondary text to Atlasium-neutral wording.
+- [x] Adjust home styles for intentional centered login-first presentation on desktop/mobile.
+- [x] Validate with `pnpm --filter @doctoral/web build`.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -441,3 +448,4 @@
 - 2026-03-09: Added deploy preflight validation for `.env` (`JWT_SECRET` min length) to prevent API crash/restart loops surfacing late in healthcheck.
 - 2026-03-10: Implemented scoped invitations (all current projects or selected projects), added public `/accept-invite` web onboarding page, updated invite emails with accept-link + scope summary, and validated with db generate + API tests/build + web build.
 - 2026-03-10: Refined invitation email copy by removing access/manual API lines and formatting expiry to readable English timezone output for better recipient clarity.
+- 2026-03-14: Cleaned initial onboarding UI to Atlasium login-first mode by removing demo-like landing elements and reducing home entry to a single `Sign in` action.

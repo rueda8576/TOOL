@@ -214,14 +214,18 @@ textarea {
 }
 
 .home-shell {
-  width: min(1120px, calc(100% - 2rem));
-  margin: 2rem auto;
+  min-height: 100vh;
+  width: min(980px, calc(100% - 2rem));
+  margin: 0 auto;
   display: grid;
-  gap: 1rem;
+  place-items: center;
+  padding: 1.5rem 0;
 }
 
 .home-hero {
-  padding: 1.4rem 1.5rem;
+  width: min(640px, 100%);
+  padding: 1.6rem 1.7rem;
+  text-align: center;
 }
 
 .eyebrow {
@@ -234,17 +238,16 @@ textarea {
 }
 
 .lede {
-  margin: 0.8rem 0 0;
+  margin: 0.72rem auto 0;
   color: var(--text-muted);
-  max-width: 70ch;
+  max-width: 45ch;
   line-height: 1.5;
 }
 
 .home-actions {
-  margin-top: 1rem;
+  margin-top: 1.15rem;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.7rem;
+  justify-content: center;
 }
 
 .login-shell {
@@ -1929,8 +1932,8 @@ body.documents-workspace-dragging * {
   }
 
   .home-shell {
-    width: min(1120px, calc(100% - 1rem));
-    margin: 1rem auto;
+    width: min(980px, calc(100% - 1rem));
+    padding: 1rem 0;
   }
 
   .documents-list-row {
