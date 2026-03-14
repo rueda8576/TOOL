@@ -211,6 +211,43 @@ export class DocumentsService {
     return workspaceRelativePath;
   }
 
+  private async materializeDefaultLatexWorkspace(params: {
+    documentVersionId: string;
+  }): Promise<string> {
+    const workspaceRelativePath = `latex-workspaces/${params.documentVersionId}`;
+    const workspaceAbsolutePath = this.workspaceAbsolutePath(workspaceRelativePath);
+    const figuresDirectoryPath = join(workspaceAbsolutePath, "Figures");
+    const mainTexPath = join(workspaceAbsolutePath, "main.tex");
+    const referencesBibPath = join(workspaceAbsolutePath, "references.bib");
+
+    const defaultMainTex = String.raw`\documentclass{article}
+\usepackage{graphicx}
+\graphicspath{{Figures/}}
+
+\title{Untitled Document}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+
+Start writing here.
+
+\end{document}
+`;
+
+    const defaultReferencesBib = `% Add bibliography entries here.\n`;
+
+    await mkdir(workspaceAbsolutePath, { recursive: true });
+    await mkdir(figuresDirectoryPath, { recursive: true });
+    await writeFile(mainTexPath, defaultMainTex, "utf8");
+    await writeFile(referencesBibPath, defaultReferencesBib, "utf8");
+
+    return workspaceRelativePath;
+  }
+
   private mapVersionSummary(version: {
     id: string;
     versionNumber: number;
@@ -539,6 +576,7 @@ export class DocumentsService {
     const latexFiles = files.latexFiles ?? [];
     const latexPaths = this.parseLatexPaths(dto.latexPaths);
     const usingLatexFolder = latexFiles.length > 0;
+    const usingBlankWorkspace = !pdfUpload && !latexBundleUpload && !usingLatexFolder;
 
     if (latexPaths && !usingLatexFolder) {
       throw new BadRequestException("latexPaths can only be provided with latexFiles");
@@ -558,10 +596,6 @@ export class DocumentsService {
       throw new BadRequestException("Provide either latexBundle or latexFiles, not both");
     }
 
-    if (!pdfUpload && !latexBundleUpload && !usingLatexFolder) {
-      throw new BadRequestException("At least one file is required: pdf or latexBundle or latexFiles");
-    }
-
     const [pdfFile, latexBundle] = await Promise.all([
       pdfUpload ? this.storageService.saveUpload(pdfUpload, user.userId) : Promise.resolve(null),
       latexBundleUpload ? this.storageService.saveUpload(latexBundleUpload, user.userId) : Promise.resolve(null)
@@ -576,7 +610,7 @@ export class DocumentsService {
         latexEntryFile: dto.latexEntryFile ?? "main.tex",
         pdfFileId: pdfFile?.id,
         latexBundleFileId: latexBundle?.id,
-        compileStatus: latexBundle || usingLatexFolder ? CompileStatus.PENDING : CompileStatus.SUCCEEDED,
+        compileStatus: latexBundle || usingLatexFolder || usingBlankWorkspace ? CompileStatus.PENDING : CompileStatus.SUCCEEDED,
         createdById: user.userId
       },
       select: {
@@ -599,6 +633,10 @@ export class DocumentsService {
         documentVersionId: createdVersion.id,
         latexFiles,
         latexPaths: normalizedLatexPaths
+      });
+    } else if (usingBlankWorkspace && createdVersion.id) {
+      latexWorkspacePath = await this.materializeDefaultLatexWorkspace({
+        documentVersionId: createdVersion.id
       });
     }
 

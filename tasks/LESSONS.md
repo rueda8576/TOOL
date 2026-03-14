@@ -55,6 +55,7 @@
 - For editor↔PDF interactions, use a same-origin `postMessage` contract with explicit `type` payloads and strict origin checks in both parent and iframe.
 - For reliable PDF word-level interactions, render PDF.js text layers (not just canvas) and implement highlight/scroll behavior over text spans instead of trying to map canvas pixels.
 - For PDF zoom UX, intercept `Ctrl/Cmd+wheel` and `Ctrl/Cmd +/-/0` inside the iframe viewer itself; never bind these globally in the parent page or you risk hijacking browser page zoom.
+- In Monaco-controlled editors, avoid full data reloads after compile/status refresh on the same document version; resetting the controlled `value` can wipe undo/redo history and break `Ctrl/Cmd+Z`.
 
 ## Monaco integration
 - In Monaco-based editors, keep business shortcuts (`save+compile`, tree toggle) wired via editor actions so focus context is respected and browser defaults do not leak in.

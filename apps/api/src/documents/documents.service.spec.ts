@@ -1,5 +1,8 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { CompileStatus, DocumentType } from "@prisma/client";
+import { mkdtemp, readdir, readFile } from "fs/promises";
+import { tmpdir } from "os";
+import { join, resolve } from "path";
 
 import { DocumentsService } from "./documents.service";
 
@@ -210,20 +213,75 @@ describe("DocumentsService", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("requires at least one source file for version creation", async () => {
-    const { service } = createService();
+  it("creates blank latex workspace when no source files are provided", async () => {
+    const { service, prisma } = createService();
+    prisma.documentVersion.create.mockResolvedValue({
+      id: "v2",
+      documentId: "d1",
+      branchId: "b1",
+      versionNumber: 2,
+      compileStatus: CompileStatus.PENDING
+    });
+    prisma.documentVersion.update.mockResolvedValue({
+      id: "v2",
+      documentId: "d1",
+      branchId: "b1",
+      versionNumber: 2,
+      compileStatus: CompileStatus.PENDING
+    });
 
-    await expect(
-      service.createVersion(
-        "d1",
-        {},
-        {},
-        {
-          userId: "u1",
-          email: "u1@example.com",
-          globalRole: "editor"
-        }
-      )
-    ).rejects.toBeInstanceOf(BadRequestException);
+    const workspaceSpy = jest
+      .spyOn(service as any, "materializeDefaultLatexWorkspace")
+      .mockResolvedValue("latex-workspaces/v2");
+
+    const result = await service.createVersion(
+      "d1",
+      {},
+      {},
+      {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(workspaceSpy).toHaveBeenCalledWith({
+      documentVersionId: "v2"
+    });
+    expect(prisma.documentVersion.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          compileStatus: CompileStatus.PENDING
+        })
+      })
+    );
+    expect(result).toEqual({
+      id: "v2",
+      documentId: "d1",
+      branchId: "b1",
+      versionNumber: 2,
+      compileStatus: CompileStatus.PENDING
+    });
+  });
+
+  it("materializes ultra-minimal default latex workspace files", async () => {
+    const { service } = createService();
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-docs-"));
+    (service as any).storageRoot = storageRoot;
+
+    const relativePath = await (service as any).materializeDefaultLatexWorkspace({
+      documentVersionId: "version-blank"
+    });
+
+    const workspaceAbsolute = resolve(storageRoot, relativePath);
+    const mainTex = await readFile(join(workspaceAbsolute, "main.tex"), "utf8");
+    const referencesBib = await readFile(join(workspaceAbsolute, "references.bib"), "utf8");
+    const entries = await readdir(workspaceAbsolute);
+
+    expect(relativePath).toBe("latex-workspaces/version-blank");
+    expect(mainTex).toContain("\\documentclass{article}");
+    expect(mainTex).toContain("\\graphicspath{{Figures/}}");
+    expect(referencesBib).toContain("% Add bibliography entries here.");
+    expect(entries).toContain("Figures");
   });
 });

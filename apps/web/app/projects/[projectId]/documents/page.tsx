@@ -171,11 +171,6 @@ export default function ProjectDocumentsPage({
       return;
     }
 
-    if (!pdfFile && latexFiles.length === 0) {
-      setError("Upload at least one source: PDF and/or LaTeX folder.");
-      return;
-    }
-
     setSubmitting(true);
     setError(null);
     setSuccess(null);
@@ -360,6 +355,10 @@ export default function ProjectDocumentsPage({
             {latexFiles.length > 0 ? (
               <p className="alert alert-info">Selected {latexFiles.length} LaTeX files from folder upload.</p>
             ) : null}
+            <p className="documents-list-meta">
+              If you upload nothing, Atlasium creates a blank LaTeX workspace with <code>main.tex</code>, <code>references.bib</code>,
+              and a <code>Figures/</code> folder.
+            </p>
             <div className="task-form-actions">
               <button className="button" type="submit" disabled={isReader || submitting}>
                 {submitting ? "Creating..." : "Create document"}

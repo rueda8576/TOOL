@@ -407,6 +407,14 @@
 - [x] Update go-live runbook to clarify LaTeX compilation happens inside worker container and does not require host TeX install.
 - [ ] Validate end-to-end via CI `build-and-push` and production compile job after deploy.
 
+## Documents vNext - Undo-safe compile refresh + blank LaTeX version (2026-03-14)
+- [x] Prevent Monaco undo-history reset after compile by avoiding full document reload when compile finishes on the same version.
+- [x] Allow creating document versions without uploaded files and auto-create default LaTeX workspace (`main.tex`, `references.bib`, `Figures/`).
+- [x] Keep existing upload validations (`latexPaths`, `latexBundle` vs `latexFiles`) unchanged.
+- [x] Update documents UI forms (`New document`, `Upload initial version`) to allow blank creation and explain default scaffold behavior.
+- [x] Replace API test that required source file with blank-version creation coverage and add scaffold materialization test.
+- [x] Validate with `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, and `pnpm --filter @doctoral/web build`.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -465,3 +473,4 @@
 - 2026-03-10: Refined invitation email copy by removing access/manual API lines and formatting expiry to readable English timezone output for better recipient clarity.
 - 2026-03-14: Cleaned initial onboarding UI to Atlasium login-first mode by removing demo-like landing elements and reducing home entry to a single `Sign in` action.
 - 2026-03-14: Completed visible rebrand from `WorkMesh` to `Atlasium` in shell/layout metadata and made `/projects` admin invite panel collapsible by default behind an `Invite user` toolbar action.
+- 2026-03-14: Improved Documents by preserving Monaco undo/redo history after compile refresh and enabling blank LaTeX version scaffolding (`main.tex`, `references.bib`, `Figures/`) from both creation flows.

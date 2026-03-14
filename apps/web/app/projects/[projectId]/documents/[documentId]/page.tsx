@@ -399,6 +399,35 @@ export default function DocumentDetailPage({
     [loadLatexWorkspace, loadPdfPreview, params.documentId, params.projectId, updatePdfUrl]
   );
 
+  const refreshDocumentAfterCompile = useCallback(
+    async (authToken: string, previousVersionId: string): Promise<void> => {
+      try {
+        const detail = await getProjectDocument(params.projectId, params.documentId, authToken);
+        setDocumentDetail(detail);
+        setCompileStatus(detail.latestMainVersion?.compileStatus ?? null);
+
+        if (!detail.latestMainVersion) {
+          updatePdfUrl(null);
+          setLatexTree([]);
+          setSelectedLatexPath("");
+          setLatexContent("");
+          setSavedLatexContent("");
+          setCompileLog(null);
+          return;
+        }
+
+        await loadPdfPreview(detail.latestMainVersion, authToken);
+
+        if (detail.latestMainVersion.id !== previousVersionId) {
+          await loadLatexWorkspace(detail.latestMainVersion, authToken);
+        }
+      } catch (detailError) {
+        setError((detailError as Error).message);
+      }
+    },
+    [loadLatexWorkspace, loadPdfPreview, params.documentId, params.projectId, updatePdfUrl]
+  );
+
   useEffect(() => {
     const folderInput = firstVersionFolderInputRef.current;
     if (!folderInput) {
@@ -650,7 +679,7 @@ export default function DocumentDetailPage({
         }
       }
 
-      await loadDocumentDetail(token);
+      await refreshDocumentAfterCompile(token, currentVersion.id);
       if (finalLog) {
         setCompileStatus(finalLog.compileStatus);
         setCompileLog(finalLog.compileLog);
@@ -662,7 +691,7 @@ export default function DocumentDetailPage({
     } finally {
       setCompileBusy(false);
     }
-  }, [currentVersion, isReader, loadDocumentDetail, token]);
+  }, [currentVersion, isReader, refreshDocumentAfterCompile, token]);
 
   const runSaveThenCompile = useCallback(async (): Promise<void> => {
     if (savingLatexFile || compileBusy) {
@@ -982,11 +1011,6 @@ export default function DocumentDetailPage({
       return;
     }
 
-    if (!firstVersionPdfFile && firstVersionLatexFiles.length === 0) {
-      setError("Upload at least one source: PDF and/or LaTeX folder.");
-      return;
-    }
-
     setSubmittingFirstVersion(true);
     setError(null);
     setSuccess(null);
@@ -1097,6 +1121,10 @@ export default function DocumentDetailPage({
             {firstVersionLatexFiles.length > 0 ? (
               <p className="alert alert-info">Selected {firstVersionLatexFiles.length} LaTeX files for first version.</p>
             ) : null}
+            <p className="documents-list-meta">
+              If you upload nothing, Atlasium creates a blank LaTeX workspace with <code>main.tex</code>, <code>references.bib</code>,
+              and a <code>Figures/</code> folder.
+            </p>
             <button className="button" type="submit" disabled={isReader || submittingFirstVersion}>
               {submittingFirstVersion ? "Uploading..." : "Upload first version"}
             </button>
