@@ -80,6 +80,7 @@ export default function ProjectsPage(): JSX.Element {
   const [listError, setListError] = useState<string | null>(null);
   const [orderBy, setOrderBy] = useState<ProjectOrderBy>("newest");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [projectKey, setProjectKey] = useState("");
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
@@ -308,6 +309,19 @@ export default function ProjectsPage(): JSX.Element {
                 <option value="name">Name</option>
               </select>
             </label>
+            {isAdmin ? (
+              <button
+                className="button button-secondary projects-invite-toggle-button"
+                type="button"
+                onClick={() => {
+                  setInviteSuccess(null);
+                  setInviteError(null);
+                  setIsInviteOpen((current) => !current);
+                }}
+              >
+                {isInviteOpen ? "Close invite" : "Invite user"}
+              </button>
+            ) : null}
             <button
               className="button"
               type="button"
@@ -374,7 +388,7 @@ export default function ProjectsPage(): JSX.Element {
           </div>
         ) : null}
 
-        {isAdmin ? (
+        {isAdmin && isInviteOpen ? (
           <div className="projects-create-collapsible projects-invite-panel">
             <h3 className="section-heading">Invite user</h3>
             <form className="form-grid" onSubmit={onSendInvite}>

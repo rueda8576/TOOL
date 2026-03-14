@@ -27,19 +27,19 @@ export function AppShell({
   const router = useRouter();
   const pathname = usePathname();
   const [exitBusy, setExitBusy] = useState(false);
-  const [brandTitle, setBrandTitle] = useState("WorkMesh");
+  const [brandTitle, setBrandTitle] = useState("Atlasium");
 
   useEffect(() => {
     let active = true;
 
     if (!projectId) {
-      setBrandTitle("WorkMesh");
+      setBrandTitle("Atlasium");
       return () => {
         active = false;
       };
     }
 
-    setBrandTitle("WorkMesh");
+    setBrandTitle("Atlasium");
     const token = localStorage.getItem("doctoral_token");
     if (!token) {
       return () => {
@@ -53,11 +53,11 @@ export function AppShell({
           return;
         }
         const current = projects.find((project) => project.id === projectId);
-        setBrandTitle(current?.key ?? "WorkMesh");
+        setBrandTitle(current?.key ?? "Atlasium");
       })
       .catch(() => {
         if (active) {
-          setBrandTitle("WorkMesh");
+          setBrandTitle("Atlasium");
         }
       });
 

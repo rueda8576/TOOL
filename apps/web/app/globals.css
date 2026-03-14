@@ -410,6 +410,10 @@ textarea {
   gap: 0.7rem;
 }
 
+.projects-invite-toggle-button {
+  min-width: 112px;
+}
+
 .projects-order-control {
   display: grid;
   gap: 0.34rem;

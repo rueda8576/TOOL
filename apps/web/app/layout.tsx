@@ -8,8 +8,8 @@ const heading = Space_Grotesk({ subsets: ["latin"], variable: "--font-heading" }
 const body = Source_Serif_4({ subsets: ["latin"], variable: "--font-body" });
 
 export const metadata: Metadata = {
-  title: "WorkMesh",
-  description: "WorkMesh collaboration workspace"
+  title: "Atlasium",
+  description: "Atlasium collaboration workspace"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }): JSX.Element {

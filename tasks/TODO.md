@@ -392,6 +392,15 @@
 - [x] Adjust home styles for intentional centered login-first presentation on desktop/mobile.
 - [x] Validate with `pnpm --filter @doctoral/web build`.
 
+## Web UI vNext - Atlasium rebrand + collapsible invite panel (2026-03-14)
+- [x] Replace visible fallback branding from `WorkMesh` to `Atlasium` in `AppShell` while keeping `project.key` in project context.
+- [x] Update web `metadata.title` and `metadata.description` to Atlasium naming.
+- [x] Add admin-only `Invite user` toggle button in `/projects` toolbar and keep invite form hidden by default.
+- [x] Show invite panel only when opened and preserve current invite validation/submission logic.
+- [x] Keep invite panel open after successful send (no auto-close).
+- [x] Adjust `/projects` toolbar styles so invite action aligns with existing controls on desktop/mobile.
+- [x] Validate with `pnpm --filter @doctoral/web build`.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -449,3 +458,4 @@
 - 2026-03-10: Implemented scoped invitations (all current projects or selected projects), added public `/accept-invite` web onboarding page, updated invite emails with accept-link + scope summary, and validated with db generate + API tests/build + web build.
 - 2026-03-10: Refined invitation email copy by removing access/manual API lines and formatting expiry to readable English timezone output for better recipient clarity.
 - 2026-03-14: Cleaned initial onboarding UI to Atlasium login-first mode by removing demo-like landing elements and reducing home entry to a single `Sign in` action.
+- 2026-03-14: Completed visible rebrand from `WorkMesh` to `Atlasium` in shell/layout metadata and made `/projects` admin invite panel collapsible by default behind an `Invite user` toolbar action.
