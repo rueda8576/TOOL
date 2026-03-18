@@ -13,16 +13,19 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
+    "katex": "^0.16.11",
     "monaco-editor": "^0.52.2",
     "next": "^14.2.20",
     "pdfjs-dist": "3.11.174",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "katex": "^0.16.11",
-    "rehype-katex": "^7.0.1",
     "react-markdown": "^9.1.0",
+    "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
-    "remark-math": "^6.0.0"
+    "remark-math": "^6.0.0",
+    "y-monaco": "^0.1.6",
+    "y-websocket": "^3.0.0",
+    "yjs": "^13.6.30"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

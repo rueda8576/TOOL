@@ -741,7 +741,67 @@ textarea.input {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
   gap: 0.55rem;
+}
+
+.documents-collaborators {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  margin-right: 0.25rem;
+}
+
+.documents-collaborator-pill {
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.documents-collaborator-pill-self {
+  box-shadow:
+    0 0 0 2px rgba(31, 79, 143, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.38);
+}
+
+.documents-collaborator-more {
+  min-width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.28rem;
+}
+
+.documents-realtime-status {
+  border: 1px solid #d1d8e5;
+  border-radius: 999px;
+  background: #f5f6f8;
+  color: #4b5569;
+  font-size: 0.73rem;
+  font-weight: 700;
+  padding: 0.16rem 0.5rem;
+}
+
+.documents-realtime-status-live {
+  border-color: #9ad0b0;
+  background: #e9f8ef;
+  color: #1f6c3b;
 }
 
 .documents-list-row {

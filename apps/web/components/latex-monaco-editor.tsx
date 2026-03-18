@@ -36,6 +36,7 @@ const WORD_CHAR_PATTERN = /[A-Za-z0-9_]/;
 export type LatexMonacoEditorHandle = {
   focus: () => void;
   highlightWord: (word: string, durationMs?: number) => void;
+  getEditor: () => MonacoEditorApi.IStandaloneCodeEditor | null;
 };
 
 type LatexMonacoEditorProps = {
@@ -49,6 +50,8 @@ type LatexMonacoEditorProps = {
   onWordDoubleClick?: (word: string) => void;
   onSaveShortcut?: () => void;
   onToggleTreeShortcut?: () => void;
+  onEditorReady?: (editor: MonacoEditorApi.IStandaloneCodeEditor) => void;
+  onEditorDispose?: () => void;
 };
 
 function clampEditorFontSize(nextSize: number): number {
@@ -126,7 +129,9 @@ export const LatexMonacoEditor = forwardRef<LatexMonacoEditorHandle, LatexMonaco
     onFocusChange,
     onWordDoubleClick,
     onSaveShortcut,
-    onToggleTreeShortcut
+    onToggleTreeShortcut,
+    onEditorReady,
+    onEditorDispose
   },
   ref
 ): JSX.Element {
@@ -137,6 +142,8 @@ export const LatexMonacoEditor = forwardRef<LatexMonacoEditorHandle, LatexMonaco
   const onWordDoubleClickRef = useRef<typeof onWordDoubleClick>(onWordDoubleClick);
   const onSaveShortcutRef = useRef<typeof onSaveShortcut>(onSaveShortcut);
   const onToggleTreeShortcutRef = useRef<typeof onToggleTreeShortcut>(onToggleTreeShortcut);
+  const onEditorReadyRef = useRef<typeof onEditorReady>(onEditorReady);
+  const onEditorDisposeRef = useRef<typeof onEditorDispose>(onEditorDispose);
   const highlightDecorationIdsRef = useRef<string[]>([]);
   const highlightTimeoutRef = useRef<number | null>(null);
   const [fontSizePx, setFontSizePx] = useState<number>(DEFAULT_EDITOR_FONT_SIZE_PX);
@@ -223,7 +230,8 @@ export const LatexMonacoEditor = forwardRef<LatexMonacoEditorHandle, LatexMonaco
       focus: () => {
         editorRef.current?.focus();
       },
-      highlightWord
+      highlightWord,
+      getEditor: () => editorRef.current
     }),
     [highlightWord]
   );
@@ -258,12 +266,21 @@ export const LatexMonacoEditor = forwardRef<LatexMonacoEditorHandle, LatexMonaco
     onToggleTreeShortcutRef.current = onToggleTreeShortcut;
   }, [onToggleTreeShortcut]);
 
+  useEffect(() => {
+    onEditorReadyRef.current = onEditorReady;
+  }, [onEditorReady]);
+
+  useEffect(() => {
+    onEditorDisposeRef.current = onEditorDispose;
+  }, [onEditorDispose]);
+
   useEffect(
     () => () => {
       if (highlightTimeoutRef.current !== null) {
         window.clearTimeout(highlightTimeoutRef.current);
         highlightTimeoutRef.current = null;
       }
+      onEditorDisposeRef.current?.();
     },
     []
   );
@@ -427,6 +444,8 @@ export const LatexMonacoEditor = forwardRef<LatexMonacoEditorHandle, LatexMonaco
 
         onWordDoubleClickRef.current?.(normalizedWord);
       });
+
+      onEditorReadyRef.current?.(editor);
     },
     [applyFontSize, disabled, language, readOnly]
   );

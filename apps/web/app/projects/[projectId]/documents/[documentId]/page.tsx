@@ -13,13 +13,24 @@ import {
   useState
 } from "react";
 import { useRouter } from "next/navigation";
+import type { editor as MonacoEditorApi } from "monaco-editor";
+import { MonacoBinding } from "y-monaco";
+import { WebsocketProvider } from "y-websocket";
+import * as Y from "yjs";
 
 import { AppShell } from "../../../../../components/app-shell";
 import {
   LatexMonacoEditor,
   LatexMonacoEditorHandle
 } from "../../../../../components/latex-monaco-editor";
-import { LoginResponse } from "../../../../../lib/client-api";
+import { API_BASE_URL, LoginResponse } from "../../../../../lib/client-api";
+import {
+  buildCollaboratorIdentity,
+  CollaboratorIdentity,
+  CollaboratorPresence,
+  listCollaboratorsFromAwareness,
+  resolveCollaborationServerUrl
+} from "../../../../../lib/documents-collaboration";
 import {
   compileDocumentVersion,
   createDocumentVersionUpload,
@@ -47,6 +58,8 @@ const DOCUMENT_SPLIT_MIN_VIEWPORT_PX = 768;
 const DOCUMENT_PDF_HIGHLIGHT_EVENT = "doctoral:pdf-highlight-word";
 const DOCUMENT_PDF_WORD_PICKED_EVENT = "doctoral:pdf-word-picked";
 const DOCUMENT_WORD_HIGHLIGHT_DURATION_MS = 1500;
+const DOCUMENT_COLLAB_TEXT_KEY = "content";
+const DOCUMENT_COLLAB_AUTOSAVE_MS = 3000;
 
 function clampLeftPaneWidth(nextWidth: number, containerWidth: number, fixedColumnsWidth: number): number {
   const availableWidth = containerWidth - fixedColumnsWidth;
@@ -253,7 +266,15 @@ export default function DocumentDetailPage({
   const editorPaneRef = useRef<HTMLElement>(null);
   const splitDragStartRef = useRef<{ clientX: number; leftWidth: number } | null>(null);
   const autoCompileVersionRef = useRef<string | null>(null);
+  const fileCollabProviderRef = useRef<WebsocketProvider | null>(null);
+  const fileCollabDocRef = useRef<Y.Doc | null>(null);
+  const fileCollabBindingRef = useRef<MonacoBinding | null>(null);
+  const presenceCollabProviderRef = useRef<WebsocketProvider | null>(null);
+  const presenceCollabDocRef = useRef<Y.Doc | null>(null);
+  const monacoInstanceRef = useRef<MonacoEditorApi.IStandaloneCodeEditor | null>(null);
+  const autosaveMarkerTimerRef = useRef<number | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [sessionUser, setSessionUser] = useState<LoginResponse["user"] | null>(null);
   const [userRole, setUserRole] = useState<LoginResponse["user"]["globalRole"] | null>(null);
   const [documentDetail, setDocumentDetail] = useState<DocumentDetail | null>(null);
   const [loadingDocument, setLoadingDocument] = useState(true);
@@ -284,8 +305,13 @@ export default function DocumentDetailPage({
   const [leftPaneWidthPx, setLeftPaneWidthPx] = useState<number | null>(null);
   const [splitPreferenceLoaded, setSplitPreferenceLoaded] = useState(false);
   const [isDraggingSplitter, setIsDraggingSplitter] = useState(false);
+  const [collaborators, setCollaborators] = useState<CollaboratorPresence[]>([]);
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+  const [monacoReadyTick, setMonacoReadyTick] = useState(0);
 
   const isReader = userRole === "reader";
+  const collaborationServerUrl = useMemo(() => resolveCollaborationServerUrl(API_BASE_URL), []);
+  const collaboratorIdentity = useMemo<CollaboratorIdentity | null>(() => buildCollaboratorIdentity(sessionUser), [sessionUser]);
 
   const updatePdfUrl = useCallback((nextUrl: string | null): void => {
     setPdfUrl((currentUrl) => {
@@ -294,6 +320,52 @@ export default function DocumentDetailPage({
       }
       return nextUrl;
     });
+  }, []);
+
+  const destroyFileCollaboration = useCallback((): void => {
+    if (autosaveMarkerTimerRef.current !== null) {
+      window.clearTimeout(autosaveMarkerTimerRef.current);
+      autosaveMarkerTimerRef.current = null;
+    }
+
+    const existingBinding = fileCollabBindingRef.current;
+    if (existingBinding) {
+      existingBinding.destroy();
+      fileCollabBindingRef.current = null;
+    }
+
+    const existingProvider = fileCollabProviderRef.current;
+    if (existingProvider) {
+      existingProvider.awareness.setLocalState(null);
+      existingProvider.destroy();
+      fileCollabProviderRef.current = null;
+    }
+
+    const existingDoc = fileCollabDocRef.current;
+    if (existingDoc) {
+      existingDoc.destroy();
+      fileCollabDocRef.current = null;
+    }
+
+    setIsRealtimeConnected(false);
+    setLoadingLatexFile(false);
+  }, []);
+
+  const destroyPresenceCollaboration = useCallback((): void => {
+    const existingProvider = presenceCollabProviderRef.current;
+    if (existingProvider) {
+      existingProvider.awareness.setLocalState(null);
+      existingProvider.destroy();
+      presenceCollabProviderRef.current = null;
+    }
+
+    const existingDoc = presenceCollabDocRef.current;
+    if (existingDoc) {
+      existingDoc.destroy();
+      presenceCollabDocRef.current = null;
+    }
+
+    setCollaborators([]);
   }, []);
 
   const loadPdfPreview = useCallback(
@@ -496,14 +568,18 @@ export default function DocumentDetailPage({
     }
 
     setToken(storedToken);
-    setUserRole(parseStoredUser(localStorage.getItem("doctoral_user"))?.globalRole ?? null);
+    const parsedUser = parseStoredUser(localStorage.getItem("doctoral_user"));
+    setSessionUser(parsedUser);
+    setUserRole(parsedUser?.globalRole ?? null);
     void loadDocumentDetail(storedToken);
   }, [loadDocumentDetail, router]);
 
   useEffect(() => {
     setIsEditorOpen(false);
     autoCompileVersionRef.current = null;
-  }, [params.documentId]);
+    destroyFileCollaboration();
+    destroyPresenceCollaboration();
+  }, [destroyFileCollaboration, destroyPresenceCollaboration, params.documentId]);
 
   useEffect(
     () => () => {
@@ -545,6 +621,214 @@ export default function DocumentDetailPage({
       latexContent !== savedLatexContent,
     [hasEditableLatex, latexContent, savedLatexContent, selectedLatexPath, showLatexWorkspace]
   );
+  const visibleCollaborators = useMemo(() => collaborators.slice(0, 6), [collaborators]);
+  const hiddenCollaboratorsCount = useMemo(
+    () => Math.max(collaborators.length - visibleCollaborators.length, 0),
+    [collaborators.length, visibleCollaborators.length]
+  );
+
+  useEffect(() => {
+    if (!token || !collaboratorIdentity) {
+      destroyPresenceCollaboration();
+      return;
+    }
+
+    destroyPresenceCollaboration();
+
+    const presenceDoc = new Y.Doc();
+    const presenceProvider = new WebsocketProvider(collaborationServerUrl, `presence-${params.documentId}`, presenceDoc, {
+      connect: true,
+      disableBc: true,
+      params: {
+        token,
+        kind: "presence",
+        documentId: params.documentId
+      }
+    });
+
+    presenceCollabDocRef.current = presenceDoc;
+    presenceCollabProviderRef.current = presenceProvider;
+
+    const syncCollaborators = (): void => {
+      const states = presenceProvider.awareness.getStates() as Map<number, Record<string, unknown>>;
+      setCollaborators(listCollaboratorsFromAwareness(states, collaboratorIdentity.id));
+    };
+
+    const onAwarenessUpdate = (): void => {
+      syncCollaborators();
+    };
+
+    presenceProvider.awareness.on("update", onAwarenessUpdate);
+    presenceProvider.awareness.setLocalState({
+      user: collaboratorIdentity,
+      activePath: null,
+      updatedAt: Date.now()
+    });
+    syncCollaborators();
+
+    return () => {
+      presenceProvider.awareness.off("update", onAwarenessUpdate);
+      destroyPresenceCollaboration();
+    };
+  }, [
+    collaboratorIdentity,
+    collaborationServerUrl,
+    destroyPresenceCollaboration,
+    params.documentId,
+    token
+  ]);
+
+  useEffect(() => {
+    const presenceProvider = presenceCollabProviderRef.current;
+    if (!presenceProvider || !collaboratorIdentity) {
+      return;
+    }
+
+    presenceProvider.awareness.setLocalState({
+      user: collaboratorIdentity,
+      activePath: showLatexWorkspace ? selectedLatexPath || null : null,
+      updatedAt: Date.now()
+    });
+  }, [collaboratorIdentity, selectedLatexPath, showLatexWorkspace]);
+
+  useEffect(() => {
+    if (!showLatexWorkspace || !token || !currentVersion || !selectedLatexPath || !collaboratorIdentity) {
+      destroyFileCollaboration();
+      return;
+    }
+
+    destroyFileCollaboration();
+    setLoadingLatexFile(true);
+
+    const fileDoc = new Y.Doc();
+    const fileProvider = new WebsocketProvider(collaborationServerUrl, `file-${currentVersion.id}`, fileDoc, {
+      connect: true,
+      disableBc: true,
+      params: {
+        token,
+        kind: "file",
+        documentVersionId: currentVersion.id,
+        path: selectedLatexPath
+      }
+    });
+
+    fileCollabDocRef.current = fileDoc;
+    fileCollabProviderRef.current = fileProvider;
+
+    const yText = fileDoc.getText(DOCUMENT_COLLAB_TEXT_KEY);
+    let initializedFromRoom = false;
+    const syncFromSharedDoc = (): void => {
+      const nextContent = yText.toString();
+      setLatexContent(nextContent);
+      if (!initializedFromRoom) {
+        setSavedLatexContent(nextContent);
+        initializedFromRoom = true;
+      }
+      setLoadingLatexFile(false);
+    };
+
+    const onSharedTextUpdate = (): void => {
+      syncFromSharedDoc();
+    };
+
+    const onConnectionStatus = (event: { status: "connected" | "disconnected" | "connecting" }): void => {
+      setIsRealtimeConnected(event.status === "connected");
+    };
+
+    yText.observe(onSharedTextUpdate);
+    fileProvider.on("status", onConnectionStatus);
+    fileProvider.awareness.setLocalState({
+      user: collaboratorIdentity,
+      activePath: selectedLatexPath,
+      updatedAt: Date.now()
+    });
+    syncFromSharedDoc();
+
+    return () => {
+      yText.unobserve(onSharedTextUpdate);
+      fileProvider.off("status", onConnectionStatus);
+      destroyFileCollaboration();
+    };
+  }, [
+    collaboratorIdentity,
+    collaborationServerUrl,
+    currentVersion?.id,
+    destroyFileCollaboration,
+    selectedLatexPath,
+    showLatexWorkspace,
+    token
+  ]);
+
+  useEffect(() => {
+    const editor = monacoInstanceRef.current;
+    const fileProvider = fileCollabProviderRef.current;
+    const fileDoc = fileCollabDocRef.current;
+    if (!showLatexWorkspace || !editor || !fileProvider || !fileDoc) {
+      return;
+    }
+
+    const model = editor.getModel();
+    if (!model) {
+      return;
+    }
+
+    const existingBinding = fileCollabBindingRef.current;
+    if (existingBinding) {
+      existingBinding.destroy();
+      fileCollabBindingRef.current = null;
+    }
+
+    const binding = new MonacoBinding(fileDoc.getText(DOCUMENT_COLLAB_TEXT_KEY), model, new Set([editor]), fileProvider.awareness);
+    fileCollabBindingRef.current = binding;
+
+    return () => {
+      if (fileCollabBindingRef.current === binding) {
+        binding.destroy();
+        fileCollabBindingRef.current = null;
+      } else {
+        binding.destroy();
+      }
+    };
+  }, [currentVersion?.id, monacoReadyTick, selectedLatexPath, showLatexWorkspace]);
+
+  useEffect(() => {
+    const fileProvider = fileCollabProviderRef.current;
+    if (!fileProvider || !showLatexWorkspace || isReader || !selectedLatexPath || latexContent === savedLatexContent) {
+      if (autosaveMarkerTimerRef.current !== null) {
+        window.clearTimeout(autosaveMarkerTimerRef.current);
+        autosaveMarkerTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (autosaveMarkerTimerRef.current !== null) {
+      window.clearTimeout(autosaveMarkerTimerRef.current);
+    }
+
+    autosaveMarkerTimerRef.current = window.setTimeout(() => {
+      setSavedLatexContent(latexContent);
+      if (!compileBusy) {
+        setCompileStatus("pending");
+      }
+      autosaveMarkerTimerRef.current = null;
+    }, DOCUMENT_COLLAB_AUTOSAVE_MS + 250);
+
+    return () => {
+      if (autosaveMarkerTimerRef.current !== null) {
+        window.clearTimeout(autosaveMarkerTimerRef.current);
+        autosaveMarkerTimerRef.current = null;
+      }
+    };
+  }, [compileBusy, isReader, latexContent, savedLatexContent, selectedLatexPath, showLatexWorkspace]);
+
+  useEffect(
+    () => () => {
+      destroyFileCollaboration();
+      destroyPresenceCollaboration();
+    },
+    [destroyFileCollaboration, destroyPresenceCollaboration]
+  );
+
   const { requestExitProject } = useUnsavedChangesGuard({
     isDirty: hasUnsavedLatexChanges,
     confirmMessage: "You have unsaved LaTeX changes. Exit project anyway?"
@@ -985,6 +1269,12 @@ export default function DocumentDetailPage({
               if (!token || !currentVersion) {
                 return;
               }
+              if (showLatexWorkspace) {
+                setSelectedLatexPath(node.path);
+                setLoadingLatexFile(true);
+                setError(null);
+                return;
+              }
               void loadLatexFileContent(currentVersion.id, node.path, token);
             }}
           >
@@ -995,7 +1285,7 @@ export default function DocumentDetailPage({
           </button>
         );
       }),
-    [currentVersion, expandedFolders, loadLatexFileContent, selectedLatexPath, toggleFolder, token]
+    [currentVersion, expandedFolders, loadLatexFileContent, selectedLatexPath, showLatexWorkspace, toggleFolder, token]
   );
 
   const createFirstVersion = async (event: FormEvent): Promise<void> => {
@@ -1059,6 +1349,30 @@ export default function DocumentDetailPage({
           )}
         </div>
         <div className="documents-detail-actions">
+          <div className="documents-collaborators" aria-live="polite" aria-label="Collaborators in this document">
+            {visibleCollaborators.map((collaborator) => (
+              <span
+                key={`${collaborator.id}-${collaborator.clientId}`}
+                className={collaborator.isSelf ? "documents-collaborator-pill documents-collaborator-pill-self" : "documents-collaborator-pill"}
+                style={{ backgroundColor: collaborator.color, borderColor: collaborator.color }}
+                title={
+                  collaborator.activePath
+                    ? `${collaborator.name} editing ${collaborator.activePath}`
+                    : `${collaborator.name} viewing`
+                }
+              >
+                {collaborator.initials}
+              </span>
+            ))}
+            {hiddenCollaboratorsCount > 0 ? (
+              <span className="documents-collaborator-more" title={`${hiddenCollaboratorsCount} more collaborators`}>
+                +{hiddenCollaboratorsCount}
+              </span>
+            ) : null}
+            <span className={isRealtimeConnected ? "documents-realtime-status documents-realtime-status-live" : "documents-realtime-status"}>
+              {isRealtimeConnected ? "Live" : "Offline"}
+            </span>
+          </div>
           {hasLatex ? (
             <button
               className={showLatexWorkspace ? "button button-secondary" : "button"}
@@ -1214,6 +1528,14 @@ export default function DocumentDetailPage({
                         return;
                       }
                       toggleTreeCollapsed();
+                    }}
+                    onEditorReady={(editor) => {
+                      monacoInstanceRef.current = editor;
+                      setMonacoReadyTick((current) => current + 1);
+                    }}
+                    onEditorDispose={() => {
+                      monacoInstanceRef.current = null;
+                      setMonacoReadyTick((current) => current + 1);
                     }}
                   />
                   {compileLog && isCompileLogOpen ? (

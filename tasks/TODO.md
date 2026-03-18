@@ -423,6 +423,15 @@
 - [x] Validate with `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, `pnpm --filter @doctoral/worker build`.
 - [ ] Manual end-to-end check in production mailbox (rendered HTML + fallback + links).
 
+## Documents vNext - Real-time collaborative LaTeX editing (2026-03-18)
+- [x] Add backend WebSocket collaboration server for document/file rooms with JWT auth and project access checks.
+- [x] Persist collaborative file edits to LaTeX workspace files with debounce and safe path validation.
+- [x] Add Nginx websocket proxy headers for `/api/collab` upgrades.
+- [x] Integrate Monaco with Yjs (`y-websocket` + `y-monaco`) for real-time text/cursor sync on selected file.
+- [x] Add document-level presence room and render collaborator avatar pills in document topbar actions.
+- [x] Add autosave (3s debounce) for editable users while preserving manual `Save` and `Compile` flows.
+- [x] Validate with `pnpm --filter @doctoral/api build`, `pnpm --filter @doctoral/web build`, `pnpm --filter @doctoral/api test`.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -483,3 +492,4 @@
 - 2026-03-14: Completed visible rebrand from `WorkMesh` to `Atlasium` in shell/layout metadata and made `/projects` admin invite panel collapsible by default behind an `Invite user` toolbar action.
 - 2026-03-14: Improved Documents by preserving Monaco undo/redo history after compile refresh and enabling blank LaTeX version scaffolding (`main.tex`, `references.bib`, `Figures/`) from both creation flows.
 - 2026-03-18: Upgraded invitation emails with security transparency copy, explicit `/login` link, UTC-readable expiration, and HTML+text fallback delivery contract across API queue and worker mail sender.
+- 2026-03-18: Implemented real-time collaborative Documents editing with Yjs/WebSocket (per-document presence + per-file cursors), backend debounced autosave to LaTeX workspace, and nginx websocket proxy support.
