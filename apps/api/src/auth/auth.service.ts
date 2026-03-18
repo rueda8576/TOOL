@@ -14,6 +14,14 @@ import { InviteDto } from "./dto/invite.dto";
 import { LoginDto } from "./dto/login.dto";
 import { PasswordResetDto } from "./dto/password-reset.dto";
 
+const escapeHtml = (value: string): string =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
 @Injectable()
 export class AuthService {
   private readonly appBaseUrl = getEnv().APP_BASE_URL.replace(/\/+$/, "");
@@ -24,7 +32,7 @@ export class AuthService {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
-    timeZone: "Europe/Madrid",
+    timeZone: "UTC",
     timeZoneName: "short"
   });
 
@@ -121,20 +129,34 @@ export class AuthService {
     });
 
     const inviteUrl = `${this.appBaseUrl}/accept-invite?token=${encodeURIComponent(token)}`;
+    const loginUrl = `${this.appBaseUrl}/login`;
     const formattedExpiresAt = this.inviteExpiryFormatter.format(expiresAt);
+    const passwordSecurityNote =
+      "Security note: Your password is never stored in plain text. Atlasium stores only a one-way bcrypt hash, so neither admins nor support can read your password.";
+    const inviteEmailText = [
+      "You have been invited to Atlasium.",
+      "",
+      `Accept invite: ${inviteUrl}`,
+      `Sign in: ${loginUrl}`,
+      "",
+      passwordSecurityNote,
+      "",
+      `Invite token: ${token}`,
+      `Expires at: ${formattedExpiresAt}`
+    ].join("\n");
+    const inviteEmailHtml = [
+      "<p>You have been invited to <strong>Atlasium</strong>.</p>",
+      `<p><a href="${escapeHtml(inviteUrl)}">Accept invite</a><br/><a href="${escapeHtml(loginUrl)}">Sign in</a></p>`,
+      `<p>${escapeHtml(passwordSecurityNote)}</p>`,
+      `<p><strong>Invite token:</strong> <code>${escapeHtml(token)}</code><br/><strong>Expires at:</strong> ${escapeHtml(formattedExpiresAt)}</p>`
+    ].join("");
 
     await this.queueService.enqueueEmail({
       directEmail: {
         to: invite.email,
         subject: "Atlasium invitation",
-        text: [
-          "You have been invited to Atlasium.",
-          "",
-          `Accept invite: ${inviteUrl}`,
-          "",
-          `Invite token: ${token}`,
-          `Expires at: ${formattedExpiresAt}`
-        ].join("\n")
+        text: inviteEmailText,
+        html: inviteEmailHtml
       }
     });
 

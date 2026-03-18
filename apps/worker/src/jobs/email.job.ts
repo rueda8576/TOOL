@@ -12,6 +12,7 @@ type EmailJobPayload = {
     to: string;
     subject: string;
     text: string;
+    html?: string;
   };
 };
 
@@ -36,7 +37,8 @@ export const processEmailJob = async (
       from: env.SMTP_FROM,
       to: job.data.directEmail.to,
       subject: job.data.directEmail.subject,
-      text: job.data.directEmail.text
+      text: job.data.directEmail.text,
+      html: job.data.directEmail.html
     });
     return;
   }

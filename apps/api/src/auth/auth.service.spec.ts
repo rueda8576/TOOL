@@ -103,10 +103,25 @@ describe("AuthService", () => {
     expect(queueService.enqueueEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         directEmail: expect.objectContaining({
-          text: expect.stringContaining("/accept-invite?token=")
+          text: expect.stringContaining("/accept-invite?token="),
+          html: expect.stringContaining("Accept invite")
         })
       })
     );
+    const emailPayload = queueService.enqueueEmail.mock.calls[0][0];
+    const inviteText = emailPayload.directEmail.text as string;
+    const inviteHtml = emailPayload.directEmail.html as string;
+    expect(inviteText).toContain("Sign in: ");
+    expect(inviteText).toContain("/login");
+    expect(inviteText).toContain("Security note: Your password is never stored in plain text.");
+    expect(inviteText).toContain("one-way bcrypt hash");
+    expect(inviteText).toContain("Invite token:");
+    expect(inviteText).toContain("Expires at:");
+    expect(inviteText).toContain("UTC");
+    expect(inviteText).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
+    expect(inviteHtml).toContain("/accept-invite?token=");
+    expect(inviteHtml).toContain("/login");
+    expect(inviteHtml).toContain("one-way bcrypt hash");
     expect(result.inviteId).toBe("invite-1");
     expect(result.token).toBeTruthy();
     expect(result.expiresAt).toBeInstanceOf(Date);

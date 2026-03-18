@@ -15,6 +15,9 @@
 - Prefer shared UI components for repeated project-context text (e.g., project header subtitle) to prevent drift.
 - Keep action button labels concise; do not append keyboard shortcut hints in the visible label unless explicitly requested.
 
+## Collaboration preferences
+- After every implemented change, always provide the user with the exact commit message to use.
+
 ## Tasks UX defaults
 - Task boards should prioritize reading state first: keep create/edit forms collapsed by default and open them explicitly via actions like `New task` or `Edit`.
 - For task actions, always provide both desktop and accessible paths (`right-click` context menu plus visible button trigger) so mobile and non-mouse workflows are covered.

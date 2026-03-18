@@ -415,6 +415,14 @@
 - [x] Replace API test that required source file with blank-version creation coverage and add scaffold materialization test.
 - [x] Validate with `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, and `pnpm --filter @doctoral/web build`.
 
+## Invite Email vNext - Security copy + login link + HTML fallback (2026-03-18)
+- [x] Update invite email body in auth service to include `Accept invite`, `Sign in`, password security note, token, and UTC-formatted expiration.
+- [x] Add HTML invite template while keeping text fallback for direct emails.
+- [x] Extend internal email job payload contract with optional `directEmail.html` in API queue service and worker job processor.
+- [x] Update invite unit test assertions to validate new text/html content, login link presence, security note, token retention, and non-ISO UTC expiry output.
+- [x] Validate with `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, `pnpm --filter @doctoral/worker build`.
+- [ ] Manual end-to-end check in production mailbox (rendered HTML + fallback + links).
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -474,3 +482,4 @@
 - 2026-03-14: Cleaned initial onboarding UI to Atlasium login-first mode by removing demo-like landing elements and reducing home entry to a single `Sign in` action.
 - 2026-03-14: Completed visible rebrand from `WorkMesh` to `Atlasium` in shell/layout metadata and made `/projects` admin invite panel collapsible by default behind an `Invite user` toolbar action.
 - 2026-03-14: Improved Documents by preserving Monaco undo/redo history after compile refresh and enabling blank LaTeX version scaffolding (`main.tex`, `references.bib`, `Figures/`) from both creation flows.
+- 2026-03-18: Upgraded invitation emails with security transparency copy, explicit `/login` link, UTC-readable expiration, and HTML+text fallback delivery contract across API queue and worker mail sender.
