@@ -137,6 +137,17 @@ jobs:
               IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml logs --tail=200 migrate api web worker postgres || true
             }
             trap on_error ERR
+            run_privileged() {
+              if [ "$(id -u)" -eq 0 ]; then
+                "$@"
+              else
+                if ! command -v sudo >/dev/null 2>&1; then
+                  echo "Not running as root and sudo is not available. Cannot execute: $*" >&2
+                  return 1
+                fi
+                sudo -n "$@"
+              fi
+            }
             cd /opt/atlasium
             git fetch --all --prune
             git reset --hard "${DEPLOY_SHA}"
@@ -149,6 +160,16 @@ jobs:
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --wait postgres redis
             sh ./infra/scripts/deploy-prisma-bootstrap.sh "${IMAGE_TAG}"
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --no-build api worker web
+            echo "Syncing Nginx config from repository..."
+            command -v nginx >/dev/null 2>&1 || { echo "nginx is not installed on VPS." >&2; exit 1; }
+            command -v systemctl >/dev/null 2>&1 || { echo "systemctl is not available on VPS." >&2; exit 1; }
+            run_privileged install -d -m 755 /etc/nginx/sites-available
+            run_privileged install -d -m 755 /etc/nginx/sites-enabled
+            run_privileged cp /opt/atlasium/infra/nginx/atlasium.conf /etc/nginx/sites-available/atlasium.conf
+            run_privileged ln -sfn /etc/nginx/sites-available/atlasium.conf /etc/nginx/sites-enabled/atlasium.conf
+            run_privileged nginx -t
+            run_privileged systemctl reload nginx
+            echo "Nginx config applied and reloaded."
             docker compose -f docker-compose.prod.yml ps
 
       - name: Healthcheck (VPS local required + public HTTPS probe)
@@ -205,6 +226,17 @@ jobs:
               IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml logs --tail=200 migrate api web worker postgres || true
             }
             trap on_error ERR
+            run_privileged() {
+              if [ "$(id -u)" -eq 0 ]; then
+                "$@"
+              else
+                if ! command -v sudo >/dev/null 2>&1; then
+                  echo "Not running as root and sudo is not available. Cannot execute: $*" >&2
+                  return 1
+                fi
+                sudo -n "$@"
+              fi
+            }
             cd /opt/atlasium
             git fetch --all --prune
             git reset --hard origin/main
@@ -217,6 +249,16 @@ jobs:
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --wait postgres redis
             sh ./infra/scripts/deploy-prisma-bootstrap.sh "${IMAGE_TAG}"
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --no-build api worker web
+            echo "Syncing Nginx config from repository..."
+            command -v nginx >/dev/null 2>&1 || { echo "nginx is not installed on VPS." >&2; exit 1; }
+            command -v systemctl >/dev/null 2>&1 || { echo "systemctl is not available on VPS." >&2; exit 1; }
+            run_privileged install -d -m 755 /etc/nginx/sites-available
+            run_privileged install -d -m 755 /etc/nginx/sites-enabled
+            run_privileged cp /opt/atlasium/infra/nginx/atlasium.conf /etc/nginx/sites-available/atlasium.conf
+            run_privileged ln -sfn /etc/nginx/sites-available/atlasium.conf /etc/nginx/sites-enabled/atlasium.conf
+            run_privileged nginx -t
+            run_privileged systemctl reload nginx
+            echo "Nginx config applied and reloaded."
             docker compose -f docker-compose.prod.yml ps
 
       - name: Healthcheck (VPS local required + public HTTPS probe)
