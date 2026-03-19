@@ -307,10 +307,24 @@ export default function DocumentDetailPage({
   const [isDraggingSplitter, setIsDraggingSplitter] = useState(false);
   const [collaborators, setCollaborators] = useState<CollaboratorPresence[]>([]);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+  const [realtimeStatusNote, setRealtimeStatusNote] = useState<string | null>(null);
   const [monacoReadyTick, setMonacoReadyTick] = useState(0);
 
   const isReader = userRole === "reader";
-  const collaborationServerUrl = useMemo(() => resolveCollaborationServerUrl(API_BASE_URL), []);
+  const { collaborationServerUrl, collaborationConfigError } = useMemo(() => {
+    try {
+      return {
+        collaborationServerUrl: resolveCollaborationServerUrl(API_BASE_URL),
+        collaborationConfigError: null
+      };
+    } catch (error) {
+      console.error("Failed to resolve collaboration websocket URL.", error);
+      return {
+        collaborationServerUrl: null,
+        collaborationConfigError: "Realtime collaboration is unavailable. You can continue editing locally."
+      };
+    }
+  }, []);
   const collaboratorIdentity = useMemo<CollaboratorIdentity | null>(() => buildCollaboratorIdentity(sessionUser), [sessionUser]);
 
   const updatePdfUrl = useCallback((nextUrl: string | null): void => {
@@ -628,7 +642,18 @@ export default function DocumentDetailPage({
   );
 
   useEffect(() => {
-    if (!token || !collaboratorIdentity) {
+    if (collaborationConfigError) {
+      setIsRealtimeConnected(false);
+      setRealtimeStatusNote(collaborationConfigError);
+      return;
+    }
+
+    setRealtimeStatusNote(null);
+  }, [collaborationConfigError]);
+
+  useEffect(() => {
+    if (!collaborationServerUrl || !token || !collaboratorIdentity) {
+      setIsRealtimeConnected(false);
       destroyPresenceCollaboration();
       return;
     }
@@ -636,15 +661,24 @@ export default function DocumentDetailPage({
     destroyPresenceCollaboration();
 
     const presenceDoc = new Y.Doc();
-    const presenceProvider = new WebsocketProvider(collaborationServerUrl, `presence-${params.documentId}`, presenceDoc, {
-      connect: true,
-      disableBc: true,
-      params: {
-        token,
-        kind: "presence",
-        documentId: params.documentId
-      }
-    });
+    let presenceProvider: WebsocketProvider;
+    try {
+      presenceProvider = new WebsocketProvider(collaborationServerUrl, `presence-${params.documentId}`, presenceDoc, {
+        connect: true,
+        disableBc: true,
+        params: {
+          token,
+          kind: "presence",
+          documentId: params.documentId
+        }
+      });
+    } catch (connectionError) {
+      console.error("Failed to initialize collaboration presence provider.", connectionError);
+      setIsRealtimeConnected(false);
+      setRealtimeStatusNote("Realtime collaboration is unavailable. You can continue editing locally.");
+      presenceDoc.destroy();
+      return;
+    }
 
     presenceCollabDocRef.current = presenceDoc;
     presenceCollabProviderRef.current = presenceProvider;
@@ -658,7 +692,18 @@ export default function DocumentDetailPage({
       syncCollaborators();
     };
 
+    const onPresenceStatus = (event: { status: "connected" | "disconnected" | "connecting" }): void => {
+      const isConnected = event.status === "connected";
+      setIsRealtimeConnected(isConnected);
+      if (isConnected) {
+        setRealtimeStatusNote(null);
+      } else if (event.status === "disconnected") {
+        setRealtimeStatusNote("Realtime collaboration is offline. You can continue editing locally.");
+      }
+    };
+
     presenceProvider.awareness.on("update", onAwarenessUpdate);
+    presenceProvider.on("status", onPresenceStatus);
     presenceProvider.awareness.setLocalState({
       user: collaboratorIdentity,
       activePath: null,
@@ -668,9 +713,11 @@ export default function DocumentDetailPage({
 
     return () => {
       presenceProvider.awareness.off("update", onAwarenessUpdate);
+      presenceProvider.off("status", onPresenceStatus);
       destroyPresenceCollaboration();
     };
   }, [
+    collaborationConfigError,
     collaboratorIdentity,
     collaborationServerUrl,
     destroyPresenceCollaboration,
@@ -692,8 +739,14 @@ export default function DocumentDetailPage({
   }, [collaboratorIdentity, selectedLatexPath, showLatexWorkspace]);
 
   useEffect(() => {
-    if (!showLatexWorkspace || !token || !currentVersion || !selectedLatexPath || !collaboratorIdentity) {
+    if (!showLatexWorkspace || !token || !currentVersion || !selectedLatexPath) {
       destroyFileCollaboration();
+      return;
+    }
+
+    if (!collaborationServerUrl || !collaboratorIdentity) {
+      destroyFileCollaboration();
+      void loadLatexFileContent(currentVersion.id, selectedLatexPath, token);
       return;
     }
 
@@ -701,16 +754,25 @@ export default function DocumentDetailPage({
     setLoadingLatexFile(true);
 
     const fileDoc = new Y.Doc();
-    const fileProvider = new WebsocketProvider(collaborationServerUrl, `file-${currentVersion.id}`, fileDoc, {
-      connect: true,
-      disableBc: true,
-      params: {
-        token,
-        kind: "file",
-        documentVersionId: currentVersion.id,
-        path: selectedLatexPath
-      }
-    });
+    let fileProvider: WebsocketProvider;
+    try {
+      fileProvider = new WebsocketProvider(collaborationServerUrl, `file-${currentVersion.id}`, fileDoc, {
+        connect: true,
+        disableBc: true,
+        params: {
+          token,
+          kind: "file",
+          documentVersionId: currentVersion.id,
+          path: selectedLatexPath
+        }
+      });
+    } catch (connectionError) {
+      console.error("Failed to initialize collaboration file provider.", connectionError);
+      setRealtimeStatusNote("Realtime collaboration is unavailable. You can continue editing locally.");
+      fileDoc.destroy();
+      void loadLatexFileContent(currentVersion.id, selectedLatexPath, token);
+      return;
+    }
 
     fileCollabDocRef.current = fileDoc;
     fileCollabProviderRef.current = fileProvider;
@@ -754,6 +816,7 @@ export default function DocumentDetailPage({
     collaborationServerUrl,
     currentVersion?.id,
     destroyFileCollaboration,
+    loadLatexFileContent,
     selectedLatexPath,
     showLatexWorkspace,
     token
@@ -1269,7 +1332,7 @@ export default function DocumentDetailPage({
               if (!token || !currentVersion) {
                 return;
               }
-              if (showLatexWorkspace) {
+              if (showLatexWorkspace && collaborationServerUrl && collaboratorIdentity) {
                 setSelectedLatexPath(node.path);
                 setLoadingLatexFile(true);
                 setError(null);
@@ -1285,7 +1348,17 @@ export default function DocumentDetailPage({
           </button>
         );
       }),
-    [currentVersion, expandedFolders, loadLatexFileContent, selectedLatexPath, showLatexWorkspace, toggleFolder, token]
+    [
+      collaborationServerUrl,
+      collaboratorIdentity,
+      currentVersion,
+      expandedFolders,
+      loadLatexFileContent,
+      selectedLatexPath,
+      showLatexWorkspace,
+      toggleFolder,
+      token
+    ]
   );
 
   const createFirstVersion = async (event: FormEvent): Promise<void> => {
@@ -1372,6 +1445,7 @@ export default function DocumentDetailPage({
             <span className={isRealtimeConnected ? "documents-realtime-status documents-realtime-status-live" : "documents-realtime-status"}>
               {isRealtimeConnected ? "Live" : "Offline"}
             </span>
+            {realtimeStatusNote ? <span className="documents-realtime-note">{realtimeStatusNote}</span> : null}
           </div>
           {hasLatex ? (
             <button

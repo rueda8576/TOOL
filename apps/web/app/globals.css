@@ -804,6 +804,13 @@ textarea.input {
   color: #1f6c3b;
 }
 
+.documents-realtime-note {
+  max-width: 320px;
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  line-height: 1.25;
+}
+
 .documents-list-row {
   display: flex;
   align-items: flex-start;

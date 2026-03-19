@@ -57,8 +57,19 @@ export function buildCollaboratorIdentity(user: LoginResponse["user"] | null): C
 }
 
 export function resolveCollaborationServerUrl(apiBaseUrl: string): string {
-  const parsed = new URL(apiBaseUrl);
-  parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+  const normalizedBaseUrl = apiBaseUrl.trim();
+  const browserOrigin = typeof window !== "undefined" ? window.location.origin : null;
+  const isAbsolute = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(normalizedBaseUrl);
+
+  if (!isAbsolute && !browserOrigin) {
+    throw new Error("Relative API base URL requires browser origin");
+  }
+
+  const parsed = isAbsolute
+    ? new URL(normalizedBaseUrl)
+    : new URL(normalizedBaseUrl || "/", browserOrigin as string);
+
+  parsed.protocol = parsed.protocol === "https:" || parsed.protocol === "wss:" ? "wss:" : "ws:";
   parsed.search = "";
   parsed.hash = "";
 
