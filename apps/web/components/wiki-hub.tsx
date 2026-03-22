@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import rehypeKatex from "rehype-katex";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -31,6 +31,257 @@ import {
 type SaveState = "idle" | "saving" | "saved" | "error" | "conflict";
 
 const WIKI_PATH_SEGMENT_PATTERN = /^[a-z0-9-]+$/;
+const INDENT_SIZE = 2;
+
+type TextTransformResult = {
+  nextValue: string;
+  nextSelectionStart: number;
+  nextSelectionEnd: number;
+};
+
+type WikiMarkdownAction =
+  | "heading1"
+  | "heading2"
+  | "heading3"
+  | "bold"
+  | "italic"
+  | "link"
+  | "inlineCode"
+  | "codeBlock"
+  | "quote"
+  | "bullets"
+  | "numbered"
+  | "checklist"
+  | "horizontalRule"
+  | "indent"
+  | "outdent";
+
+type WikiMarkdownTool = {
+  action: WikiMarkdownAction;
+  label: string;
+  title: string;
+};
+
+type ListMarkerInfo = {
+  indent: string;
+  marker: string;
+  content: string;
+};
+
+const WIKI_MARKDOWN_TOOL_GROUPS: WikiMarkdownTool[][] = [
+  [
+    { action: "heading1", label: "H1", title: "Heading 1" },
+    { action: "heading2", label: "H2", title: "Heading 2" },
+    { action: "heading3", label: "H3", title: "Heading 3" }
+  ],
+  [
+    { action: "bold", label: "B", title: "Bold (Ctrl/Cmd+B)" },
+    { action: "italic", label: "I", title: "Italic (Ctrl/Cmd+I)" },
+    { action: "link", label: "Link", title: "Link (Ctrl/Cmd+K)" },
+    { action: "inlineCode", label: "Code", title: "Inline code" },
+    { action: "codeBlock", label: "Block", title: "Code block" }
+  ],
+  [
+    { action: "quote", label: "Quote", title: "Block quote" },
+    { action: "bullets", label: "- List", title: "Bulleted list (Ctrl/Cmd+Shift+8)" },
+    { action: "numbered", label: "1. List", title: "Numbered list (Ctrl/Cmd+Shift+7)" },
+    { action: "checklist", label: "Task", title: "Checklist" },
+    { action: "horizontalRule", label: "HR", title: "Horizontal rule" },
+    { action: "indent", label: ">>", title: "Indent (Tab)" },
+    { action: "outdent", label: "<<", title: "Outdent (Shift+Tab)" }
+  ]
+];
+
+function clampSelectionRange(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number
+): { safeStart: number; safeEnd: number } {
+  const safeStart = Math.max(0, Math.min(selectionStart, value.length));
+  const safeEnd = Math.max(safeStart, Math.min(selectionEnd, value.length));
+  return { safeStart, safeEnd };
+}
+
+function transformSelectedLines(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  transformLine: (line: string, index: number) => string
+): TextTransformResult {
+  const { safeStart, safeEnd } = clampSelectionRange(value, selectionStart, selectionEnd);
+  const lineStart = value.lastIndexOf("\n", Math.max(0, safeStart - 1)) + 1;
+  const lineEndIndex = value.indexOf("\n", safeEnd);
+  const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex;
+  const selectedBlock = value.slice(lineStart, lineEnd);
+  const selectedLines = selectedBlock.split("\n");
+  const transformedBlock = selectedLines.map((line, index) => transformLine(line, index)).join("\n");
+  return {
+    nextValue: `${value.slice(0, lineStart)}${transformedBlock}${value.slice(lineEnd)}`,
+    nextSelectionStart: lineStart,
+    nextSelectionEnd: lineStart + transformedBlock.length
+  };
+}
+
+function indentLine(line: string): string {
+  return `${" ".repeat(INDENT_SIZE)}${line}`;
+}
+
+function outdentLine(line: string): string {
+  if (line.startsWith("\t")) {
+    return line.slice(1);
+  }
+  if (line.startsWith("  ")) {
+    return line.slice(2);
+  }
+  if (line.startsWith(" ")) {
+    return line.slice(1);
+  }
+  return line;
+}
+
+function applyHeadingToLine(line: string, level: 1 | 2 | 3): string {
+  const marker = `${"#".repeat(level)} `;
+  const headingMatch = line.match(/^(\s{0,3})(#{1,6}\s+)?(.*)$/);
+  if (!headingMatch) {
+    return `${marker}${line.trimStart()}`;
+  }
+  const indent = headingMatch[1] ?? "";
+  const content = (headingMatch[3] ?? "").trimStart();
+  return `${indent}${marker}${content}`;
+}
+
+function wrapSelectionWith(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  prefix: string,
+  suffix: string,
+  placeholder: string
+): TextTransformResult {
+  const { safeStart, safeEnd } = clampSelectionRange(value, selectionStart, selectionEnd);
+  const hasSelection = safeEnd > safeStart;
+  const content = hasSelection ? value.slice(safeStart, safeEnd) : placeholder;
+  const wrapped = `${prefix}${content}${suffix}`;
+  return {
+    nextValue: `${value.slice(0, safeStart)}${wrapped}${value.slice(safeEnd)}`,
+    nextSelectionStart: safeStart + prefix.length,
+    nextSelectionEnd: safeStart + prefix.length + content.length
+  };
+}
+
+function insertLinkMarkdown(value: string, selectionStart: number, selectionEnd: number): TextTransformResult {
+  const { safeStart, safeEnd } = clampSelectionRange(value, selectionStart, selectionEnd);
+  const label = safeEnd > safeStart ? value.slice(safeStart, safeEnd) : "link text";
+  const urlPlaceholder = "https://";
+  const snippet = `[${label}](${urlPlaceholder})`;
+  const urlStart = safeStart + snippet.length - 1 - urlPlaceholder.length;
+  return {
+    nextValue: `${value.slice(0, safeStart)}${snippet}${value.slice(safeEnd)}`,
+    nextSelectionStart: urlStart,
+    nextSelectionEnd: urlStart + urlPlaceholder.length
+  };
+}
+
+function wrapWithCodeBlock(value: string, selectionStart: number, selectionEnd: number): TextTransformResult {
+  const { safeStart, safeEnd } = clampSelectionRange(value, selectionStart, selectionEnd);
+  if (safeEnd > safeStart) {
+    const selected = value.slice(safeStart, safeEnd);
+    const snippet = `\`\`\`\n${selected}\n\`\`\``;
+    return {
+      nextValue: `${value.slice(0, safeStart)}${snippet}${value.slice(safeEnd)}`,
+      nextSelectionStart: safeStart + 4,
+      nextSelectionEnd: safeStart + 4 + selected.length
+    };
+  }
+
+  const snippet = "```\n\n```";
+  const cursor = safeStart + 4;
+  return {
+    nextValue: `${value.slice(0, safeStart)}${snippet}${value.slice(safeEnd)}`,
+    nextSelectionStart: cursor,
+    nextSelectionEnd: cursor
+  };
+}
+
+function insertHorizontalRule(value: string, selectionStart: number, selectionEnd: number): TextTransformResult {
+  const { safeStart, safeEnd } = clampSelectionRange(value, selectionStart, selectionEnd);
+  const before = value.slice(0, safeStart);
+  const after = value.slice(safeEnd);
+  const leading = before.length === 0 || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+  const trailing = after.length === 0 || after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
+  const snippet = `${leading}---${trailing}`;
+  const cursor = before.length + snippet.length;
+  return {
+    nextValue: `${before}${snippet}${after}`,
+    nextSelectionStart: cursor,
+    nextSelectionEnd: cursor
+  };
+}
+
+function extractListMarker(line: string): ListMarkerInfo | null {
+  const checklistMatch = line.match(/^(\s*)-\s\[(?: |x|X)\]\s?(.*)$/);
+  if (checklistMatch) {
+    return {
+      indent: checklistMatch[1] ?? "",
+      marker: "- [ ] ",
+      content: checklistMatch[2] ?? ""
+    };
+  }
+
+  const unorderedMatch = line.match(/^(\s*)([-+*])\s(.*)$/);
+  if (unorderedMatch) {
+    return {
+      indent: unorderedMatch[1] ?? "",
+      marker: `${unorderedMatch[2]} `,
+      content: unorderedMatch[3] ?? ""
+    };
+  }
+
+  const orderedMatch = line.match(/^(\s*)\d+\.\s(.*)$/);
+  if (orderedMatch) {
+    return {
+      indent: orderedMatch[1] ?? "",
+      marker: "1. ",
+      content: orderedMatch[2] ?? ""
+    };
+  }
+
+  return null;
+}
+
+function buildListContinuationOnEnter(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number
+): TextTransformResult | null {
+  if (selectionStart !== selectionEnd) {
+    return null;
+  }
+
+  const safeCursor = Math.max(0, Math.min(selectionStart, value.length));
+  const lineStart = value.lastIndexOf("\n", Math.max(0, safeCursor - 1)) + 1;
+  const lineEndIndex = value.indexOf("\n", safeCursor);
+  const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex;
+  const line = value.slice(lineStart, lineEnd);
+  const markerInfo = extractListMarker(line);
+  if (!markerInfo) {
+    return null;
+  }
+
+  const hasContent = markerInfo.content.trim().length > 0;
+  const nextIndent = hasContent
+    ? markerInfo.indent
+    : markerInfo.indent.length >= INDENT_SIZE
+      ? markerInfo.indent.slice(0, markerInfo.indent.length - INDENT_SIZE)
+      : "";
+  const insertText = hasContent || markerInfo.indent.length >= INDENT_SIZE ? `\n${nextIndent}${markerInfo.marker}` : "\n";
+
+  return {
+    nextValue: `${value.slice(0, safeCursor)}${insertText}${value.slice(safeCursor)}`,
+    nextSelectionStart: safeCursor + insertText.length,
+    nextSelectionEnd: safeCursor + insertText.length
+  };
+}
 
 function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
   if (!rawUser) {
@@ -243,6 +494,11 @@ export function WikiHub({
   const isReader = userRole === "reader";
 
   const allPagePaths = useMemo(() => flattenPagePaths(treeNodes), [treeNodes]);
+
+  const updateDraftContent = useCallback((nextContent: string): void => {
+    setDraftContent(nextContent);
+    setSaveState((current) => (current === "saved" ? "idle" : current));
+  }, []);
 
   const isDirty = useMemo(() => {
     if (!isEditing) {
@@ -600,24 +856,182 @@ export function WikiHub({
     fileInputRef.current?.click();
   };
 
-  const insertImageMarkdown = (snippet: string): void => {
-    const textarea = markdownRef.current;
-    if (!textarea) {
-      setDraftContent((current) => `${current.trimEnd()}\n\n${snippet}\n`);
-      return;
-    }
+  const applyMarkdownTransform = useCallback(
+    (transformed: TextTransformResult): void => {
+      updateDraftContent(transformed.nextValue);
+      requestAnimationFrame(() => {
+        const textarea = markdownRef.current;
+        if (!textarea) {
+          return;
+        }
+        textarea.focus();
+        textarea.setSelectionRange(transformed.nextSelectionStart, transformed.nextSelectionEnd);
+      });
+    },
+    [updateDraftContent]
+  );
 
-    const start = textarea.selectionStart ?? draftContent.length;
-    const end = textarea.selectionEnd ?? draftContent.length;
-    const nextContent = `${draftContent.slice(0, start)}${snippet}${draftContent.slice(end)}`;
-    setDraftContent(nextContent);
+  const applyWikiMarkdownAction = useCallback(
+    (action: WikiMarkdownAction): void => {
+      const textarea = markdownRef.current;
+      const selectionStart = textarea?.selectionStart ?? draftContent.length;
+      const selectionEnd = textarea?.selectionEnd ?? draftContent.length;
 
-    requestAnimationFrame(() => {
-      const caretPosition = start + snippet.length;
-      textarea.focus();
-      textarea.setSelectionRange(caretPosition, caretPosition);
-    });
-  };
+      let transformed: TextTransformResult;
+      switch (action) {
+        case "heading1":
+          transformed = transformSelectedLines(draftContent, selectionStart, selectionEnd, (line) => applyHeadingToLine(line, 1));
+          break;
+        case "heading2":
+          transformed = transformSelectedLines(draftContent, selectionStart, selectionEnd, (line) => applyHeadingToLine(line, 2));
+          break;
+        case "heading3":
+          transformed = transformSelectedLines(draftContent, selectionStart, selectionEnd, (line) => applyHeadingToLine(line, 3));
+          break;
+        case "bold":
+          transformed = wrapSelectionWith(draftContent, selectionStart, selectionEnd, "**", "**", "bold text");
+          break;
+        case "italic":
+          transformed = wrapSelectionWith(draftContent, selectionStart, selectionEnd, "*", "*", "italic text");
+          break;
+        case "link":
+          transformed = insertLinkMarkdown(draftContent, selectionStart, selectionEnd);
+          break;
+        case "inlineCode":
+          transformed = wrapSelectionWith(draftContent, selectionStart, selectionEnd, "`", "`", "code");
+          break;
+        case "codeBlock":
+          transformed = wrapWithCodeBlock(draftContent, selectionStart, selectionEnd);
+          break;
+        case "quote":
+          transformed = transformSelectedLines(draftContent, selectionStart, selectionEnd, (line) => `> ${line}`);
+          break;
+        case "bullets":
+          transformed = transformSelectedLines(draftContent, selectionStart, selectionEnd, (line) => `- ${line}`);
+          break;
+        case "numbered":
+          transformed = transformSelectedLines(draftContent, selectionStart, selectionEnd, (line, index) => `${index + 1}. ${line}`);
+          break;
+        case "checklist":
+          transformed = transformSelectedLines(draftContent, selectionStart, selectionEnd, (line) => `- [ ] ${line}`);
+          break;
+        case "horizontalRule":
+          transformed = insertHorizontalRule(draftContent, selectionStart, selectionEnd);
+          break;
+        case "indent":
+          transformed = transformSelectedLines(draftContent, selectionStart, selectionEnd, (line) => indentLine(line));
+          break;
+        case "outdent":
+          transformed = transformSelectedLines(draftContent, selectionStart, selectionEnd, (line) => outdentLine(line));
+          break;
+      }
+
+      applyMarkdownTransform(transformed);
+    },
+    [applyMarkdownTransform, draftContent]
+  );
+
+  const onMarkdownKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+      if (event.nativeEvent.isComposing) {
+        return;
+      }
+
+      if (event.key === "Tab") {
+        event.preventDefault();
+        applyWikiMarkdownAction(event.shiftKey ? "outdent" : "indent");
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+        const lowerKey = event.key.toLowerCase();
+        if (!event.shiftKey && lowerKey === "b") {
+          event.preventDefault();
+          applyWikiMarkdownAction("bold");
+          return;
+        }
+        if (!event.shiftKey && lowerKey === "i") {
+          event.preventDefault();
+          applyWikiMarkdownAction("italic");
+          return;
+        }
+        if (!event.shiftKey && lowerKey === "k") {
+          event.preventDefault();
+          applyWikiMarkdownAction("link");
+          return;
+        }
+        if (event.shiftKey && event.code === "Digit8") {
+          event.preventDefault();
+          applyWikiMarkdownAction("bullets");
+          return;
+        }
+        if (event.shiftKey && event.code === "Digit7") {
+          event.preventDefault();
+          applyWikiMarkdownAction("numbered");
+          return;
+        }
+      }
+
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      const textarea = markdownRef.current;
+      if (!textarea) {
+        return;
+      }
+      const transformed = buildListContinuationOnEnter(draftContent, textarea.selectionStart, textarea.selectionEnd);
+      if (!transformed) {
+        return;
+      }
+      event.preventDefault();
+      applyMarkdownTransform(transformed);
+    },
+    [applyMarkdownTransform, applyWikiMarkdownAction, draftContent]
+  );
+
+  const insertImageMarkdown = useCallback(
+    (snippet: string): void => {
+      const textarea = markdownRef.current;
+      if (!textarea) {
+        updateDraftContent(`${draftContent.trimEnd()}\n\n${snippet}\n`);
+        return;
+      }
+
+      const start = textarea.selectionStart ?? draftContent.length;
+      const end = textarea.selectionEnd ?? draftContent.length;
+      applyMarkdownTransform({
+        nextValue: `${draftContent.slice(0, start)}${snippet}${draftContent.slice(end)}`,
+        nextSelectionStart: start + snippet.length,
+        nextSelectionEnd: start + snippet.length
+      });
+    },
+    [applyMarkdownTransform, draftContent, updateDraftContent]
+  );
+
+  const renderMarkdownToolbar = useCallback(
+    (): JSX.Element => (
+      <div className="wiki-markdown-toolbar" role="toolbar" aria-label="Markdown formatting toolbar">
+        {WIKI_MARKDOWN_TOOL_GROUPS.map((group, groupIndex) => (
+          <div className="wiki-markdown-toolbar-group" key={`wiki-markdown-group-${groupIndex}`}>
+            {group.map((tool) => (
+              <button
+                key={tool.action}
+                type="button"
+                className="wiki-markdown-tool"
+                title={tool.title}
+                aria-label={tool.title}
+                onClick={() => applyWikiMarkdownAction(tool.action)}
+              >
+                {tool.label}
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+    ),
+    [applyWikiMarkdownAction]
+  );
 
   const onImageFileChange = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = event.target.files?.[0];
@@ -1092,14 +1506,15 @@ export function WikiHub({
               <div className="wiki-editor-grid">
                 <label>
                   Draft markdown
+                  {renderMarkdownToolbar()}
                   <textarea
                     ref={markdownRef}
                     className="input wiki-editor-textarea"
                     value={draftContent}
                     onChange={(event) => {
-                      setDraftContent(event.target.value);
-                      setSaveState((current) => (current === "saved" ? "idle" : current));
+                      updateDraftContent(event.target.value);
                     }}
+                    onKeyDown={onMarkdownKeyDown}
                     onBlur={onDraftBlur}
                   />
                 </label>

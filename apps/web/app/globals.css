@@ -1790,6 +1790,53 @@ body.documents-workspace-dragging * {
   font-size: 0.82rem;
 }
 
+.wiki-markdown-toolbar {
+  margin-top: 0.36rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+
+.wiki-markdown-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.22rem;
+  padding: 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+.wiki-markdown-tool {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.wiki-markdown-tool:hover {
+  border-color: var(--line);
+  background: var(--bg-surface-soft);
+  color: var(--brand-strong);
+}
+
+.wiki-markdown-tool:focus-visible {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(31, 79, 143, 0.16);
+}
+
+.wiki-markdown-tool:active {
+  transform: translateY(1px);
+}
+
 .wiki-editor-grid {
   display: grid;
   gap: 0.75rem;
@@ -2125,6 +2172,16 @@ body.documents-workspace-dragging * {
   .wiki-main-header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .wiki-markdown-toolbar-group {
+    width: 100%;
+    border-radius: var(--radius-sm);
+  }
+
+  .wiki-markdown-tool {
+    flex: 1 1 calc(33.33% - 0.22rem);
+    min-height: 2rem;
   }
 
   .wiki-editor-grid {
