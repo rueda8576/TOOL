@@ -1445,7 +1445,7 @@ export function WikiHub({
                     }}
                     disabled={saveState === "saving"}
                   >
-                    {saveState === "saving" ? "Saving..." : "Save draft"}
+                    Save draft
                   </button>
                   <button type="button" className="button button-secondary" onClick={onUploadImageClick} disabled={uploadingImage}>
                     {uploadingImage ? "Uploading..." : "Upload image"}
