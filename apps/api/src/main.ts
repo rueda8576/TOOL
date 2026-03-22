@@ -8,6 +8,7 @@ import { AppModule } from "./app.module";
 import { ProjectAccessService } from "./common/project-access.service";
 import { getEnv } from "./config/env";
 import { DocumentsCollaborationServer } from "./documents/documents-collaboration.server";
+import { setDocumentsCollaborationServer } from "./documents/collaboration-server-registry";
 import { PrismaService } from "./prisma/prisma.service";
 
 async function bootstrap(): Promise<void> {
@@ -27,6 +28,7 @@ async function bootstrap(): Promise<void> {
     app.get(JwtService),
     app.get(ProjectAccessService)
   );
+  setDocumentsCollaborationServer(collabServer);
   collabServer.start(app.getHttpServer());
 
   await app.listen(env.API_PORT);

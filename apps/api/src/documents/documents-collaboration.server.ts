@@ -16,10 +16,11 @@ import { WebSocket, WebSocketServer, RawData } from "ws";
 
 import { hashValue } from "../common/crypto";
 import { ProjectAccessService } from "../common/project-access.service";
+import { AuthenticatedUser } from "../common/authenticated-user";
 import { PrismaService } from "../prisma/prisma.service";
 import { getEnv } from "../config/env";
 
-type CollaborationRoomKind = "presence" | "file";
+type CollaborationRoomKind = "presence" | "file" | "wiki-presence" | "wiki-page";
 
 type BaseRoom = {
   key: string;
@@ -27,11 +28,16 @@ type BaseRoom = {
   doc: Y.Doc;
   awareness: Awareness;
   connections: Map<WebSocket, Set<number>>;
+  connectionUsers: Map<WebSocket, string>;
   teardown: () => void;
 };
 
 type PresenceRoom = BaseRoom & {
   kind: "presence";
+};
+
+type WikiPresenceRoom = BaseRoom & {
+  kind: "wiki-presence";
 };
 
 type FileRoom = BaseRoom & {
@@ -48,7 +54,19 @@ type FileRoom = BaseRoom & {
   loadPromise: Promise<void> | null;
 };
 
-type CollaborationRoom = PresenceRoom | FileRoom;
+type WikiPageRoom = BaseRoom & {
+  kind: "wiki-page";
+  wikiPageId: string;
+  projectId: string;
+  persistTimer: NodeJS.Timeout | null;
+  persistInFlight: boolean;
+  persistQueued: boolean;
+  lastPersistedTitle: string;
+  lastPersistedContent: string;
+  lastUpdatedById: string;
+};
+
+type CollaborationRoom = PresenceRoom | FileRoom | WikiPresenceRoom | WikiPageRoom;
 
 type AuthenticatedCollabUser = {
   userId: string;
@@ -59,6 +77,7 @@ type AuthenticatedCollabUser = {
 type RoomConnectionContext = {
   room: CollaborationRoom;
   canWrite: boolean;
+  userId: string;
 };
 
 type RoomQuery =
@@ -72,6 +91,16 @@ type RoomQuery =
       token: string;
       documentVersionId: string;
       path: string;
+    }
+  | {
+      kind: "wiki-presence";
+      token: string;
+      wikiPageId: string;
+    }
+  | {
+      kind: "wiki-page";
+      token: string;
+      wikiPageId: string;
     };
 
 const MESSAGE_SYNC = 0;
@@ -79,7 +108,9 @@ const MESSAGE_AWARENESS = 1;
 const MESSAGE_QUERY_AWARENESS = 3;
 const AUTOSAVE_DEBOUNCE_MS = 3000;
 const COLLAB_PATH_PREFIX = "/collab";
-const YDOC_TEXT_KEY = "content";
+const FILE_YDOC_TEXT_KEY = "content";
+const WIKI_YDOC_TITLE_KEY = "title";
+const WIKI_YDOC_CONTENT_KEY = "content";
 const INITIAL_LOAD_ORIGIN = Symbol("initial-load");
 
 function normalizeLatexPath(filePath: string): string {
@@ -140,6 +171,14 @@ function parseRoomQuery(request: IncomingMessage): RoomQuery {
       throw new ForbiddenException("Missing documentVersionId or path");
     }
     return { kind, token, documentVersionId, path };
+  }
+
+  if (kind === "wiki-presence" || kind === "wiki-page") {
+    const wikiPageId = parsedUrl.searchParams.get("wikiPageId")?.trim();
+    if (!wikiPageId) {
+      throw new ForbiddenException("Missing wikiPageId");
+    }
+    return { kind, token, wikiPageId };
   }
 
   throw new ForbiddenException("Unsupported collaboration room kind");
@@ -280,10 +319,93 @@ export class DocumentsCollaborationServer {
       const roomKey = `presence:${document.id}`;
       const room = this.getOrCreatePresenceRoom(roomKey);
       room.connections.set(connection, new Set<number>());
+      room.connectionUsers.set(connection, user.userId);
 
       return {
         room,
-        canWrite: user.globalRole !== "reader"
+        canWrite: user.globalRole !== "reader",
+        userId: user.userId
+      };
+    }
+
+    if (query.kind === "wiki-presence") {
+      const page = await this.prisma.wikiPage.findFirst({
+        where: {
+          id: query.wikiPageId,
+          deletedAt: null
+        },
+        select: {
+          id: true,
+          projectId: true
+        }
+      });
+
+      if (!page) {
+        throw new NotFoundException("Wiki page not found");
+      }
+
+      await this.accessService.ensureProjectReadable(user.userId, user.globalRole, page.projectId);
+
+      const roomKey = `wiki-presence:${page.id}`;
+      const room = this.getOrCreateWikiPresenceRoom(roomKey);
+      room.connections.set(connection, new Set<number>());
+      room.connectionUsers.set(connection, user.userId);
+
+      return {
+        room,
+        canWrite: user.globalRole !== "reader",
+        userId: user.userId
+      };
+    }
+
+    if (query.kind === "wiki-page") {
+      const page = await this.prisma.wikiPage.findFirst({
+        where: {
+          id: query.wikiPageId,
+          deletedAt: null
+        },
+        select: {
+          id: true,
+          projectId: true,
+          title: true,
+          createdById: true,
+          currentRevision: {
+            select: {
+              contentMarkdown: true
+            }
+          },
+          draft: {
+            select: {
+              title: true,
+              contentMarkdown: true,
+              updatedById: true
+            }
+          }
+        }
+      });
+
+      if (!page) {
+        throw new NotFoundException("Wiki page not found");
+      }
+
+      await this.accessService.ensureProjectReadable(user.userId, user.globalRole, page.projectId);
+
+      const roomKey = `wiki-page:${page.id}`;
+      const room = this.getOrCreateWikiPageRoom({
+        roomKey,
+        wikiPageId: page.id,
+        projectId: page.projectId,
+        initialTitle: page.draft?.title ?? page.title,
+        initialContent: page.draft?.contentMarkdown ?? page.currentRevision?.contentMarkdown ?? "",
+        initialUpdatedById: page.draft?.updatedById ?? page.createdById
+      });
+      room.connections.set(connection, new Set<number>());
+      room.connectionUsers.set(connection, user.userId);
+
+      return {
+        room,
+        canWrite: user.globalRole !== "reader",
+        userId: user.userId
       };
     }
 
@@ -328,11 +450,13 @@ export class DocumentsCollaborationServer {
     });
 
     room.connections.set(connection, new Set<number>());
+    room.connectionUsers.set(connection, user.userId);
     await this.ensureFileRoomLoaded(room);
 
     return {
       room,
-      canWrite: user.globalRole !== "reader"
+      canWrite: user.globalRole !== "reader",
+      userId: user.userId
     };
   }
 
@@ -350,6 +474,57 @@ export class DocumentsCollaborationServer {
       doc,
       awareness,
       connections: new Map<WebSocket, Set<number>>(),
+      connectionUsers: new Map<WebSocket, string>(),
+      teardown: () => {
+        awareness.off("update", awarenessUpdateHandler);
+        doc.destroy();
+      }
+    };
+
+    const awarenessUpdateHandler = ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }, origin: unknown): void => {
+      const changedClients = [...added, ...updated, ...removed];
+      if (origin instanceof WebSocket) {
+        const controlledClients = room.connections.get(origin);
+        if (controlledClients) {
+          for (const clientId of added) {
+            controlledClients.add(clientId);
+          }
+          for (const clientId of removed) {
+            controlledClients.delete(clientId);
+          }
+        }
+      }
+
+      const encoder = encoding.createEncoder();
+      encoding.writeVarUint(encoder, MESSAGE_AWARENESS);
+      encoding.writeVarUint8Array(encoder, awarenessProtocol.encodeAwarenessUpdate(room.awareness, changedClients));
+      const message = encoding.toUint8Array(encoder);
+
+      for (const ws of room.connections.keys()) {
+        safeSend(ws, message);
+      }
+    };
+
+    awareness.on("update", awarenessUpdateHandler);
+    this.rooms.set(roomKey, room);
+    return room;
+  }
+
+  private getOrCreateWikiPresenceRoom(roomKey: string): WikiPresenceRoom {
+    const existing = this.rooms.get(roomKey);
+    if (existing) {
+      return existing as WikiPresenceRoom;
+    }
+
+    const doc = new Y.Doc();
+    const awareness = new Awareness(doc);
+    const room: WikiPresenceRoom = {
+      key: roomKey,
+      kind: "wiki-presence",
+      doc,
+      awareness,
+      connections: new Map<WebSocket, Set<number>>(),
+      connectionUsers: new Map<WebSocket, string>(),
       teardown: () => {
         awareness.off("update", awarenessUpdateHandler);
         doc.destroy();
@@ -412,6 +587,7 @@ export class DocumentsCollaborationServer {
       filePath: params.filePath,
       absoluteFilePath: params.absoluteFilePath,
       connections: new Map<WebSocket, Set<number>>(),
+      connectionUsers: new Map<WebSocket, string>(),
       persistTimer: null,
       persistInFlight: false,
       persistQueued: false,
@@ -479,6 +655,335 @@ export class DocumentsCollaborationServer {
     return room;
   }
 
+  private getOrCreateWikiPageRoom(params: {
+    roomKey: string;
+    wikiPageId: string;
+    projectId: string;
+    initialTitle: string;
+    initialContent: string;
+    initialUpdatedById: string;
+  }): WikiPageRoom {
+    const existing = this.rooms.get(params.roomKey);
+    if (existing) {
+      return existing as WikiPageRoom;
+    }
+
+    const doc = new Y.Doc();
+    const awareness = new Awareness(doc);
+    const room: WikiPageRoom = {
+      key: params.roomKey,
+      kind: "wiki-page",
+      doc,
+      awareness,
+      wikiPageId: params.wikiPageId,
+      projectId: params.projectId,
+      connections: new Map<WebSocket, Set<number>>(),
+      connectionUsers: new Map<WebSocket, string>(),
+      persistTimer: null,
+      persistInFlight: false,
+      persistQueued: false,
+      lastPersistedTitle: params.initialTitle,
+      lastPersistedContent: params.initialContent,
+      lastUpdatedById: params.initialUpdatedById,
+      teardown: () => {
+        awareness.off("update", awarenessUpdateHandler);
+        doc.off("update", documentUpdateHandler);
+        if (room.persistTimer) {
+          clearTimeout(room.persistTimer);
+          room.persistTimer = null;
+        }
+        doc.destroy();
+      }
+    };
+
+    const awarenessUpdateHandler = ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }, origin: unknown): void => {
+      const changedClients = [...added, ...updated, ...removed];
+      if (origin instanceof WebSocket) {
+        const controlledClients = room.connections.get(origin);
+        if (controlledClients) {
+          for (const clientId of added) {
+            controlledClients.add(clientId);
+          }
+          for (const clientId of removed) {
+            controlledClients.delete(clientId);
+          }
+        }
+      }
+
+      const encoder = encoding.createEncoder();
+      encoding.writeVarUint(encoder, MESSAGE_AWARENESS);
+      encoding.writeVarUint8Array(encoder, awarenessProtocol.encodeAwarenessUpdate(room.awareness, changedClients));
+      const message = encoding.toUint8Array(encoder);
+
+      for (const ws of room.connections.keys()) {
+        safeSend(ws, message);
+      }
+    };
+
+    const documentUpdateHandler = (update: Uint8Array, origin: unknown): void => {
+      if (origin === INITIAL_LOAD_ORIGIN) {
+        return;
+      }
+
+      if (origin instanceof WebSocket) {
+        const userId = room.connectionUsers.get(origin);
+        if (userId) {
+          room.lastUpdatedById = userId;
+        }
+      }
+
+      const encoder = encoding.createEncoder();
+      encoding.writeVarUint(encoder, MESSAGE_SYNC);
+      syncProtocol.writeUpdate(encoder, update);
+      const message = encoding.toUint8Array(encoder);
+
+      for (const ws of room.connections.keys()) {
+        if (origin instanceof WebSocket && ws === origin) {
+          continue;
+        }
+        safeSend(ws, message);
+      }
+
+      this.scheduleWikiPageRoomPersist(room);
+    };
+
+    awareness.on("update", awarenessUpdateHandler);
+    doc.on("update", documentUpdateHandler);
+    doc.transact(() => {
+      const yTitle = doc.getText(WIKI_YDOC_TITLE_KEY);
+      const yContent = doc.getText(WIKI_YDOC_CONTENT_KEY);
+      if (params.initialTitle.length > 0) {
+        yTitle.insert(0, params.initialTitle);
+      }
+      if (params.initialContent.length > 0) {
+        yContent.insert(0, params.initialContent);
+      }
+    }, INITIAL_LOAD_ORIGIN);
+
+    this.rooms.set(params.roomKey, room);
+    return room;
+  }
+
+  private scheduleWikiPageRoomPersist(room: WikiPageRoom): void {
+    if (room.persistTimer) {
+      clearTimeout(room.persistTimer);
+    }
+
+    room.persistTimer = setTimeout(() => {
+      room.persistTimer = null;
+      void this.persistWikiPageRoom(room);
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }
+
+  private wikiPageRoomSnapshot(room: WikiPageRoom): { title: string; contentMarkdown: string } {
+    return {
+      title: room.doc.getText(WIKI_YDOC_TITLE_KEY).toString(),
+      contentMarkdown: room.doc.getText(WIKI_YDOC_CONTENT_KEY).toString()
+    };
+  }
+
+  private async persistWikiPageRoom(
+    room: WikiPageRoom,
+    forcedState?: { title: string; contentMarkdown: string },
+    forcedUpdatedById?: string
+  ): Promise<void> {
+    if (room.persistInFlight) {
+      room.persistQueued = true;
+      return;
+    }
+
+    room.persistInFlight = true;
+
+    try {
+      const nextState = forcedState ?? this.wikiPageRoomSnapshot(room);
+      const hasChanges =
+        nextState.title !== room.lastPersistedTitle || nextState.contentMarkdown !== room.lastPersistedContent;
+      if (!hasChanges) {
+        return;
+      }
+
+      const updatedById = forcedUpdatedById ?? room.lastUpdatedById;
+      const updatedDraft = await this.prisma.$transaction(async (tx) => {
+        const page = await tx.wikiPage.findFirst({
+          where: {
+            id: room.wikiPageId,
+            deletedAt: null
+          },
+          select: {
+            id: true,
+            title: true,
+            currentRevision: {
+              select: {
+                contentMarkdown: true
+              }
+            },
+            draft: {
+              select: {
+                id: true
+              }
+            }
+          }
+        });
+
+        if (!page) {
+          throw new NotFoundException("Wiki page not found");
+        }
+
+        if (page.draft) {
+          return tx.wikiDraft.update({
+            where: {
+              pageId: room.wikiPageId
+            },
+            data: {
+              title: nextState.title,
+              contentMarkdown: nextState.contentMarkdown,
+              draftVersion: {
+                increment: 1
+              },
+              updatedById
+            },
+            select: {
+              updatedById: true
+            }
+          });
+        }
+
+        return tx.wikiDraft.create({
+          data: {
+            pageId: room.wikiPageId,
+            title: nextState.title || page.title,
+            contentMarkdown: nextState.contentMarkdown || page.currentRevision?.contentMarkdown || "",
+            draftVersion: 1,
+            updatedById
+          },
+          select: {
+            updatedById: true
+          }
+        });
+      });
+
+      room.lastPersistedTitle = nextState.title;
+      room.lastPersistedContent = nextState.contentMarkdown;
+      room.lastUpdatedById = updatedDraft.updatedById;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown wiki persistence error";
+      this.logger.error(`Wiki collaboration autosave failed for ${room.key}: ${message}`);
+    } finally {
+      room.persistInFlight = false;
+      if (room.persistQueued) {
+        room.persistQueued = false;
+        this.scheduleWikiPageRoomPersist(room);
+      }
+    }
+  }
+
+  private async getOrCreateWikiDraftSnapshot(pageId: string, updatedById: string): Promise<{
+    draftVersion: number;
+    updatedAt: string;
+    updatedBy: { id: string; name: string; email: string };
+  }> {
+    const draft = await this.prisma.$transaction(async (tx) => {
+      const page = await tx.wikiPage.findFirst({
+        where: {
+          id: pageId,
+          deletedAt: null
+        },
+        select: {
+          id: true,
+          title: true,
+          currentRevision: {
+            select: {
+              contentMarkdown: true
+            }
+          },
+          draft: {
+            select: {
+              title: true,
+              contentMarkdown: true,
+              draftVersion: true,
+              updatedAt: true,
+              updatedBy: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (!page) {
+        throw new NotFoundException("Wiki page not found");
+      }
+
+      if (page.draft) {
+        return page.draft;
+      }
+
+      return tx.wikiDraft.create({
+        data: {
+          pageId: page.id,
+          title: page.title,
+          contentMarkdown: page.currentRevision?.contentMarkdown ?? "",
+          draftVersion: 1,
+          updatedById
+        },
+        select: {
+          draftVersion: true,
+          updatedAt: true,
+          updatedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true
+            }
+          }
+        }
+      });
+    });
+
+    return {
+      draftVersion: draft.draftVersion,
+      updatedAt: draft.updatedAt.toISOString(),
+      updatedBy: draft.updatedBy
+    };
+  }
+
+  async flushWikiPageDraft(pageId: string, user: AuthenticatedUser): Promise<{
+    draftVersion: number;
+    updatedAt: string;
+    updatedBy: { id: string; name: string; email: string };
+  }> {
+    const page = await this.prisma.wikiPage.findFirst({
+      where: {
+        id: pageId,
+        deletedAt: null
+      },
+      select: {
+        id: true,
+        projectId: true
+      }
+    });
+
+    if (!page) {
+      throw new NotFoundException("Wiki page not found");
+    }
+
+    await this.accessService.ensureProjectWritable(user.userId, user.globalRole, page.projectId);
+
+    const roomKey = `wiki-page:${page.id}`;
+    const room = this.rooms.get(roomKey);
+    if (room?.kind === "wiki-page") {
+      const snapshot = this.wikiPageRoomSnapshot(room);
+      room.lastUpdatedById = user.userId;
+      await this.persistWikiPageRoom(room, snapshot, user.userId);
+    }
+
+    return this.getOrCreateWikiDraftSnapshot(page.id, user.userId);
+  }
+
   private async ensureFileRoomLoaded(room: FileRoom): Promise<void> {
     if (room.loadPromise) {
       await room.loadPromise;
@@ -497,7 +1002,7 @@ export class DocumentsCollaborationServer {
       }
 
       room.doc.transact(() => {
-        const yText = room.doc.getText(YDOC_TEXT_KEY);
+        const yText = room.doc.getText(FILE_YDOC_TEXT_KEY);
         if (yText.length > 0) {
           yText.delete(0, yText.length);
         }
@@ -532,7 +1037,7 @@ export class DocumentsCollaborationServer {
     room.persistInFlight = true;
 
     try {
-      const nextContent = forcedContent ?? room.doc.getText(YDOC_TEXT_KEY).toString();
+      const nextContent = forcedContent ?? room.doc.getText(FILE_YDOC_TEXT_KEY).toString();
       if (nextContent === room.lastPersistedContent) {
         return;
       }
@@ -630,11 +1135,15 @@ export class DocumentsCollaborationServer {
     }
 
     room.connections.delete(connection);
+    room.connectionUsers.delete(connection);
 
     if (room.connections.size === 0) {
       if (room.kind === "file") {
-        const contentSnapshot = room.doc.getText(YDOC_TEXT_KEY).toString();
+        const contentSnapshot = room.doc.getText(FILE_YDOC_TEXT_KEY).toString();
         void this.persistRoom(room, contentSnapshot);
+      } else if (room.kind === "wiki-page") {
+        const snapshot = this.wikiPageRoomSnapshot(room);
+        void this.persistWikiPageRoom(room, snapshot);
       }
       room.teardown();
       this.rooms.delete(room.key);

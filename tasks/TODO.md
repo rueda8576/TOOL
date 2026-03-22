@@ -432,6 +432,16 @@
 - [x] Add autosave (3s debounce) for editable users while preserving manual `Save` and `Compile` flows.
 - [x] Validate with `pnpm --filter @doctoral/api build`, `pnpm --filter @doctoral/web build`, `pnpm --filter @doctoral/api test`.
 
+## Wiki vNext - Real-time collaborative editing (2026-03-22)
+- [x] Extend collaboration server to support `wiki-presence` and `wiki-page` rooms on `/collab`.
+- [x] Persist collaborative wiki draft (`title` + `contentMarkdown`) with debounce and writer tracking.
+- [x] Add `POST /wiki-pages/:pageId/realtime-flush` endpoint and service wiring.
+- [x] Integrate wiki realtime providers in web editor (presence + shared draft sync + fallback).
+- [x] Route `Save draft` and `Publish` through realtime flush when realtime is active.
+- [x] Keep classic wiki autosave/conflict flow as automatic fallback when realtime is unavailable.
+- [x] Validate with `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, `pnpm --filter @doctoral/web build`.
+- [ ] Manual 2-browser verification for shared typing/presence and forced fallback scenarios.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -493,3 +503,4 @@
 - 2026-03-14: Improved Documents by preserving Monaco undo/redo history after compile refresh and enabling blank LaTeX version scaffolding (`main.tex`, `references.bib`, `Figures/`) from both creation flows.
 - 2026-03-18: Upgraded invitation emails with security transparency copy, explicit `/login` link, UTC-readable expiration, and HTML+text fallback delivery contract across API queue and worker mail sender.
 - 2026-03-18: Implemented real-time collaborative Documents editing with Yjs/WebSocket (per-document presence + per-file cursors), backend debounced autosave to LaTeX workspace, and nginx websocket proxy support.
+- 2026-03-22: Implemented Wiki real-time editing v1 (`wiki-presence` + `wiki-page` rooms, flush endpoint, realtime save/publish integration, and frontend fallback to classic autosave/conflict mode).

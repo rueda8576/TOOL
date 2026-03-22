@@ -6,14 +6,23 @@ import rehypeKatex from "rehype-katex";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import { WebsocketProvider } from "y-websocket";
+import * as Y from "yjs";
 
 import { AppShell } from "./app-shell";
 import { ProjectSubtitle } from "./project-subtitle";
 import { API_BASE_URL, LoginResponse } from "../lib/client-api";
+import {
+  buildCollaboratorIdentity,
+  CollaboratorPresence,
+  listCollaboratorsFromAwareness,
+  resolveCollaborationServerUrl
+} from "../lib/documents-collaboration";
 import { useUnsavedChangesGuard } from "../lib/use-unsaved-changes-guard";
 import {
   createWikiPage,
   DraftConflictPayload,
+  flushWikiRealtimeDraft,
   getWikiPageByPath,
   listWikiRevisions,
   listWikiTree,
@@ -32,6 +41,9 @@ type SaveState = "idle" | "saving" | "saved" | "error" | "conflict";
 
 const WIKI_PATH_SEGMENT_PATTERN = /^[a-z0-9-]+$/;
 const INDENT_SIZE = 2;
+const WIKI_REALTIME_TITLE_KEY = "title";
+const WIKI_REALTIME_CONTENT_KEY = "content";
+const WIKI_REALTIME_AUTOSAVE_MARK_MS = 3250;
 
 type TextTransformResult = {
   nextValue: string;
@@ -283,6 +295,36 @@ function buildListContinuationOnEnter(
   };
 }
 
+function applyStringToYText(yText: Y.Text, nextValue: string): void {
+  const currentValue = yText.toString();
+  if (currentValue === nextValue) {
+    return;
+  }
+
+  let prefixLength = 0;
+  const maxPrefix = Math.min(currentValue.length, nextValue.length);
+  while (prefixLength < maxPrefix && currentValue[prefixLength] === nextValue[prefixLength]) {
+    prefixLength += 1;
+  }
+
+  let currentSuffix = currentValue.length - 1;
+  let nextSuffix = nextValue.length - 1;
+  while (currentSuffix >= prefixLength && nextSuffix >= prefixLength && currentValue[currentSuffix] === nextValue[nextSuffix]) {
+    currentSuffix -= 1;
+    nextSuffix -= 1;
+  }
+
+  const deleteLength = currentSuffix - prefixLength + 1;
+  if (deleteLength > 0) {
+    yText.delete(prefixLength, deleteLength);
+  }
+
+  const insertText = nextValue.slice(prefixLength, nextSuffix + 1);
+  if (insertText.length > 0) {
+    yText.insert(prefixLength, insertText);
+  }
+}
+
 function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
   if (!rawUser) {
     return null;
@@ -451,8 +493,16 @@ export function WikiHub({
   const markdownRef = useRef<HTMLTextAreaElement>(null);
   const lastSavedSnapshotRef = useRef<{ title: string; content: string } | null>(null);
   const draftVersionRef = useRef<number | null>(null);
+  const wikiPresenceProviderRef = useRef<WebsocketProvider | null>(null);
+  const wikiPresenceDocRef = useRef<Y.Doc | null>(null);
+  const wikiPageProviderRef = useRef<WebsocketProvider | null>(null);
+  const wikiPageDocRef = useRef<Y.Doc | null>(null);
+  const wikiRealtimeTitleRef = useRef<Y.Text | null>(null);
+  const wikiRealtimeContentRef = useRef<Y.Text | null>(null);
+  const wikiRealtimeAutosaveMarkerRef = useRef<number | null>(null);
 
   const [token, setToken] = useState<string | null>(null);
+  const [sessionUser, setSessionUser] = useState<LoginResponse["user"] | null>(null);
   const [userRole, setUserRole] = useState<LoginResponse["user"]["globalRole"] | null>(null);
   const [treeNodes, setTreeNodes] = useState<WikiTreeNode[]>([]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -485,6 +535,10 @@ export function WikiHub({
   const [searchResults, setSearchResults] = useState<WikiSearchResult[]>([]);
   const [conflictDraft, setConflictDraft] = useState<DraftConflictPayload | null>(null);
   const [conflictLocalSnapshot, setConflictLocalSnapshot] = useState<{ title: string; content: string } | null>(null);
+  const [collaborators, setCollaborators] = useState<CollaboratorPresence[]>([]);
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+  const [isRealtimeActive, setIsRealtimeActive] = useState(false);
+  const [realtimeStatusNote, setRealtimeStatusNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -492,23 +546,49 @@ export function WikiHub({
   const normalizedSearchQuery = useMemo(() => treeQuery.trim(), [treeQuery]);
   const searchModeActive = normalizedSearchQuery.length >= 2;
   const isReader = userRole === "reader";
+  const { collaborationServerUrl, collaborationConfigError } = useMemo(() => {
+    try {
+      return {
+        collaborationServerUrl: resolveCollaborationServerUrl(API_BASE_URL),
+        collaborationConfigError: null
+      };
+    } catch (collaborationError) {
+      console.error("Failed to resolve wiki collaboration websocket URL.", collaborationError);
+      return {
+        collaborationServerUrl: null,
+        collaborationConfigError: "Realtime collaboration is unavailable. Editor fallback remains active."
+      };
+    }
+  }, []);
+  const collaboratorIdentity = useMemo(() => buildCollaboratorIdentity(sessionUser), [sessionUser]);
 
   const allPagePaths = useMemo(() => flattenPagePaths(treeNodes), [treeNodes]);
+  const visibleCollaborators = useMemo(() => collaborators.slice(0, 6), [collaborators]);
+  const hiddenCollaboratorsCount = useMemo(
+    () => Math.max(collaborators.length - visibleCollaborators.length, 0),
+    [collaborators.length, visibleCollaborators.length]
+  );
 
   const updateDraftContent = useCallback((nextContent: string): void => {
+    if (isRealtimeActive) {
+      const yContent = wikiRealtimeContentRef.current;
+      if (yContent) {
+        applyStringToYText(yContent, nextContent);
+      }
+    }
     setDraftContent(nextContent);
     setSaveState((current) => (current === "saved" ? "idle" : current));
-  }, []);
+  }, [isRealtimeActive]);
 
   const isDirty = useMemo(() => {
-    if (!isEditing) {
+    if (!isEditing || isRealtimeActive) {
       return false;
     }
     if (!lastSavedSnapshotRef.current) {
       return false;
     }
     return draftTitle !== lastSavedSnapshotRef.current.title || draftContent !== lastSavedSnapshotRef.current.content;
-  }, [draftContent, draftTitle, isEditing]);
+  }, [draftContent, draftTitle, isEditing, isRealtimeActive]);
   const { requestExitProject } = useUnsavedChangesGuard({
     isDirty,
     confirmMessage: "You have unsaved wiki draft changes. Exit project anyway?"
@@ -517,6 +597,57 @@ export function WikiHub({
   useEffect(() => {
     draftVersionRef.current = draftVersion;
   }, [draftVersion]);
+
+  const destroyWikiPageCollaboration = useCallback((): void => {
+    if (wikiRealtimeAutosaveMarkerRef.current !== null) {
+      window.clearTimeout(wikiRealtimeAutosaveMarkerRef.current);
+      wikiRealtimeAutosaveMarkerRef.current = null;
+    }
+
+    const provider = wikiPageProviderRef.current;
+    if (provider) {
+      provider.awareness.setLocalState(null);
+      provider.destroy();
+      wikiPageProviderRef.current = null;
+    }
+
+    const doc = wikiPageDocRef.current;
+    if (doc) {
+      doc.destroy();
+      wikiPageDocRef.current = null;
+    }
+
+    wikiRealtimeTitleRef.current = null;
+    wikiRealtimeContentRef.current = null;
+    setIsRealtimeConnected(false);
+    setIsRealtimeActive(false);
+  }, []);
+
+  const destroyWikiPresenceCollaboration = useCallback((): void => {
+    const provider = wikiPresenceProviderRef.current;
+    if (provider) {
+      provider.awareness.setLocalState(null);
+      provider.destroy();
+      wikiPresenceProviderRef.current = null;
+    }
+
+    const doc = wikiPresenceDocRef.current;
+    if (doc) {
+      doc.destroy();
+      wikiPresenceDocRef.current = null;
+    }
+
+    setCollaborators([]);
+  }, []);
+
+  const disableRealtimeWithFallback = useCallback(
+    (note: string): void => {
+      destroyWikiPageCollaboration();
+      destroyWikiPresenceCollaboration();
+      setRealtimeStatusNote(note);
+    },
+    [destroyWikiPageCollaboration, destroyWikiPresenceCollaboration]
+  );
 
   const hydrateDraftFromDetail = useCallback((detail: WikiPageDetail): void => {
     const sourceTitle = detail.draft?.title ?? detail.page.title;
@@ -601,7 +732,9 @@ export function WikiHub({
     }
 
     setToken(storedToken);
-    setUserRole(parseStoredUser(localStorage.getItem("doctoral_user"))?.globalRole ?? null);
+    const storedUser = parseStoredUser(localStorage.getItem("doctoral_user"));
+    setSessionUser(storedUser);
+    setUserRole(storedUser?.globalRole ?? null);
 
     void (async () => {
       const nodes = await loadTree(storedToken);
@@ -671,13 +804,257 @@ export function WikiHub({
     };
   }, [normalizedSearchQuery, projectId, searchModeActive, token]);
 
+  useEffect(() => {
+    if (!isEditing || isReader) {
+      setRealtimeStatusNote(null);
+      return;
+    }
+    if (collaborationConfigError) {
+      disableRealtimeWithFallback(collaborationConfigError);
+    }
+  }, [collaborationConfigError, disableRealtimeWithFallback, isEditing, isReader]);
+
+  useEffect(() => {
+    if (!isEditing || !pageDetail || !token || isReader) {
+      destroyWikiPresenceCollaboration();
+      return;
+    }
+
+    if (!collaborationServerUrl || !collaboratorIdentity) {
+      disableRealtimeWithFallback("Realtime collaboration is unavailable. Editor fallback remains active.");
+      return;
+    }
+
+    destroyWikiPresenceCollaboration();
+
+    const presenceDoc = new Y.Doc();
+    let presenceProvider: WebsocketProvider;
+    try {
+      presenceProvider = new WebsocketProvider(collaborationServerUrl, `wiki-presence-${pageDetail.page.id}`, presenceDoc, {
+        connect: true,
+        disableBc: true,
+        params: {
+          token,
+          kind: "wiki-presence",
+          wikiPageId: pageDetail.page.id
+        }
+      });
+    } catch (connectionError) {
+      console.error("Failed to initialize wiki presence provider.", connectionError);
+      presenceDoc.destroy();
+      disableRealtimeWithFallback("Realtime collaboration is unavailable. Editor fallback remains active.");
+      return;
+    }
+
+    wikiPresenceDocRef.current = presenceDoc;
+    wikiPresenceProviderRef.current = presenceProvider;
+
+    const syncCollaborators = (): void => {
+      const states = presenceProvider.awareness.getStates() as Map<number, Record<string, unknown>>;
+      setCollaborators(listCollaboratorsFromAwareness(states, collaboratorIdentity.id));
+    };
+
+    const onAwarenessUpdate = (): void => {
+      syncCollaborators();
+    };
+
+    const onStatus = (event: { status: "connected" | "disconnected" | "connecting" }): void => {
+      if (event.status === "disconnected") {
+        setCollaborators([]);
+      }
+    };
+
+    presenceProvider.awareness.on("update", onAwarenessUpdate);
+    presenceProvider.on("status", onStatus);
+    presenceProvider.awareness.setLocalState({
+      user: collaboratorIdentity,
+      activePath: selectedPath,
+      updatedAt: Date.now()
+    });
+    syncCollaborators();
+
+    return () => {
+      presenceProvider.awareness.off("update", onAwarenessUpdate);
+      presenceProvider.off("status", onStatus);
+      destroyWikiPresenceCollaboration();
+    };
+  }, [
+    collaborationServerUrl,
+    collaboratorIdentity,
+    disableRealtimeWithFallback,
+    destroyWikiPresenceCollaboration,
+    isEditing,
+    isReader,
+    pageDetail,
+    selectedPath,
+    token
+  ]);
+
+  useEffect(() => {
+    const presenceProvider = wikiPresenceProviderRef.current;
+    if (!presenceProvider || !collaboratorIdentity || !isEditing) {
+      return;
+    }
+    presenceProvider.awareness.setLocalState({
+      user: collaboratorIdentity,
+      activePath: selectedPath,
+      updatedAt: Date.now()
+    });
+  }, [collaboratorIdentity, isEditing, selectedPath]);
+
+  useEffect(() => {
+    if (!isEditing || !pageDetail || !token || isReader) {
+      destroyWikiPageCollaboration();
+      return;
+    }
+
+    if (!collaborationServerUrl || !collaboratorIdentity) {
+      disableRealtimeWithFallback("Realtime collaboration is unavailable. Editor fallback remains active.");
+      return;
+    }
+
+    destroyWikiPageCollaboration();
+    const pageDoc = new Y.Doc();
+    let pageProvider: WebsocketProvider;
+
+    try {
+      pageProvider = new WebsocketProvider(collaborationServerUrl, `wiki-page-${pageDetail.page.id}`, pageDoc, {
+        connect: true,
+        disableBc: true,
+        params: {
+          token,
+          kind: "wiki-page",
+          wikiPageId: pageDetail.page.id
+        }
+      });
+    } catch (connectionError) {
+      console.error("Failed to initialize wiki page provider.", connectionError);
+      pageDoc.destroy();
+      disableRealtimeWithFallback("Realtime collaboration is unavailable. Editor fallback remains active.");
+      return;
+    }
+
+    wikiPageDocRef.current = pageDoc;
+    wikiPageProviderRef.current = pageProvider;
+    setIsRealtimeActive(true);
+    setIsRealtimeConnected(false);
+    const yTitle = pageDoc.getText(WIKI_REALTIME_TITLE_KEY);
+    const yContent = pageDoc.getText(WIKI_REALTIME_CONTENT_KEY);
+    wikiRealtimeTitleRef.current = yTitle;
+    wikiRealtimeContentRef.current = yContent;
+
+    const syncFromSharedDoc = (): void => {
+      setDraftTitle(yTitle.toString());
+      setDraftContent(yContent.toString());
+    };
+
+    const onSharedDocUpdate = (): void => {
+      syncFromSharedDoc();
+      setSaveState((current) => (current === "saved" ? "idle" : current));
+    };
+
+    const onConnectionStatus = (event: { status: "connected" | "disconnected" | "connecting" }): void => {
+      if (event.status === "connected") {
+        setIsRealtimeConnected(true);
+        setIsRealtimeActive(true);
+        setRealtimeStatusNote(null);
+        return;
+      }
+      if (event.status === "disconnected") {
+        window.setTimeout(() => {
+          disableRealtimeWithFallback("Realtime collaboration is offline. Switched to local draft autosave.");
+        }, 0);
+        return;
+      }
+      setIsRealtimeConnected(false);
+    };
+
+    yTitle.observe(onSharedDocUpdate);
+    yContent.observe(onSharedDocUpdate);
+    pageProvider.on("status", onConnectionStatus);
+    pageProvider.awareness.setLocalState({
+      user: collaboratorIdentity,
+      activePath: selectedPath,
+      updatedAt: Date.now()
+    });
+
+    return () => {
+      yTitle.unobserve(onSharedDocUpdate);
+      yContent.unobserve(onSharedDocUpdate);
+      pageProvider.off("status", onConnectionStatus);
+      destroyWikiPageCollaboration();
+    };
+  }, [
+    collaborationServerUrl,
+    collaboratorIdentity,
+    disableRealtimeWithFallback,
+    destroyWikiPageCollaboration,
+    isEditing,
+    isReader,
+    pageDetail,
+    selectedPath,
+    token
+  ]);
+
+  useEffect(() => {
+    const pageProvider = wikiPageProviderRef.current;
+    if (!pageProvider || !collaboratorIdentity || !isEditing) {
+      return;
+    }
+    pageProvider.awareness.setLocalState({
+      user: collaboratorIdentity,
+      activePath: selectedPath,
+      updatedAt: Date.now()
+    });
+  }, [collaboratorIdentity, isEditing, selectedPath]);
+
+  useEffect(() => {
+    if (!isEditing || !isRealtimeActive || isReader || saveState === "saving" || saveState === "conflict") {
+      if (wikiRealtimeAutosaveMarkerRef.current !== null) {
+        window.clearTimeout(wikiRealtimeAutosaveMarkerRef.current);
+        wikiRealtimeAutosaveMarkerRef.current = null;
+      }
+      return;
+    }
+
+    const snapshot = lastSavedSnapshotRef.current;
+    if (snapshot && snapshot.title === draftTitle && snapshot.content === draftContent) {
+      return;
+    }
+
+    setSaveState((current) => (current === "saved" ? "idle" : current));
+    if (wikiRealtimeAutosaveMarkerRef.current !== null) {
+      window.clearTimeout(wikiRealtimeAutosaveMarkerRef.current);
+    }
+    wikiRealtimeAutosaveMarkerRef.current = window.setTimeout(() => {
+      lastSavedSnapshotRef.current = {
+        title: draftTitle,
+        content: draftContent
+      };
+      setSaveState("saved");
+      setLastSavedAt(new Date().toISOString());
+      wikiRealtimeAutosaveMarkerRef.current = null;
+    }, WIKI_REALTIME_AUTOSAVE_MARK_MS);
+
+    return () => {
+      if (wikiRealtimeAutosaveMarkerRef.current !== null) {
+        window.clearTimeout(wikiRealtimeAutosaveMarkerRef.current);
+        wikiRealtimeAutosaveMarkerRef.current = null;
+      }
+    };
+  }, [draftContent, draftTitle, isEditing, isReader, isRealtimeActive, saveState]);
+
+  useEffect(
+    () => () => {
+      destroyWikiPageCollaboration();
+      destroyWikiPresenceCollaboration();
+    },
+    [destroyWikiPageCollaboration, destroyWikiPresenceCollaboration]
+  );
+
   const saveDraftNow = useCallback(
     async (baseVersionOverride?: number): Promise<number | null> => {
       if (!token || !pageDetail || isReader) {
-        return null;
-      }
-      const baseVersion = baseVersionOverride ?? draftVersionRef.current;
-      if (!baseVersion) {
         return null;
       }
 
@@ -685,11 +1062,20 @@ export function WikiHub({
       setError(null);
 
       try {
-        const response = await saveWikiDraft(pageDetail.page.id, token, {
-          title: draftTitle,
-          contentMarkdown: draftContent,
-          baseDraftVersion: baseVersion
-        });
+        const response = isRealtimeActive
+          ? await flushWikiRealtimeDraft(pageDetail.page.id, token)
+          : await (() => {
+              const baseVersion = baseVersionOverride ?? draftVersionRef.current;
+              if (!baseVersion) {
+                throw new Error("Draft version is missing.");
+              }
+              return saveWikiDraft(pageDetail.page.id, token, {
+                title: draftTitle,
+                contentMarkdown: draftContent,
+                baseDraftVersion: baseVersion
+              });
+            })();
+
         setDraftVersion(response.draftVersion);
         draftVersionRef.current = response.draftVersion;
         lastSavedSnapshotRef.current = {
@@ -717,11 +1103,11 @@ export function WikiHub({
         return null;
       }
     },
-    [draftContent, draftTitle, isReader, pageDetail, token]
+    [draftContent, draftTitle, isReader, isRealtimeActive, pageDetail, token]
   );
 
   useEffect(() => {
-    if (!isEditing || isReader || !token || !pageDetail || !isDirty) {
+    if (!isEditing || isReader || !token || !pageDetail || isRealtimeActive || !isDirty) {
       return;
     }
     if (saveState === "saving" || saveState === "conflict") {
@@ -735,10 +1121,10 @@ export function WikiHub({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [isDirty, isEditing, isReader, pageDetail, saveDraftNow, saveState, token]);
+  }, [isDirty, isEditing, isReader, isRealtimeActive, pageDetail, saveDraftNow, saveState, token]);
 
   const onDraftBlur = (): void => {
-    if (!isDirty || saveState === "saving") {
+    if (isRealtimeActive || !isDirty || saveState === "saving") {
       return;
     }
     void saveDraftNow();
@@ -753,21 +1139,29 @@ export function WikiHub({
     setSuccess(null);
 
     try {
-      if (isDirty) {
+      let publishBaseVersion = draftVersionRef.current;
+
+      if (isRealtimeActive) {
+        const flushedVersion = await saveDraftNow();
+        if (!flushedVersion) {
+          return;
+        }
+        publishBaseVersion = flushedVersion;
+      } else if (isDirty) {
         const savedVersion = await saveDraftNow();
         if (!savedVersion) {
           return;
         }
+        publishBaseVersion = savedVersion;
       }
 
-      const baseVersion = draftVersionRef.current;
-      if (!baseVersion) {
+      if (!publishBaseVersion) {
         setError("Draft version is missing.");
         return;
       }
 
       const published = await publishWikiPage(pageDetail.page.id, token, {
-        baseDraftVersion: baseVersion,
+        baseDraftVersion: publishBaseVersion,
         changeNote: publishNote.trim() || undefined
       });
 
@@ -1455,12 +1849,33 @@ export function WikiHub({
                   </button>
                 </div>
                 <div className="wiki-save-status">
+                  <div className="wiki-collaborators" aria-live="polite" aria-label="Collaborators in this wiki page">
+                    {visibleCollaborators.map((collaborator) => (
+                      <span
+                        key={`${collaborator.id}-${collaborator.clientId}`}
+                        className={collaborator.isSelf ? "wiki-collaborator-pill wiki-collaborator-pill-self" : "wiki-collaborator-pill"}
+                        style={{ backgroundColor: collaborator.color, borderColor: collaborator.color }}
+                        title={collaborator.activePath ? `${collaborator.name} editing ${collaborator.activePath}` : `${collaborator.name} editing`}
+                      >
+                        {collaborator.initials}
+                      </span>
+                    ))}
+                    {hiddenCollaboratorsCount > 0 ? (
+                      <span className="wiki-collaborator-more" title={`${hiddenCollaboratorsCount} more collaborators`}>
+                        +{hiddenCollaboratorsCount}
+                      </span>
+                    ) : null}
+                    <span className={isRealtimeConnected ? "wiki-realtime-status wiki-realtime-status-live" : "wiki-realtime-status"}>
+                      {isRealtimeConnected ? "Live" : isRealtimeActive ? "Connecting" : "Fallback"}
+                    </span>
+                    {realtimeStatusNote ? <span className="wiki-realtime-note">{realtimeStatusNote}</span> : null}
+                  </div>
                   <span>Status: {saveState}</span>
                   {lastSavedAt ? <span>Last saved: {timeLabel(lastSavedAt)}</span> : null}
                 </div>
               </div>
 
-              {conflictDraft ? (
+              {!isRealtimeActive && conflictDraft ? (
                 <div className="alert alert-error">
                   <p>
                     Draft conflict with version {conflictDraft.draftVersion} updated by {conflictDraft.updatedBy.name}.
@@ -1485,7 +1900,14 @@ export function WikiHub({
                   className="input"
                   value={draftTitle}
                   onChange={(event) => {
-                    setDraftTitle(event.target.value);
+                    const nextTitle = event.target.value;
+                    if (isRealtimeActive) {
+                      const yTitle = wikiRealtimeTitleRef.current;
+                      if (yTitle) {
+                        applyStringToYText(yTitle, nextTitle);
+                      }
+                    }
+                    setDraftTitle(nextTitle);
                     setSaveState((current) => (current === "saved" ? "idle" : current));
                   }}
                   maxLength={300}

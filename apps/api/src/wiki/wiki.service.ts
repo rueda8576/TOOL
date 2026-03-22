@@ -4,6 +4,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { ProjectAccessService } from "../common/project-access.service";
+import { getDocumentsCollaborationServer } from "../documents/collaboration-server-registry";
 import { PrismaService } from "../prisma/prisma.service";
 import { StorageService } from "../storage/storage.service";
 import { CreateWikiPageDto } from "./dto/create-wiki-page.dto";
@@ -872,6 +873,30 @@ export class WikiService {
       draftVersion: result.updated.draftVersion,
       updatedAt: result.updated.updatedAt.toISOString(),
       updatedBy: result.updated.updatedBy
+    };
+  }
+
+  async flushRealtimeDraft(pageId: string, user: AuthenticatedUser): Promise<{
+    draftVersion: number;
+    updatedAt: string;
+    updatedBy: WikiUserSummary;
+  }> {
+    const collabServer = getDocumentsCollaborationServer();
+    if (collabServer) {
+      return collabServer.flushWikiPageDraft(pageId, user);
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const page = await this.getPageForMutation(pageId, tx);
+      await this.accessService.ensureProjectWritable(user.userId, user.globalRole, page.projectId);
+      const draft = await this.ensureDraftExists(tx, page, user.userId);
+      return draft;
+    });
+
+    return {
+      draftVersion: result.draftVersion,
+      updatedAt: result.updatedAt.toISOString(),
+      updatedBy: result.updatedBy
     };
   }
 

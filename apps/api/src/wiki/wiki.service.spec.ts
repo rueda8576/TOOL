@@ -1,8 +1,13 @@
 import { BadRequestException, ConflictException } from "@nestjs/common";
 
+import * as collaborationRegistry from "../documents/collaboration-server-registry";
 import { WikiService } from "./wiki.service";
 
 describe("WikiService", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   const makeService = (): {
     service: WikiService;
     prisma: any;
@@ -366,6 +371,115 @@ describe("WikiService", () => {
       revisionNumber: 2,
       publishedAt: "2026-03-03T12:00:00.000Z",
       draftVersion: 4
+    });
+  });
+
+  it("flushes realtime wiki draft through collaboration server when available", async () => {
+    const { service } = makeService();
+    const flushWikiPageDraft = jest.fn().mockResolvedValue({
+      draftVersion: 8,
+      updatedAt: "2026-03-22T20:15:00.000Z",
+      updatedBy: {
+        id: "editor-1",
+        name: "Editor",
+        email: "editor@example.com"
+      }
+    });
+
+    jest.spyOn(collaborationRegistry, "getDocumentsCollaborationServer").mockReturnValue({
+      flushWikiPageDraft
+    } as any);
+
+    const user = {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor" as const
+    };
+    const result = await service.flushRealtimeDraft("page-1", user);
+
+    expect(flushWikiPageDraft).toHaveBeenCalledWith("page-1", user);
+    expect(result).toEqual({
+      draftVersion: 8,
+      updatedAt: "2026-03-22T20:15:00.000Z",
+      updatedBy: {
+        id: "editor-1",
+        name: "Editor",
+        email: "editor@example.com"
+      }
+    });
+  });
+
+  it("falls back to local draft snapshot when collaboration server is unavailable", async () => {
+    const { service, prisma, accessService } = makeService();
+    jest.spyOn(collaborationRegistry, "getDocumentsCollaborationServer").mockReturnValue(null);
+
+    const tx: any = {
+      wikiPage: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "page-1",
+          projectId: "project-1",
+          title: "Roadmap",
+          slug: "roadmap",
+          folderPath: "",
+          path: "roadmap",
+          templateType: null,
+          updatedAt: new Date("2026-03-03T10:00:00.000Z"),
+          createdById: "user-1",
+          currentRevision: {
+            id: "revision-1",
+            revisionNumber: 1,
+            contentMarkdown: "published",
+            createdAt: new Date("2026-03-03T09:00:00.000Z"),
+            changeNote: null,
+            createdBy: {
+              id: "user-1",
+              name: "Owner",
+              email: "owner@example.com"
+            }
+          },
+          draft: null
+        })
+      },
+      wikiDraft: {
+        create: jest.fn().mockResolvedValue({
+          id: "draft-1",
+          title: "Roadmap",
+          contentMarkdown: "published",
+          draftVersion: 1,
+          updatedAt: new Date("2026-03-22T20:20:00.000Z"),
+          updatedBy: {
+            id: "editor-1",
+            name: "Editor",
+            email: "editor@example.com"
+          }
+        })
+      }
+    };
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+
+    const result = await service.flushRealtimeDraft("page-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("editor-1", "editor", "project-1");
+    expect(tx.wikiDraft.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          pageId: "page-1",
+          updatedById: "editor-1"
+        })
+      })
+    );
+    expect(result).toEqual({
+      draftVersion: 1,
+      updatedAt: "2026-03-22T20:20:00.000Z",
+      updatedBy: {
+        id: "editor-1",
+        name: "Editor",
+        email: "editor@example.com"
+      }
     });
   });
 

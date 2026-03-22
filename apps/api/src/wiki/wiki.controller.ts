@@ -75,6 +75,14 @@ export class WikiController {
     return this.wikiService.saveDraft(pageId, dto, user);
   }
 
+  @Post("wiki-pages/:pageId/realtime-flush")
+  flushRealtimeDraft(
+    @Param("pageId") pageId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<{ draftVersion: number; updatedAt: string; updatedBy: { id: string; name: string; email: string } }> {
+    return this.wikiService.flushRealtimeDraft(pageId, user);
+  }
+
   @Post("wiki-pages/:pageId/publish")
   publishDraft(
     @Param("pageId") pageId: string,

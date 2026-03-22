@@ -201,6 +201,19 @@ export async function saveWikiDraft(
   return response.json() as Promise<{ draftVersion: number; updatedAt: string; updatedBy: WikiUserSummary }>;
 }
 
+export async function flushWikiRealtimeDraft(
+  pageId: string,
+  token: string
+): Promise<{ draftVersion: number; updatedAt: string; updatedBy: WikiUserSummary }> {
+  const response = await authRequestRaw(`/wiki-pages/${pageId}/realtime-flush`, token, {
+    method: "POST"
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return response.json() as Promise<{ draftVersion: number; updatedAt: string; updatedBy: WikiUserSummary }>;
+}
+
 export async function publishWikiPage(
   pageId: string,
   token: string,
