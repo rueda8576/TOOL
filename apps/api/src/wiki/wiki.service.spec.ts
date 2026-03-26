@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 
 import * as collaborationRegistry from "../documents/collaboration-server-registry";
 import { WikiService } from "./wiki.service";
@@ -35,7 +35,8 @@ describe("WikiService", () => {
       wikiLink: {
         findMany: jest.fn(),
         createMany: jest.fn(),
-        deleteMany: jest.fn()
+        deleteMany: jest.fn(),
+        updateMany: jest.fn()
       },
       wikiAsset: {
         create: jest.fn(),
@@ -481,6 +482,157 @@ describe("WikiService", () => {
         email: "editor@example.com"
       }
     });
+  });
+
+  it("soft deletes wiki pages and detaches related links for editor users", async () => {
+    const { service, prisma, accessService, auditService } = makeService();
+    const deletedAt = new Date("2026-03-26T15:30:00.000Z");
+    const tx: any = {
+      wikiPage: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "page-1",
+          projectId: "project-1",
+          title: "Roadmap",
+          slug: "roadmap",
+          folderPath: "",
+          path: "roadmap",
+          templateType: null,
+          updatedAt: new Date("2026-03-03T10:00:00.000Z"),
+          createdById: "user-1",
+          currentRevision: {
+            id: "revision-1",
+            revisionNumber: 1,
+            contentMarkdown: "published",
+            createdAt: new Date("2026-03-03T09:00:00.000Z"),
+            changeNote: null,
+            createdBy: {
+              id: "user-1",
+              name: "Owner",
+              email: "owner@example.com"
+            }
+          },
+          draft: {
+            id: "draft-1",
+            title: "Roadmap",
+            contentMarkdown: "draft",
+            draftVersion: 1,
+            updatedAt: new Date("2026-03-03T11:00:00.000Z"),
+            updatedBy: {
+              id: "user-2",
+              name: "Editor",
+              email: "editor@example.com"
+            }
+          }
+        }),
+        update: jest.fn().mockResolvedValue({
+          id: "page-1",
+          deletedAt
+        })
+      },
+      wikiLink: {
+        deleteMany: jest.fn(),
+        updateMany: jest.fn()
+      }
+    };
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+
+    const result = await service.deletePage("page-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("editor-1", "editor", "project-1");
+    expect(tx.wikiLink.deleteMany).toHaveBeenCalledWith({
+      where: {
+        fromPageId: "page-1"
+      }
+    });
+    expect(tx.wikiLink.updateMany).toHaveBeenCalledWith({
+      where: {
+        toPageId: "page-1"
+      },
+      data: {
+        toPageId: null
+      }
+    });
+    expect(tx.wikiPage.update).toHaveBeenCalledWith({
+      where: {
+        id: "page-1"
+      },
+      data: {
+        deletedAt: expect.any(Date)
+      },
+      select: {
+        id: true,
+        deletedAt: true
+      }
+    });
+    expect(auditService.log).toHaveBeenCalledWith(expect.objectContaining({ action: "wiki.page.delete" }));
+    expect(result).toEqual({
+      id: "page-1",
+      deletedAt: "2026-03-26T15:30:00.000Z"
+    });
+  });
+
+  it("rejects wiki page deletion for reader users", async () => {
+    const { service, prisma, accessService } = makeService();
+    const tx: any = {
+      wikiPage: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "page-1",
+          projectId: "project-1",
+          title: "Roadmap",
+          slug: "roadmap",
+          folderPath: "",
+          path: "roadmap",
+          templateType: null,
+          updatedAt: new Date("2026-03-03T10:00:00.000Z"),
+          createdById: "user-1",
+          currentRevision: null,
+          draft: null
+        }),
+        update: jest.fn()
+      },
+      wikiLink: {
+        deleteMany: jest.fn(),
+        updateMany: jest.fn()
+      }
+    };
+    accessService.ensureProjectWritable.mockRejectedValueOnce(new ForbiddenException("Forbidden"));
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+
+    await expect(
+      service.deletePage("page-1", {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      })
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(tx.wikiLink.deleteMany).not.toHaveBeenCalled();
+    expect(tx.wikiLink.updateMany).not.toHaveBeenCalled();
+    expect(tx.wikiPage.update).not.toHaveBeenCalled();
+  });
+
+  it("returns not found when deleting a missing wiki page", async () => {
+    const { service, prisma, accessService } = makeService();
+    const tx: any = {
+      wikiPage: {
+        findFirst: jest.fn().mockResolvedValue(null)
+      }
+    };
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+
+    await expect(
+      service.deletePage("missing-page", {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(accessService.ensureProjectWritable).not.toHaveBeenCalled();
   });
 
   it("rejects unsupported wiki asset mime types", async () => {

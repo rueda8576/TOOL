@@ -442,6 +442,13 @@
 - [x] Validate with `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, `pnpm --filter @doctoral/web build`.
 - [ ] Manual 2-browser verification for shared typing/presence and forced fallback scenarios.
 
+## Wiki vNext - TeX delimiter compatibility + page delete (2026-03-26)
+- [x] Add frontend markdown normalization so wiki render/preview support `\\[ ... \\]` and `\\( ... \\)` without changing stored markdown.
+- [x] Add wiki soft-delete endpoint/service flow with outgoing link cleanup, incoming link detachment, and audit logging.
+- [x] Add frontend delete action for writer roles and refresh wiki state/navigation after deletion.
+- [x] Add backend coverage for page deletion behavior and permissions.
+- [x] Validate with `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, `pnpm --filter @doctoral/web build`.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -504,3 +511,4 @@
 - 2026-03-18: Upgraded invitation emails with security transparency copy, explicit `/login` link, UTC-readable expiration, and HTML+text fallback delivery contract across API queue and worker mail sender.
 - 2026-03-18: Implemented real-time collaborative Documents editing with Yjs/WebSocket (per-document presence + per-file cursors), backend debounced autosave to LaTeX workspace, and nginx websocket proxy support.
 - 2026-03-22: Implemented Wiki real-time editing v1 (`wiki-presence` + `wiki-page` rooms, flush endpoint, realtime save/publish integration, and frontend fallback to classic autosave/conflict mode).
+- 2026-03-26: Added wiki TeX delimiter normalization for `\\[ \\]` / `\\( \\)` rendering plus soft-delete page flow with link cleanup, delete UI, and backend coverage.

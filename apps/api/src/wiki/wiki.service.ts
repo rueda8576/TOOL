@@ -1036,6 +1036,65 @@ export class WikiService {
     };
   }
 
+  async deletePage(pageId: string, user: AuthenticatedUser): Promise<{ id: string; deletedAt: string }> {
+    const deletedPage = await this.prisma.$transaction(async (tx) => {
+      const page = await this.getPageForMutation(pageId, tx);
+      await this.accessService.ensureProjectWritable(user.userId, user.globalRole, page.projectId);
+
+      await tx.wikiLink.deleteMany({
+        where: {
+          fromPageId: pageId
+        }
+      });
+
+      await tx.wikiLink.updateMany({
+        where: {
+          toPageId: pageId
+        },
+        data: {
+          toPageId: null
+        }
+      });
+
+      const deletedAt = new Date();
+      const deleted = await tx.wikiPage.update({
+        where: {
+          id: pageId
+        },
+        data: {
+          deletedAt
+        },
+        select: {
+          id: true,
+          deletedAt: true
+        }
+      });
+
+      return {
+        projectId: page.projectId,
+        id: deleted.id,
+        deletedAt: deleted.deletedAt
+      };
+    });
+
+    await this.auditService.log({
+      userId: user.userId,
+      projectId: deletedPage.projectId,
+      entityType: "wiki_page",
+      entityId: deletedPage.id,
+      action: "wiki.page.delete"
+    });
+
+    if (!deletedPage.deletedAt) {
+      throw new NotFoundException("Wiki page not found");
+    }
+
+    return {
+      id: deletedPage.id,
+      deletedAt: deletedPage.deletedAt.toISOString()
+    };
+  }
+
   async listBacklinks(pageId: string, user: AuthenticatedUser): Promise<WikiBacklinkView[]> {
     const page = await this.ensurePageReadable(pageId, user);
 

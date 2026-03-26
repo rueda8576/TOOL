@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
 import type { Response } from "express";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { diskStorage } from "multer";
@@ -90,6 +90,14 @@ export class WikiController {
     @CurrentUser() user: AuthenticatedUser
   ): Promise<{ pageId: string; revisionNumber: number; publishedAt: string; draftVersion: number }> {
     return this.wikiService.publishDraft(pageId, dto, user);
+  }
+
+  @Delete("wiki-pages/:pageId")
+  deletePage(
+    @Param("pageId") pageId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<{ id: string; deletedAt: string }> {
+    return this.wikiService.deletePage(pageId, user);
   }
 
   @Get("wiki-pages/:pageId/backlinks")

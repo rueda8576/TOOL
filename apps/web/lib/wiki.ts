@@ -137,8 +137,98 @@ async function authRequestRaw(path: string, token: string, init?: RequestInit): 
   });
 }
 
+function replaceMathDelimitersOutsideCodeSpans(markdown: string): string {
+  let index = 0;
+  let result = "";
+  let buffer = "";
+
+  const flushBuffer = (): void => {
+    if (!buffer) {
+      return;
+    }
+
+    const withDisplayMath = buffer.replace(/\\\[([\s\S]*?)\\\]/g, (_match, content: string) => {
+      const trimmedContent = content.trim();
+      return trimmedContent ? `\n$$\n${trimmedContent}\n$$\n` : "\n$$\n$$\n";
+    });
+    result += withDisplayMath.replace(/\\\((.+?)\\\)/g, (_match, content: string) => `$${content.trim()}$`);
+    buffer = "";
+  };
+
+  while (index < markdown.length) {
+    if (markdown[index] !== "`") {
+      buffer += markdown[index];
+      index += 1;
+      continue;
+    }
+
+    flushBuffer();
+
+    let tickCount = 1;
+    while (markdown[index + tickCount] === "`") {
+      tickCount += 1;
+    }
+
+    const fence = "`".repeat(tickCount);
+    const closingIndex = markdown.indexOf(fence, index + tickCount);
+    if (closingIndex === -1) {
+      result += markdown.slice(index);
+      return result;
+    }
+
+    result += markdown.slice(index, closingIndex + tickCount);
+    index = closingIndex + tickCount;
+  }
+
+  flushBuffer();
+  return result;
+}
+
 function normalizeWikiPath(rawPath: string): string {
   return rawPath.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase();
+}
+
+export function normalizeWikiMathMarkdown(markdown: string): string {
+  if (!markdown.includes("\\[") && !markdown.includes("\\(")) {
+    return markdown;
+  }
+
+  const lines = markdown.split("\n");
+  const normalizedLines: string[] = [];
+  const textBuffer: string[] = [];
+  let activeFenceMarker: string | null = null;
+
+  const flushTextBuffer = (): void => {
+    if (textBuffer.length === 0) {
+      return;
+    }
+    normalizedLines.push(replaceMathDelimitersOutsideCodeSpans(textBuffer.join("\n")));
+    textBuffer.length = 0;
+  };
+
+  for (const line of lines) {
+    const fenceMatch = line.trimStart().match(/^(```+|~~~+)/);
+
+    if (activeFenceMarker) {
+      normalizedLines.push(line);
+      if (fenceMatch && fenceMatch[1] === activeFenceMarker) {
+        activeFenceMarker = null;
+      }
+      continue;
+    }
+
+    if (fenceMatch) {
+      flushTextBuffer();
+      activeFenceMarker = fenceMatch[1];
+      normalizedLines.push(line);
+      continue;
+    }
+
+    textBuffer.push(line);
+  }
+
+  flushTextBuffer();
+  return normalizedLines.join("\n");
 }
 
 async function parseError(response: Response): Promise<Error> {
@@ -230,6 +320,16 @@ export async function publishWikiPage(
     throw await parseError(response);
   }
   return response.json() as Promise<{ pageId: string; revisionNumber: number; publishedAt: string; draftVersion: number }>;
+}
+
+export async function deleteWikiPage(pageId: string, token: string): Promise<{ id: string; deletedAt: string }> {
+  const response = await authRequestRaw(`/wiki-pages/${pageId}`, token, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return response.json() as Promise<{ id: string; deletedAt: string }>;
 }
 
 export async function listWikiRevisions(pageId: string, token: string): Promise<WikiRevisionSummary[]> {

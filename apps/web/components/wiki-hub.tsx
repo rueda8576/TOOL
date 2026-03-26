@@ -21,11 +21,13 @@ import {
 import { useUnsavedChangesGuard } from "../lib/use-unsaved-changes-guard";
 import {
   createWikiPage,
+  deleteWikiPage,
   DraftConflictPayload,
   flushWikiRealtimeDraft,
   getWikiPageByPath,
   listWikiRevisions,
   listWikiTree,
+  normalizeWikiMathMarkdown,
   publishWikiPage,
   saveWikiDraft,
   searchWikiPages,
@@ -44,6 +46,7 @@ const INDENT_SIZE = 2;
 const WIKI_REALTIME_TITLE_KEY = "title";
 const WIKI_REALTIME_CONTENT_KEY = "content";
 const WIKI_REALTIME_AUTOSAVE_MARK_MS = 3250;
+const WIKI_FLASH_SUCCESS_KEY = "atlasium_wiki_flash_success";
 
 type TextTransformResult = {
   nextValue: string;
@@ -529,6 +532,7 @@ export function WikiHub({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [revisions, setRevisions] = useState<WikiRevisionSummary[]>([]);
+  const [deletingPage, setDeletingPage] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -568,6 +572,11 @@ export function WikiHub({
     () => Math.max(collaborators.length - visibleCollaborators.length, 0),
     [collaborators.length, visibleCollaborators.length]
   );
+  const renderedPublishedMarkdown = useMemo(
+    () => normalizeWikiMathMarkdown(pageDetail?.published.contentMarkdown ?? ""),
+    [pageDetail?.published.contentMarkdown]
+  );
+  const renderedDraftMarkdown = useMemo(() => normalizeWikiMathMarkdown(draftContent), [draftContent]);
 
   const updateDraftContent = useCallback((nextContent: string): void => {
     if (isRealtimeActive) {
@@ -705,6 +714,33 @@ export function WikiHub({
     [hydrateDraftFromDetail, projectId]
   );
 
+  const refreshSearchResults = useCallback(
+    async (authToken: string): Promise<void> => {
+      if (!searchModeActive) {
+        setSearchResults([]);
+        setSearchError(null);
+        setSearching(false);
+        return;
+      }
+
+      setSearching(true);
+      setSearchError(null);
+      try {
+        const results = await searchWikiPages(projectId, authToken, {
+          q: normalizedSearchQuery,
+          limit: 20
+        });
+        setSearchResults(results);
+      } catch (searchFailure) {
+        setSearchError((searchFailure as Error).message);
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    },
+    [normalizedSearchQuery, projectId, searchModeActive]
+  );
+
   const openPath = useCallback(
     (path: string, updateUrl = true): void => {
       const normalized = normalizePath(path);
@@ -723,6 +759,15 @@ export function WikiHub({
     },
     [projectId, router]
   );
+
+  useEffect(() => {
+    const flashSuccess = sessionStorage.getItem(WIKI_FLASH_SUCCESS_KEY);
+    if (!flashSuccess) {
+      return;
+    }
+    sessionStorage.removeItem(WIKI_FLASH_SUCCESS_KEY);
+    setSuccess(flashSuccess);
+  }, []);
 
   useEffect(() => {
     const storedToken = localStorage.getItem("doctoral_token");
@@ -1246,6 +1291,50 @@ export function WikiHub({
     }
   };
 
+  const onDeletePage = async (): Promise<void> => {
+    if (!token || !pageDetail || isReader) {
+      return;
+    }
+
+    const targetPage = pageDetail.page;
+    const confirmed = window.confirm(`Delete wiki page "/${targetPage.path}"?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingPage(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      await deleteWikiPage(targetPage.id, token);
+      destroyWikiPageCollaboration();
+      destroyWikiPresenceCollaboration();
+      setIsEditing(false);
+      setHistoryOpen(false);
+      setRevisions([]);
+      setPageDetail(null);
+      setSelectedPath(null);
+      setDraftTitle("");
+      setDraftContent("");
+      setDraftVersion(null);
+      draftVersionRef.current = null;
+      setLastSavedAt(null);
+      lastSavedSnapshotRef.current = null;
+      setConflictDraft(null);
+      setConflictLocalSnapshot(null);
+      setPublishNote("");
+      await loadTree(token);
+      await refreshSearchResults(token);
+      sessionStorage.setItem(WIKI_FLASH_SUCCESS_KEY, `Deleted wiki page "/${targetPage.path}".`);
+      router.push(`/projects/${projectId}/wiki`);
+    } catch (deleteError) {
+      setError((deleteError as Error).message);
+    } finally {
+      setDeletingPage(false);
+    }
+  };
+
   const onUploadImageClick = (): void => {
     fileInputRef.current?.click();
   };
@@ -1728,12 +1817,23 @@ export function WikiHub({
                     type="button"
                     className="button button-secondary"
                     onClick={() => setIsEditing((current) => !current)}
+                    disabled={deletingPage}
                   >
                     {isEditing ? "Close editor" : "Edit"}
                   </button>
                 ) : null}
+                {!isReader ? (
+                  <button type="button" className="button button-danger" onClick={() => void onDeletePage()} disabled={deletingPage}>
+                    {deletingPage ? "Deleting..." : "Delete"}
+                  </button>
+                ) : null}
                 {pageDetail ? (
-                  <button type="button" className="button button-secondary" onClick={() => void onToggleHistory()}>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => void onToggleHistory()}
+                    disabled={deletingPage}
+                  >
                     {historyOpen ? "Hide history" : "History"}
                   </button>
                 ) : null}
@@ -1770,7 +1870,7 @@ export function WikiHub({
                     )
                   }}
                 >
-                  {pageDetail.published.contentMarkdown}
+                  {renderedPublishedMarkdown}
                 </ReactMarkdown>
               </article>
 
@@ -1952,7 +2052,7 @@ export function WikiHub({
                         )
                       }}
                     >
-                      {draftContent}
+                      {renderedDraftMarkdown}
                     </ReactMarkdown>
                   </article>
                 </section>
