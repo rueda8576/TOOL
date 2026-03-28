@@ -449,6 +449,13 @@
 - [x] Add backend coverage for page deletion behavior and permissions.
 - [x] Validate with `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, `pnpm --filter @doctoral/web build`.
 
+## VPS Docker Storage Hardening - Atlasium image retention (2026-03-28)
+- [x] Add versioned VPS script to diagnose Docker usage, prune old Atlasium images, and keep only current + previous local tags.
+- [x] Add pre-deploy cleanup and free-space guard to auto/manual deploy workflows before `docker compose pull`.
+- [x] Add post-healthcheck state update and final prune to auto/manual deploy workflows.
+- [x] Document local image retention behavior and explicit `IMAGE_TAG` manual compose usage in the go-live runbook.
+- [x] Validate shell syntax and workflow diff sanity for retention changes.
+
 ## Review Log
 - 2026-02-20: Bootstrap implementation started from empty repository.
 - 2026-02-20: Monorepo scaffold completed with API, worker, web, DB schema, queues, backups, and deployment docs.
@@ -512,3 +519,4 @@
 - 2026-03-18: Implemented real-time collaborative Documents editing with Yjs/WebSocket (per-document presence + per-file cursors), backend debounced autosave to LaTeX workspace, and nginx websocket proxy support.
 - 2026-03-22: Implemented Wiki real-time editing v1 (`wiki-presence` + `wiki-page` rooms, flush endpoint, realtime save/publish integration, and frontend fallback to classic autosave/conflict mode).
 - 2026-03-26: Added wiki TeX delimiter normalization for `\\[ \\]` / `\\( \\)` rendering plus soft-delete page flow with link cleanup, delete UI, and backend coverage.
+- 2026-03-28: Hardened VPS Docker storage by adding local Atlasium image retention state, pre-pull cleanup, free-space guard, and post-deploy prune while keeping GHCR as full history.

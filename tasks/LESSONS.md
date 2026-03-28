@@ -130,3 +130,6 @@
 ## Realtime collaboration resilience
 - In browser code, never call `new URL()` with potentially relative API bases (`/api`) unless you pass `window.location.origin` as the base; otherwise client render can crash with `TypeError: Invalid URL`.
 - Collaboration features must degrade safely: if realtime URL resolution or websocket setup fails, keep local editor/file loading/save/compile paths operational and surface a non-blocking status message.
+
+## Docker disk diagnostics
+- When diagnosing Docker disk pressure on a VPS, do not rely on `df --total` because overlay mounts inflate the apparent total usage; inspect `docker info` for `Docker Root Dir` and use `docker system df -v` to identify reclaimable images and build cache before proposing storage expansion.

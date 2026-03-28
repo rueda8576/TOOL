@@ -143,12 +143,28 @@ Manual smoke test:
 Note:
 - LaTeX compilation runs inside the `worker` container image.
 - The VPS host does not need a local TeX installation (`pdflatex`, `biber`, etc.).
+- Production deploys keep only the active Atlasium image tag plus one previous tag locally on the VPS; full history remains in GHCR.
+- The deploy workflow stores retention state in `/opt/atlasium/.deploy-image-state.env`.
 
 Live logs:
 
 ```bash
 docker compose -f docker-compose.prod.yml logs -f api web worker
 tail -f /var/log/nginx/error.log
+```
+
+Docker image retention diagnostics:
+
+```bash
+cd /opt/atlasium
+sh ./infra/scripts/manage-docker-retention.sh diagnose \
+  --state-file /opt/atlasium/.deploy-image-state.env
+
+sh ./infra/scripts/manage-docker-retention.sh pre-deploy \
+  --state-file /opt/atlasium/.deploy-image-state.env \
+  --target-tag <sha-tag> \
+  --min-free-gb 12 \
+  --dry-run
 ```
 
 ## 8) Rollback
@@ -163,7 +179,13 @@ IMAGE_TAG=<previous-sha-tag> docker compose -f docker-compose.prod.yml pull
 IMAGE_TAG=<previous-sha-tag> docker compose -f docker-compose.prod.yml up -d --wait postgres redis
 IMAGE_TAG=<previous-sha-tag> docker compose -f docker-compose.prod.yml run --rm migrate
 IMAGE_TAG=<previous-sha-tag> docker compose -f docker-compose.prod.yml up -d --no-build api worker web
+curl -fsS http://127.0.0.1:4000/health
+sh ./infra/scripts/manage-docker-retention.sh finalize-success \
+  --state-file /opt/atlasium/.deploy-image-state.env \
+  --target-tag <previous-sha-tag>
 ```
+
+Always set `IMAGE_TAG=<sha-tag>` for manual `docker compose` operations. If omitted, Compose falls back to `:main`.
 
 If migration fails:
 

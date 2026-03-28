@@ -153,6 +153,10 @@ jobs:
             git reset --hard "${DEPLOY_SHA}"
             git clean -fd
             sh ./infra/scripts/validate-prod-env.sh .env
+            sh ./infra/scripts/manage-docker-retention.sh pre-deploy \
+              --state-file /opt/atlasium/.deploy-image-state.env \
+              --target-tag "${IMAGE_TAG}" \
+              --min-free-gb 12
 
             echo "${GHCR_READ_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
@@ -174,11 +178,14 @@ jobs:
 
       - name: Healthcheck (VPS local required + public HTTPS probe)
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script_stop: true
+          envs: IMAGE_TAG
           script: |
             set -euo pipefail
             cd /opt/atlasium
@@ -197,6 +204,10 @@ jobs:
               docker compose -f docker-compose.prod.yml logs --tail=200 api web worker postgres || true
               exit 1
             fi
+
+            sh ./infra/scripts/manage-docker-retention.sh finalize-success \
+              --state-file /opt/atlasium/.deploy-image-state.env \
+              --target-tag "${IMAGE_TAG}"
 
             if curl -fsS https://atlasium.info/api/health >/dev/null; then
               echo "Public HTTPS healthcheck OK"
@@ -242,6 +253,10 @@ jobs:
             git reset --hard origin/main
             git clean -fd
             sh ./infra/scripts/validate-prod-env.sh .env
+            sh ./infra/scripts/manage-docker-retention.sh pre-deploy \
+              --state-file /opt/atlasium/.deploy-image-state.env \
+              --target-tag "${IMAGE_TAG}" \
+              --min-free-gb 12
 
             echo "${GHCR_READ_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
@@ -263,11 +278,14 @@ jobs:
 
       - name: Healthcheck (VPS local required + public HTTPS probe)
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script_stop: true
+          envs: IMAGE_TAG
           script: |
             set -euo pipefail
             cd /opt/atlasium
@@ -286,6 +304,10 @@ jobs:
               docker compose -f docker-compose.prod.yml logs --tail=200 api web worker postgres || true
               exit 1
             fi
+
+            sh ./infra/scripts/manage-docker-retention.sh finalize-success \
+              --state-file /opt/atlasium/.deploy-image-state.env \
+              --target-tag "${IMAGE_TAG}"
 
             if curl -fsS https://atlasium.info/api/health >/dev/null; then
               echo "Public HTTPS healthcheck OK"
