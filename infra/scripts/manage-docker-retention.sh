@@ -124,6 +124,11 @@ human_available() {
   df -h "$(docker_root_dir)" | awk 'NR == 2 { print $4 " free of " $2 " on " $6 }'
 }
 
+log_free_space() {
+  label="$1"
+  log "${label}: $(human_available)"
+}
+
 list_running_atlasium_tags() {
   docker ps --format '{{.Image}}' | awk '
     $0 ~ /(^|\/)atlasium-(api|web|worker):/ {
@@ -202,8 +207,14 @@ prune_atlasium_images() {
 
       if [ "${DRY_RUN}" -eq 1 ]; then
         log "[dry-run] docker image rm ${repository}:${tag}"
-      elif ! docker image rm "${repository}:${tag}" >/dev/null 2>&1; then
-        log "Skipping ${repository}:${tag}; image is still referenced."
+      elif rm_output="$(docker image rm "${repository}:${tag}" 2>&1)"; then
+        :
+      else
+        rm_output="$(printf '%s\n' "${rm_output}" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')"
+        if [ -z "${rm_output}" ]; then
+          rm_output="unknown docker image rm error"
+        fi
+        log "Skipping ${repository}:${tag}; docker said: ${rm_output}"
       fi
     done
     IFS="${old_ifs}"
@@ -244,7 +255,7 @@ check_min_free_space() {
     die "Docker root dir has insufficient free space after cleanup: $(human_available). Required minimum: ${MIN_FREE_GB}GB."
   fi
 
-  log "Docker root dir free space OK: $(human_available)"
+  log "Docker root dir free space after cleanup: $(human_available)"
 }
 
 diagnose() {
@@ -263,6 +274,7 @@ diagnose() {
 
 pre_deploy() {
   log "Running Docker retention cleanup before deploy..."
+  log_free_space "Docker root dir free space before cleanup"
   prune_atlasium_images
   check_min_free_space
 }
@@ -280,7 +292,9 @@ finalize_success() {
 
   log "Recording deploy success state..."
   write_state_file
+  log_free_space "Docker root dir free space before final retention cleanup"
   prune_atlasium_images
+  log_free_space "Docker root dir free space after final retention cleanup"
 }
 
 case "${MODE}" in

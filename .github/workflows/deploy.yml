@@ -130,6 +130,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script_stop: true
+          command_timeout: 45m
           envs: GHCR_USERNAME,GHCR_READ_TOKEN,IMAGE_TAG,DEPLOY_SHA
           script: |
             set -euo pipefail
@@ -230,6 +231,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script_stop: true
+          command_timeout: 45m
           envs: GHCR_USERNAME,GHCR_READ_TOKEN,IMAGE_TAG
           script: |
             set -euo pipefail

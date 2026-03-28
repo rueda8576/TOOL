@@ -260,6 +260,16 @@
 - [x] Keep `AppShell` `onExitProjectRequest` contract unchanged and feed it from the shared hook.
 - [x] Validate with `pnpm --filter @doctoral/web build` and `pnpm --filter @doctoral/api build`.
 
+## Deploy Hotfix - SSH Timeout + Docker Retention Diagnostics (2026-03-28)
+- [x] Increase `appleboy/ssh-action` `command_timeout` to `45m` on the main auto/manual deploy steps.
+- [x] Keep healthcheck SSH steps on the shorter default timeout.
+- [x] Improve `manage-docker-retention.sh` logs to show free space before/after cleanup.
+- [x] Surface the real `docker image rm` error message instead of a generic "still referenced" line.
+- [x] Validate workflow/script syntax locally.
+
+### Review
+- The prior deploy hardening solved disk pressure, but the next failure was a separate SSH command timeout while pulling/extracting the `worker` image.
+
 ## Sidebar Branding vNext - Project KEY Context (2026-03-04)
 - [x] Remove sidebar subtitle copy `Collaboration Workspace`.
 - [x] Resolve sidebar brand title dynamically to `project.key` when `projectId` context exists.

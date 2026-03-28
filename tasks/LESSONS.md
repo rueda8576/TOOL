@@ -126,6 +126,8 @@
 - For long multi-layer deploy commands (GitHub Actions YAML -> SSH shell -> Docker shell -> SQL), avoid inline nested quoting entirely; move logic into a versioned script on the repo and invoke it from the workflow.
 - In SSH-based deploys, invoke repo scripts with `sh <script>` (or enforce `chmod +x` explicitly in deploy) because executable bits can be lost or inconsistent across server checkouts and cause `Permission denied`.
 - Add deploy preflight validation for critical env vars (at minimum `JWT_SECRET` length) before `docker compose up`; otherwise failures appear later as healthcheck flakiness while API is actually crashing on config parsing.
+- For large runtime images pulled through `appleboy/ssh-action`, set an explicit `command_timeout`; the default `10m` can kill a healthy deploy during `docker compose pull` and layer extraction.
+- Retention/cleanup scripts must not suppress `docker image rm` stderr entirely; surface Docker's real conflict message or deploy diagnostics become misleading.
 
 ## Realtime collaboration resilience
 - In browser code, never call `new URL()` with potentially relative API bases (`/api`) unless you pass `window.location.origin` as the base; otherwise client render can crash with `TypeError: Invalid URL`.
