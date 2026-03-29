@@ -188,6 +188,51 @@ describe("AuthService", () => {
     expect(result.projectIds).toEqual(["p1", "p2"]);
   });
 
+  it("accepts selected-project invite and assigns only selected active projects", async () => {
+    const { service, prisma } = makeService();
+
+    prisma.invite.findFirst.mockResolvedValue({
+      id: "invite-selected",
+      email: "invitee@example.com",
+      globalRole: GlobalRole.EDITOR,
+      accessMode: InviteAccessMode.SELECTED_PROJECTS,
+      status: InviteStatus.PENDING,
+      expiresAt: new Date(Date.now() + 60_000),
+      projectId: null,
+      inviteProjects: [{ projectId: "p2" }, { projectId: "p4" }]
+    });
+    prisma.user.findUnique.mockResolvedValue({
+      id: "user-1",
+      email: "invitee@example.com",
+      globalRole: GlobalRole.READER
+    });
+    prisma.project.findMany.mockResolvedValue([{ id: "p2" }, { id: "p4" }]);
+    prisma.user.update.mockResolvedValue({ id: "user-1" });
+    prisma.projectMember.upsert.mockResolvedValue({});
+    prisma.invite.update.mockResolvedValue({});
+    prisma.session.create.mockResolvedValue({});
+
+    const result = await service.acceptInvite({
+      token: "selected-token",
+      name: "Invited User",
+      password: "password-123"
+    });
+
+    expect(prisma.project.findMany).toHaveBeenCalledWith({
+      where: {
+        id: {
+          in: ["p2", "p4"]
+        },
+        deletedAt: null
+      },
+      select: {
+        id: true
+      }
+    });
+    expect(prisma.projectMember.upsert).toHaveBeenCalledTimes(2);
+    expect(result.projectIds).toEqual(["p2", "p4"]);
+  });
+
   it("keeps legacy projectId fallback when accepting selected invite without InviteProject rows", async () => {
     const { service, prisma } = makeService();
 

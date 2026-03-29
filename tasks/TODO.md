@@ -543,3 +543,15 @@
 - Backend now soft-deletes `Document`, `DocumentBranch`, and `DocumentVersion` together, emits `document.delete` audit logs, and treats deleted parents as `not found` for all version-scoped document APIs.
 - Realtime file rooms now reject new joins on deleted versions and stop autosave persistence if a version disappears after the session started.
 - Document delete is available from both `/projects/:projectId/documents` and `/projects/:projectId/documents/:documentId`, with a confirm step and flash success after redirect from detail back to the list.
+
+## Projects RBAC + Soft Delete (2026-03-29)
+- [x] Restrict project creation to `admin` in backend and `/projects` UI.
+- [x] Add `DELETE /projects/:projectId` soft-delete endpoint with audit logging.
+- [x] Add admin-only `Delete` action in `/projects` list with confirmation and refresh.
+- [x] Add backend coverage for admin-only create/delete and selected-project invite acceptance.
+- [x] Validate with `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, and `pnpm --filter @doctoral/web build`.
+
+### Review - Projects RBAC + Soft Delete (2026-03-29)
+- Project creation is now admin-only in both Nest service/controller enforcement and `/projects` UI; editors/readers remain browse+pin only.
+- Projects now support soft delete through `DELETE /projects/:projectId`, with `project.delete` audit logging and existing access guards treating deleted projects as not found.
+- `/projects` now exposes an admin-only destructive action with confirmation and list refresh, while invitation scope behavior remains intact and covered by selected-project acceptance tests.

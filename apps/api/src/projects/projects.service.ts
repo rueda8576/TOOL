@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 
 import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
@@ -21,8 +22,8 @@ export class ProjectsService {
     name: string;
     description: string | null;
   }> {
-    if (user.globalRole === "reader") {
-      throw new ForbiddenException("Reader role cannot create projects");
+    if (user.globalRole !== "admin") {
+      throw new ForbiddenException("Only admins can create projects");
     }
 
     const key = dto.key.trim().toUpperCase();
@@ -65,6 +66,59 @@ export class ProjectsService {
     });
 
     return project;
+  }
+
+  async deleteProject(projectId: string, user: AuthenticatedUser): Promise<{ id: string; deletedAt: string }> {
+    if (user.globalRole !== "admin") {
+      throw new ForbiddenException("Only admins can delete projects");
+    }
+
+    const deletedProject = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const project = await tx.project.findFirst({
+        where: {
+          id: projectId,
+          deletedAt: null
+        },
+        select: {
+          id: true
+        }
+      });
+
+      if (!project) {
+        throw new NotFoundException("Project not found");
+      }
+
+      return tx.project.update({
+        where: {
+          id: projectId
+        },
+        data: {
+          deletedAt: new Date()
+        },
+        select: {
+          id: true,
+          deletedAt: true
+        }
+      });
+    });
+
+    await this.auditService.log({
+      userId: user.userId,
+      projectId: deletedProject.id,
+      entityType: "project",
+      entityId: deletedProject.id,
+      action: "project.delete"
+    });
+
+    const deletedAt = deletedProject.deletedAt;
+    if (!deletedAt) {
+      throw new Error("Project soft delete did not persist deletedAt");
+    }
+
+    return {
+      id: deletedProject.id,
+      deletedAt: deletedAt.toISOString()
+    };
   }
 
   async listProjects(user: AuthenticatedUser): Promise<Array<{

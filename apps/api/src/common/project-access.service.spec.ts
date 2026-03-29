@@ -1,4 +1,4 @@
-import { ForbiddenException } from "@nestjs/common";
+import { ForbiddenException, NotFoundException } from "@nestjs/common";
 
 import { ProjectAccessService } from "./project-access.service";
 
@@ -31,5 +31,27 @@ describe("ProjectAccessService", () => {
     const service = new ProjectAccessService(prisma);
     await expect(service.ensureProjectReadable("u1", "admin", "p1")).resolves.toBeUndefined();
     expect(prisma.projectMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("treats soft-deleted projects as not found", async () => {
+    const prisma: any = {
+      project: {
+        findFirst: jest.fn().mockResolvedValue(null)
+      },
+      projectMember: {
+        findUnique: jest.fn()
+      }
+    };
+
+    const service = new ProjectAccessService(prisma);
+
+    await expect(service.ensureProjectReadable("u1", "admin", "p1")).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.project.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "p1",
+        deletedAt: null
+      },
+      select: { id: true }
+    });
   });
 });

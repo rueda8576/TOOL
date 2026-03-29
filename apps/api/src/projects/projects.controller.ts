@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Post, UseGuards } from "@nestjs/c
 
 import { CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { Roles } from "../common/roles.decorator";
 import { RolesGuard } from "../common/roles.guard";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { AddProjectMemberDto } from "./dto/add-project-member.dto";
@@ -14,6 +15,7 @@ export class ProjectsController {
   constructor(private readonly projectsService: ProjectsService) {}
 
   @Post()
+  @Roles("admin")
   createProject(
     @Body() dto: CreateProjectDto,
     @CurrentUser() user: AuthenticatedUser
@@ -55,6 +57,15 @@ export class ProjectsController {
     @CurrentUser() user: AuthenticatedUser
   ): Promise<Array<{ userId: string; name: string; email: string }>> {
     return this.projectsService.listMembers(projectId, user);
+  }
+
+  @Delete(":projectId")
+  @Roles("admin")
+  deleteProject(
+    @Param("projectId") projectId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<{ id: string; deletedAt: string }> {
+    return this.projectsService.deleteProject(projectId, user);
   }
 
   @Post(":projectId/members")

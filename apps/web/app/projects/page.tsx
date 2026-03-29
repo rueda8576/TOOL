@@ -87,6 +87,9 @@ export default function ProjectsPage(): JSX.Element {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
   const [pinBusyProjectId, setPinBusyProjectId] = useState<string | null>(null);
   const [pinError, setPinError] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -127,7 +130,6 @@ export default function ProjectsPage(): JSX.Element {
     void loadProjects(storedToken);
   }, [loadProjects, router]);
 
-  const isReader = userRole === "reader";
   const isAdmin = userRole === "admin";
 
   useEffect(() => {
@@ -157,8 +159,8 @@ export default function ProjectsPage(): JSX.Element {
       return;
     }
 
-    if (isReader) {
-      setCreateError("Reader role cannot create projects.");
+    if (!isAdmin) {
+      setCreateError("Only admins can create projects.");
       return;
     }
 
@@ -179,6 +181,7 @@ export default function ProjectsPage(): JSX.Element {
     setCreating(true);
     setCreateError(null);
     setCreateSuccess(null);
+    setDeleteSuccess(null);
 
     try {
       await authFetch<CreateProjectResponse>("/projects", {
@@ -203,6 +206,42 @@ export default function ProjectsPage(): JSX.Element {
       setCreateError((submitError as Error).message);
     } finally {
       setCreating(false);
+    }
+  };
+
+  const onDeleteProject = async (project: ProjectSummary): Promise<void> => {
+    if (!token || deletingProjectId) {
+      return;
+    }
+
+    if (!isAdmin) {
+      setDeleteError("Only admins can delete projects.");
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete project ${project.key} - ${project.name}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingProjectId(project.id);
+    setDeleteError(null);
+    setDeleteSuccess(null);
+    setCreateSuccess(null);
+
+    try {
+      await authFetch<{ id: string; deletedAt: string }>(`/projects/${project.id}`, {
+        token,
+        init: {
+          method: "DELETE"
+        }
+      });
+      setDeleteSuccess(`Project ${project.key} deleted successfully.`);
+      await loadProjects(token);
+    } catch (error) {
+      setDeleteError((error as Error).message);
+    } finally {
+      setDeletingProjectId(null);
     }
   };
 
@@ -322,24 +361,29 @@ export default function ProjectsPage(): JSX.Element {
                 {isInviteOpen ? "Close invite" : "Invite user"}
               </button>
             ) : null}
-            <button
-              className="button"
-              type="button"
-              onClick={() => {
-                setCreateSuccess(null);
-                setCreateError(null);
-                setIsCreateOpen((current) => !current);
-              }}
-              disabled={isReader}
-            >
-              {isCreateOpen ? "Close" : "New project"}
-            </button>
+            {isAdmin ? (
+              <button
+                className="button"
+                type="button"
+                onClick={() => {
+                  setCreateSuccess(null);
+                  setCreateError(null);
+                  setDeleteSuccess(null);
+                  setDeleteError(null);
+                  setIsCreateOpen((current) => !current);
+                }}
+              >
+                {isCreateOpen ? "Close" : "New project"}
+              </button>
+            ) : null}
           </div>
         </div>
 
-        {isReader ? <p className="alert alert-info">Reader role can view and pin projects but cannot create new ones.</p> : null}
+        {!isAdmin ? <p className="alert alert-info">Only admins can create and delete projects. You can still browse and pin accessible projects.</p> : null}
         {createSuccess ? <p className="alert alert-success">{createSuccess}</p> : null}
         {createError ? <p className="alert alert-error">{createError}</p> : null}
+        {deleteSuccess ? <p className="alert alert-success">{deleteSuccess}</p> : null}
+        {deleteError ? <p className="alert alert-error">{deleteError}</p> : null}
         {pinError ? <p className="alert alert-error">{pinError}</p> : null}
         {inviteSuccess ? <p className="alert alert-success">{inviteSuccess}</p> : null}
         {inviteError ? <p className="alert alert-error">{inviteError}</p> : null}
@@ -349,7 +393,7 @@ export default function ProjectsPage(): JSX.Element {
           </p>
         ) : null}
 
-        {isCreateOpen && !isReader ? (
+        {isCreateOpen && isAdmin ? (
           <div className="projects-create-collapsible">
             <h3 className="section-heading">Create project</h3>
             <form className="form-grid" onSubmit={onCreateProject}>
@@ -487,6 +531,18 @@ export default function ProjectsPage(): JSX.Element {
                     <Link className="button button-secondary" href={`/projects/${project.id}`}>
                       Open project
                     </Link>
+                    {isAdmin ? (
+                      <button
+                        className="button button-danger"
+                        type="button"
+                        disabled={deletingProjectId === project.id}
+                        onClick={() => {
+                          void onDeleteProject(project);
+                        }}
+                      >
+                        {deletingProjectId === project.id ? "Deleting..." : "Delete"}
+                      </button>
+                    ) : null}
                     <button
                       className="button button-ghost"
                       type="button"
