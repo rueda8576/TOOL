@@ -2,6 +2,7 @@ import { API_BASE_URL, authFetch } from "./client-api";
 
 export type DocumentTypeValue = "paper" | "manual" | "model" | "draft" | "minutes" | "other";
 export type CompileStatusValue = "pending" | "running" | "succeeded" | "failed" | "timeout";
+export const DOCUMENTS_FLASH_SUCCESS_KEY = "documents_flash_success";
 
 export type DocumentVersionSummary = {
   id: string;
@@ -128,6 +129,15 @@ export async function createProjectDocument(
       }
     }
   );
+}
+
+export async function deleteDocument(documentId: string, token: string): Promise<{ id: string; deletedAt: string }> {
+  return authFetch<{ id: string; deletedAt: string }>(`/documents/${documentId}`, {
+    token,
+    init: {
+      method: "DELETE"
+    }
+  });
 }
 
 export async function createDocumentVersionUpload(

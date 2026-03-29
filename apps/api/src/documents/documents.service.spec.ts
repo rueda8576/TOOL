@@ -12,21 +12,27 @@ describe("DocumentsService", () => {
     prisma: any;
     accessService: any;
     storageService: any;
+    auditService: any;
   } => {
     const prisma: any = {
+      $transaction: jest.fn(),
       document: {
         findMany: jest.fn(),
-        findFirst: jest.fn().mockResolvedValue({ id: "d1", projectId: "p1" })
+        findFirst: jest.fn().mockResolvedValue({ id: "d1", projectId: "p1" }),
+        update: jest.fn()
       },
       documentBranch: {
-        upsert: jest.fn().mockResolvedValue({ id: "b1" })
+        upsert: jest.fn().mockResolvedValue({ id: "b1" }),
+        updateMany: jest.fn()
       },
       documentVersion: {
         findFirst: jest.fn().mockResolvedValue({ versionNumber: 1 }),
         create: jest.fn(),
-        update: jest.fn()
+        update: jest.fn(),
+        updateMany: jest.fn()
       }
     };
+    prisma.$transaction.mockImplementation(async (callback: (tx: any) => Promise<unknown>) => callback(prisma));
 
     const accessService: any = {
       ensureProjectWritable: jest.fn().mockResolvedValue(undefined),
@@ -50,7 +56,8 @@ describe("DocumentsService", () => {
       service: new DocumentsService(prisma, accessService, storageService, queueService, auditService),
       prisma,
       accessService,
-      storageService
+      storageService,
+      auditService
     };
   };
 
@@ -283,5 +290,129 @@ describe("DocumentsService", () => {
     expect(mainTex).toContain("\\graphicspath{{Figures/}}");
     expect(referencesBib).toContain("% Add bibliography entries here.");
     expect(entries).toContain("Figures");
+  });
+
+  it("soft-deletes document, branches, and versions and logs audit", async () => {
+    const { service, prisma, accessService, auditService } = createService();
+    const deletedAt = new Date("2026-03-28T10:15:00.000Z");
+    prisma.document.findFirst.mockResolvedValueOnce({
+      id: "d1",
+      projectId: "p1"
+    });
+    prisma.document.update.mockResolvedValueOnce({
+      id: "d1",
+      deletedAt
+    });
+
+    const result = await service.deleteDocument("d1", {
+      userId: "u1",
+      email: "u1@example.com",
+      globalRole: "editor"
+    });
+    const versionDeletedAt = prisma.documentVersion.updateMany.mock.calls[0][0].data.deletedAt;
+    const branchDeletedAt = prisma.documentBranch.updateMany.mock.calls[0][0].data.deletedAt;
+    const documentDeletedAt = prisma.document.update.mock.calls[0][0].data.deletedAt;
+
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("u1", "editor", "p1");
+    expect(prisma.documentVersion.updateMany).toHaveBeenCalledWith({
+      where: {
+        documentId: "d1",
+        deletedAt: null
+      },
+      data: {
+        deletedAt: expect.any(Date)
+      }
+    });
+    expect(prisma.documentBranch.updateMany).toHaveBeenCalledWith({
+      where: {
+        documentId: "d1",
+        deletedAt: null
+      },
+      data: {
+        deletedAt: expect.any(Date)
+      }
+    });
+    expect(prisma.document.update).toHaveBeenCalledWith({
+      where: {
+        id: "d1"
+      },
+      data: {
+        deletedAt: expect.any(Date)
+      },
+      select: {
+        id: true,
+        deletedAt: true
+      }
+    });
+    expect(versionDeletedAt).toBeInstanceOf(Date);
+    expect(branchDeletedAt).toBe(versionDeletedAt);
+    expect(documentDeletedAt).toBe(versionDeletedAt);
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "u1",
+      projectId: "p1",
+      entityType: "document",
+      entityId: "d1",
+      action: "document.delete"
+    });
+    expect(result).toEqual({
+      id: "d1",
+      deletedAt: deletedAt.toISOString()
+    });
+  });
+
+  it("throws not found when deleting a missing document", async () => {
+    const { service, prisma } = createService();
+    prisma.document.findFirst.mockResolvedValueOnce(null);
+
+    await expect(
+      service.deleteDocument("missing", {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "editor"
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("queries compile log only for active versions under active branches and documents", async () => {
+    const { service, prisma } = createService();
+    prisma.documentVersion.findFirst.mockResolvedValueOnce({
+      id: "v1",
+      compileStatus: CompileStatus.PENDING,
+      compileLog: null,
+      compiledPdfFileId: null,
+      document: {
+        projectId: "p1"
+      }
+    });
+
+    await service.getCompileLog("v1", {
+      userId: "u1",
+      email: "u1@example.com",
+      globalRole: "editor"
+    });
+
+    expect(prisma.documentVersion.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "v1",
+        deletedAt: null,
+        branch: {
+          deletedAt: null
+        },
+        document: {
+          deletedAt: null
+        }
+      },
+      select: {
+        id: true,
+        compileStatus: true,
+        compileLog: true,
+        compiledPdfFileId: true,
+        document: {
+          select: {
+            projectId: true
+          }
+        }
+      }
+    });
   });
 });

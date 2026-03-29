@@ -34,7 +34,9 @@ import {
 import {
   compileDocumentVersion,
   createDocumentVersionUpload,
+  deleteDocument,
   DocumentDetail,
+  DOCUMENTS_FLASH_SUCCESS_KEY,
   DocumentVersionSummary,
   getCompileLog,
   getLatexFile,
@@ -293,6 +295,7 @@ export default function DocumentDetailPage({
   const [compileLog, setCompileLog] = useState<string | null>(null);
   const [isCompileLogOpen, setIsCompileLogOpen] = useState(false);
   const [compileBusy, setCompileBusy] = useState(false);
+  const [deletingDocument, setDeletingDocument] = useState(false);
   const [firstVersionPdfFile, setFirstVersionPdfFile] = useState<File | null>(null);
   const [firstVersionLatexFiles, setFirstVersionLatexFiles] = useState<File[]>([]);
   const [firstVersionLatexPaths, setFirstVersionLatexPaths] = useState<string[]>([]);
@@ -1398,6 +1401,40 @@ export default function DocumentDetailPage({
     }
   };
 
+  const onDeleteDocument = useCallback(async (): Promise<void> => {
+    if (!token || !documentDetail || isReader) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete document "${documentDetail.title}"?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingDocument(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      await deleteDocument(documentDetail.id, token);
+      destroyFileCollaboration();
+      destroyPresenceCollaboration();
+      sessionStorage.setItem(DOCUMENTS_FLASH_SUCCESS_KEY, `Deleted document "${documentDetail.title}".`);
+      router.push(`/projects/${params.projectId}/documents`);
+    } catch (deleteError) {
+      setError((deleteError as Error).message);
+      setDeletingDocument(false);
+    }
+  }, [
+    destroyFileCollaboration,
+    destroyPresenceCollaboration,
+    documentDetail,
+    isReader,
+    params.projectId,
+    router,
+    token
+  ]);
+
   return (
     <AppShell
       title="Documents"
@@ -1466,6 +1503,11 @@ export default function DocumentDetailPage({
           {hasPdf ? (
             <button className="button button-secondary" type="button" onClick={downloadCurrentPdf} disabled={loadingPdf || !pdfUrl}>
               Download PDF
+            </button>
+          ) : null}
+          {documentDetail && !isReader ? (
+            <button className="button button-danger" type="button" onClick={() => void onDeleteDocument()} disabled={deletingDocument}>
+              {deletingDocument ? "Deleting..." : "Delete"}
             </button>
           ) : null}
           <Link className="button button-secondary" href={`/projects/${params.projectId}/documents`}>

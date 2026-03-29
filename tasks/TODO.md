@@ -530,3 +530,16 @@
 - 2026-03-22: Implemented Wiki real-time editing v1 (`wiki-presence` + `wiki-page` rooms, flush endpoint, realtime save/publish integration, and frontend fallback to classic autosave/conflict mode).
 - 2026-03-26: Added wiki TeX delimiter normalization for `\\[ \\]` / `\\( \\)` rendering plus soft-delete page flow with link cleanup, delete UI, and backend coverage.
 - 2026-03-28: Hardened VPS Docker storage by adding local Atlasium image retention state, pre-pull cleanup, free-space guard, and post-deploy prune while keeping GHCR as full history.
+
+## Documents vNext - Safe Soft Delete (2026-03-28)
+- [x] Add `DELETE /documents/:documentId` and soft-delete active document, branches, and versions in one transaction.
+- [x] Harden version-based document endpoints so deleted parent documents/branches invalidate compile, PDF, tree, file read, and file write access.
+- [x] Fail LaTeX worker jobs closed if a document version is deleted before or during compilation.
+- [x] Reject/close collaborative file persistence for deleted document versions.
+- [x] Add delete actions to Documents list and document detail with confirmation and success feedback.
+- [x] Validate with `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, `pnpm --filter @doctoral/worker build`, and `pnpm --filter @doctoral/web build`.
+
+### Review - Documents vNext - Safe Soft Delete (2026-03-28)
+- Backend now soft-deletes `Document`, `DocumentBranch`, and `DocumentVersion` together, emits `document.delete` audit logs, and treats deleted parents as `not found` for all version-scoped document APIs.
+- Realtime file rooms now reject new joins on deleted versions and stop autosave persistence if a version disappears after the session started.
+- Document delete is available from both `/projects/:projectId/documents` and `/projects/:projectId/documents/:documentId`, with a confirm step and flash success after redirect from detail back to the list.

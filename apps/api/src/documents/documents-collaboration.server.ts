@@ -297,6 +297,25 @@ export class DocumentsCollaborationServer {
     return absoluteFilePath;
   }
 
+  private closeRoomDueToInvalidVersion(room: FileRoom, reason: string): void {
+    if (room.persistTimer) {
+      clearTimeout(room.persistTimer);
+      room.persistTimer = null;
+    }
+
+    const activeConnections = Array.from(room.connections.keys());
+    for (const connection of activeConnections) {
+      if (connection.readyState === WebSocket.OPEN || connection.readyState === WebSocket.CONNECTING) {
+        connection.close(1008, reason.slice(0, 120));
+      }
+    }
+
+    if (activeConnections.length === 0) {
+      room.teardown();
+      this.rooms.delete(room.key);
+    }
+  }
+
   private async joinRoom(query: RoomQuery, user: AuthenticatedCollabUser, connection: WebSocket): Promise<RoomConnectionContext> {
     if (query.kind === "presence") {
       const document = await this.prisma.document.findFirst({
@@ -412,7 +431,13 @@ export class DocumentsCollaborationServer {
     const version = await this.prisma.documentVersion.findFirst({
       where: {
         id: query.documentVersionId,
-        deletedAt: null
+        deletedAt: null,
+        branch: {
+          deletedAt: null
+        },
+        document: {
+          deletedAt: null
+        }
       },
       select: {
         id: true,
@@ -1039,6 +1064,27 @@ export class DocumentsCollaborationServer {
     try {
       const nextContent = forcedContent ?? room.doc.getText(FILE_YDOC_TEXT_KEY).toString();
       if (nextContent === room.lastPersistedContent) {
+        return;
+      }
+
+      const activeVersion = await this.prisma.documentVersion.findFirst({
+        where: {
+          id: room.documentVersionId,
+          deletedAt: null,
+          branch: {
+            deletedAt: null
+          },
+          document: {
+            deletedAt: null
+          }
+        },
+        select: {
+          id: true
+        }
+      });
+
+      if (!activeVersion) {
+        this.closeRoomDueToInvalidVersion(room, "Document version is no longer available");
         return;
       }
 

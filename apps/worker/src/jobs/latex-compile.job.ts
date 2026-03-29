@@ -186,6 +186,22 @@ export const processLatexCompileJob = async (
   job: Job<{ documentVersionId: string; compileJobId: string }>
 ): Promise<void> => {
   const { documentVersionId, compileJobId } = job.data;
+  const loadActiveVersion = async () =>
+    prisma.documentVersion.findFirst({
+      where: {
+        id: documentVersionId,
+        deletedAt: null,
+        branch: {
+          deletedAt: null
+        },
+        document: {
+          deletedAt: null
+        }
+      },
+      include: {
+        latexBundleFile: true
+      }
+    });
 
   await prisma.documentCompileJob.update({
     where: { id: compileJobId },
@@ -195,28 +211,34 @@ export const processLatexCompileJob = async (
     }
   });
 
-  const version = await prisma.documentVersion.findFirst({
-    where: { id: documentVersionId },
-    include: {
-      latexBundleFile: true,
-      createdBy: true
-    }
-  });
+  const version = await loadActiveVersion();
 
-  if (!version || (!version.latexBundleFile && !version.latexWorkspacePath)) {
+  if (!version) {
+    await prisma.documentCompileJob.update({
+      where: { id: compileJobId },
+      data: {
+        status: CompileStatus.FAILED,
+        finishedAt: new Date(),
+        errorMessage: "Document was deleted before compilation started"
+      }
+    });
+    return;
+  }
+
+  if (!version.latexBundleFile && !version.latexWorkspacePath) {
+    await prisma.documentVersion.update({
+      where: { id: version.id },
+      data: {
+        compileStatus: CompileStatus.FAILED,
+        compileLog: "Version has no latex source"
+      }
+    });
     await prisma.documentCompileJob.update({
       where: { id: compileJobId },
       data: {
         status: CompileStatus.FAILED,
         finishedAt: new Date(),
         errorMessage: "Version has no latex source"
-      }
-    });
-    await prisma.documentVersion.update({
-      where: { id: documentVersionId },
-      data: {
-        compileStatus: CompileStatus.FAILED,
-        compileLog: "Version has no latex source"
       }
     });
     return;
@@ -237,21 +259,34 @@ export const processLatexCompileJob = async (
   }
 
   const compileResult = await compileLatex(workDir, version.latexEntryFile ?? "main.tex");
+  const activeVersionAfterCompile = await loadActiveVersion();
+
+  if (!activeVersionAfterCompile) {
+    await prisma.documentCompileJob.update({
+      where: { id: compileJobId },
+      data: {
+        status: CompileStatus.FAILED,
+        finishedAt: new Date(),
+        errorMessage: "Document was deleted during compilation"
+      }
+    });
+    return;
+  }
 
   let compiledPdfFileId: string | null = null;
   if (compileResult.status === CompileStatus.SUCCEEDED && compileResult.pdfPath) {
     const pdfBuffer = await readFile(compileResult.pdfPath);
-    const relativePath = `compiled/${new Date().toISOString().slice(0, 10)}/${randomUUID()}-${version.id}.pdf`;
+    const relativePath = `compiled/${new Date().toISOString().slice(0, 10)}/${randomUUID()}-${activeVersionAfterCompile.id}.pdf`;
     await mkdir(join(env.STORAGE_ROOT, "compiled", new Date().toISOString().slice(0, 10)), { recursive: true });
     await writeFile(join(env.STORAGE_ROOT, relativePath), pdfBuffer);
 
     const fileObject = await prisma.fileObject.create({
       data: {
         storagePath: relativePath,
-        originalName: `${version.id}.pdf`,
+        originalName: `${activeVersionAfterCompile.id}.pdf`,
         mimeType: "application/pdf",
         sizeBytes: BigInt(pdfBuffer.byteLength),
-        uploadedById: version.createdById
+        uploadedById: activeVersionAfterCompile.createdById
       },
       select: { id: true }
     });
@@ -260,7 +295,7 @@ export const processLatexCompileJob = async (
   }
 
   await prisma.documentVersion.update({
-    where: { id: version.id },
+    where: { id: activeVersionAfterCompile.id },
     data: {
       compileStatus: compileResult.status,
       compileLog: compileResult.log,
@@ -280,7 +315,7 @@ export const processLatexCompileJob = async (
 
   await prisma.notificationEvent.create({
     data: {
-      userId: version.createdById,
+      userId: activeVersionAfterCompile.createdById,
       type: NotificationEventType.DOC_COMPILED,
       status: NotificationStatus.PENDING,
       payload: {

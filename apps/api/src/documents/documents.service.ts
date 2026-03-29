@@ -105,6 +105,17 @@ const mapCompileStatusValue = (status: CompileStatus): CompileStatusValue => {
   }
 };
 
+const activeDocumentVersionWhere = (documentVersionId: string) => ({
+  id: documentVersionId,
+  deletedAt: null,
+  branch: {
+    deletedAt: null
+  },
+  document: {
+    deletedAt: null
+  }
+});
+
 @Injectable()
 export class DocumentsService {
   private readonly storageRoot = getEnv().STORAGE_ROOT;
@@ -452,6 +463,80 @@ Start writing here.
     return created;
   }
 
+  async deleteDocument(documentId: string, user: AuthenticatedUser): Promise<{ id: string; deletedAt: string }> {
+    const deletedDocument = await this.prisma.$transaction(async (tx) => {
+      const document = await tx.document.findFirst({
+        where: {
+          id: documentId,
+          deletedAt: null
+        },
+        select: {
+          id: true,
+          projectId: true
+        }
+      });
+
+      if (!document) {
+        throw new NotFoundException("Document not found");
+      }
+
+      await this.accessService.ensureProjectWritable(user.userId, user.globalRole, document.projectId);
+
+      const deletedAt = new Date();
+      await tx.documentVersion.updateMany({
+        where: {
+          documentId,
+          deletedAt: null
+        },
+        data: {
+          deletedAt
+        }
+      });
+
+      await tx.documentBranch.updateMany({
+        where: {
+          documentId,
+          deletedAt: null
+        },
+        data: {
+          deletedAt
+        }
+      });
+
+      const deleted = await tx.document.update({
+        where: {
+          id: documentId
+        },
+        data: {
+          deletedAt
+        },
+        select: {
+          id: true,
+          deletedAt: true
+        }
+      });
+
+      return {
+        projectId: document.projectId,
+        id: deleted.id,
+        deletedAt: deleted.deletedAt
+      };
+    });
+
+    await this.auditService.log({
+      userId: user.userId,
+      projectId: deletedDocument.projectId,
+      entityType: "document",
+      entityId: deletedDocument.id,
+      action: "document.delete"
+    });
+
+    return {
+      id: deletedDocument.id,
+      deletedAt: deletedDocument.deletedAt?.toISOString() ?? new Date().toISOString()
+    };
+  }
+
   async createBranch(documentId: string, dto: CreateDocumentBranchDto, user: AuthenticatedUser): Promise<{
     id: string;
     documentId: string;
@@ -678,10 +763,7 @@ Start writing here.
     status: CompileStatus;
   }> {
     const version = await this.prisma.documentVersion.findFirst({
-      where: {
-        id: documentVersionId,
-        deletedAt: null
-      },
+      where: activeDocumentVersionWhere(documentVersionId),
       select: {
         id: true,
         latexBundleFileId: true,
@@ -760,10 +842,7 @@ Start writing here.
     compiledPdfFileId: string | null;
   }> {
     const version = await this.prisma.documentVersion.findFirst({
-      where: {
-        id: documentVersionId,
-        deletedAt: null
-      },
+      where: activeDocumentVersionWhere(documentVersionId),
       select: {
         id: true,
         compileStatus: true,
@@ -794,10 +873,7 @@ Start writing here.
     fileName: string;
   }> {
     const version = await this.prisma.documentVersion.findFirst({
-      where: {
-        id: documentVersionId,
-        deletedAt: null
-      },
+      where: activeDocumentVersionWhere(documentVersionId),
       select: {
         id: true,
         document: {
@@ -843,10 +919,7 @@ Start writing here.
     files: Array<{ path: string; isDirectory: boolean }>;
   }> {
     const version = await this.prisma.documentVersion.findFirst({
-      where: {
-        id: documentVersionId,
-        deletedAt: null
-      },
+      where: activeDocumentVersionWhere(documentVersionId),
       select: {
         id: true,
         latexWorkspacePath: true,
@@ -898,10 +971,7 @@ Start writing here.
     content: string;
   }> {
     const version = await this.prisma.documentVersion.findFirst({
-      where: {
-        id: documentVersionId,
-        deletedAt: null
-      },
+      where: activeDocumentVersionWhere(documentVersionId),
       select: {
         id: true,
         latexWorkspacePath: true,
@@ -944,10 +1014,7 @@ Start writing here.
     user: AuthenticatedUser
   ): Promise<{ documentVersionId: string; path: string; sizeBytes: number }> {
     const version = await this.prisma.documentVersion.findFirst({
-      where: {
-        id: documentVersionId,
-        deletedAt: null
-      },
+      where: activeDocumentVersionWhere(documentVersionId),
       select: {
         id: true,
         latexWorkspacePath: true,

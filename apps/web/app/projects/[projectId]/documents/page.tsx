@@ -10,7 +10,9 @@ import { LoginResponse } from "../../../../lib/client-api";
 import {
   createDocumentVersionUpload,
   createProjectDocument,
+  deleteDocument,
   DocumentListItem,
+  DOCUMENTS_FLASH_SUCCESS_KEY,
   DocumentTypeValue,
   listProjectDocuments
 } from "../../../../lib/documents";
@@ -85,6 +87,7 @@ export default function ProjectDocumentsPage({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [retryDocumentId, setRetryDocumentId] = useState<string | null>(null);
+  const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
 
   const isReader = userRole === "reader";
 
@@ -112,6 +115,15 @@ export default function ProjectDocumentsPage({
 
     folderInput.setAttribute("webkitdirectory", "");
     folderInput.setAttribute("directory", "");
+  }, []);
+
+  useEffect(() => {
+    const flashSuccess = sessionStorage.getItem(DOCUMENTS_FLASH_SUCCESS_KEY);
+    if (!flashSuccess) {
+      return;
+    }
+    sessionStorage.removeItem(DOCUMENTS_FLASH_SUCCESS_KEY);
+    setSuccess(flashSuccess);
   }, []);
 
   useEffect(() => {
@@ -228,6 +240,31 @@ export default function ProjectDocumentsPage({
       case "pending":
       default:
         return "Pending compile";
+    }
+  };
+
+  const onDeleteDocument = async (document: DocumentListItem): Promise<void> => {
+    if (!token || isReader) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete document "${document.title}"?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingDocumentId(document.id);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      await deleteDocument(document.id, token);
+      setSuccess(`Deleted document "${document.title}".`);
+      await loadDocuments(token);
+    } catch (deleteError) {
+      setError((deleteError as Error).message);
+    } finally {
+      setDeletingDocumentId(null);
     }
   };
 
@@ -405,9 +442,23 @@ export default function ProjectDocumentsPage({
                       <p className="documents-list-meta">No version uploaded yet</p>
                     )}
                   </div>
-                  <Link className="button button-secondary" href={`/projects/${params.projectId}/documents/${document.id}`}>
-                    Open
-                  </Link>
+                  <div className="inline-actions">
+                    <Link className="button button-secondary" href={`/projects/${params.projectId}/documents/${document.id}`}>
+                      Open
+                    </Link>
+                    {!isReader ? (
+                      <button
+                        className="button button-danger"
+                        type="button"
+                        onClick={() => {
+                          void onDeleteDocument(document);
+                        }}
+                        disabled={deletingDocumentId === document.id}
+                      >
+                        {deletingDocumentId === document.id ? "Deleting..." : "Delete"}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               </li>
             ))}

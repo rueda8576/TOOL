@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -64,6 +65,14 @@ export class DocumentsController {
     mainBranchId: string;
   }> {
     return this.documentsService.createDocument(projectId, dto, user);
+  }
+
+  @Delete("documents/:documentId")
+  deleteDocument(
+    @Param("documentId") documentId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<{ id: string; deletedAt: string }> {
+    return this.documentsService.deleteDocument(documentId, user);
   }
 
   @Post("documents/:documentId/branches")
