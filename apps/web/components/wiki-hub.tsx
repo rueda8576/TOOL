@@ -1671,20 +1671,17 @@ export function WikiHub({
         <aside className="wiki-sidebar panel">
           <div className="wiki-sidebar-toolbar">
             <h3 className="section-heading">Pages</h3>
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() => {
-                if (isReader) {
-                  setError("Reader role cannot create wiki pages.");
-                  return;
-                }
-                setShowCreateForm((current) => !current);
-              }}
-              disabled={isReader}
-            >
-              {showCreateForm ? "Close" : "New page"}
-            </button>
+            {!isReader ? (
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => {
+                  setShowCreateForm((current) => !current);
+                }}
+              >
+                {showCreateForm ? "Close" : "New page"}
+              </button>
+            ) : null}
           </div>
 
           <label className="wiki-search-label">
@@ -1796,9 +1793,7 @@ export function WikiHub({
             </section>
           ) : null}
 
-          {!loadingTree && !searchModeActive && treeNodes.length === 0 ? (
-            <p className="alert alert-info">No wiki pages yet.</p>
-          ) : null}
+          {!loadingTree && !searchModeActive && treeNodes.length === 0 ? <p className="alert alert-info">{isReader ? "No published wiki pages available yet." : "No wiki pages yet."}</p> : null}
           {!loadingTree && !searchModeActive && treeNodes.length > 0 ? (
             <ul className="wiki-tree-list">{treeNodes.map((node) => renderTreeNode(node))}</ul>
           ) : null}
@@ -1843,13 +1838,11 @@ export function WikiHub({
 
           {success ? <p className="alert alert-success">{success}</p> : null}
           {error ? <p className="alert alert-error">{error}</p> : null}
-          {isReader ? <p className="alert alert-info">Reader role can view published wiki pages.</p> : null}
-
           {!loadingPage && !pageDetail && allPagePaths.length === 0 ? (
-            <p className="alert alert-info">Create your first wiki page from the left panel.</p>
+            <p className="alert alert-info">{isReader ? "No published wiki pages available yet." : "Create your first wiki page from the left panel."}</p>
           ) : null}
           {!loadingPage && !pageDetail && allPagePaths.length > 0 ? (
-            <p className="alert alert-info">Select a page from the left tree to start reading or editing.</p>
+            <p className="alert alert-info">{isReader ? "Select a page from the left tree to start reading." : "Select a page from the left tree to start reading or editing."}</p>
           ) : null}
           {loadingPage ? <p className="alert alert-info">Loading wiki page...</p> : null}
 

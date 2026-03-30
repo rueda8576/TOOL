@@ -335,16 +335,17 @@ export default function ProjectTasksPage({
       <section className="panel task-toolbar">
         <div className="task-toolbar-row">
           <h3 className="section-heading">Board</h3>
-          <button className="button button-secondary" type="button" onClick={onNewTaskClick} disabled={isReader}>
-            {showForm && formMode === "create" ? "Close" : "New task"}
-          </button>
+          {!isReader ? (
+            <button className="button button-secondary" type="button" onClick={onNewTaskClick}>
+              {showForm && formMode === "create" ? "Close" : "New task"}
+            </button>
+          ) : null}
         </div>
-        {isReader ? <p className="alert alert-info">Reader role can view tasks but cannot create, edit, or delete.</p> : null}
         {success ? <p className="alert alert-success">{success}</p> : null}
         {error ? <p className="alert alert-error">{error}</p> : null}
       </section>
 
-      {showForm ? (
+      {showForm && !isReader ? (
         <section className="panel">
           <h3 className="section-heading">{formMode === "edit" ? "Edit task" : "Create task"}</h3>
           <form className="form-grid" onSubmit={onSubmit}>

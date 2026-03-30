@@ -410,7 +410,6 @@ export default function ProjectsPage(): JSX.Element {
           </div>
         </div>
 
-        {!isAdmin ? <p className="alert alert-info">Only admins can create and delete projects. You can still browse and pin accessible projects.</p> : null}
         {createSuccess ? <p className="alert alert-success">{createSuccess}</p> : null}
         {createError ? <p className="alert alert-error">{createError}</p> : null}
         {deleteSuccess ? <p className="alert alert-success">{deleteSuccess}</p> : null}

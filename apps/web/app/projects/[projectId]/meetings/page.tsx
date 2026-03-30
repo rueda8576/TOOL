@@ -724,16 +724,17 @@ export default function ProjectMeetingsPage({
               Calendar
             </button>
           </div>
-          <button className="button button-secondary" type="button" onClick={onNewMinuteClick} disabled={isReader}>
-            {showForm && formMode === "create" ? "Close" : "New minute"}
-          </button>
+          {!isReader ? (
+            <button className="button button-secondary" type="button" onClick={onNewMinuteClick}>
+              {showForm && formMode === "create" ? "Close" : "New minute"}
+            </button>
+          ) : null}
         </div>
-        {isReader ? <p className="alert alert-info">Reader role can view minutes but cannot create, edit, or delete.</p> : null}
         {success ? <p className="alert alert-success">{success}</p> : null}
         {error ? <p className="alert alert-error">{error}</p> : null}
       </section>
 
-      {showForm ? (
+      {showForm && !isReader ? (
         <div className="meetings-editor-modal-backdrop" onClick={closeForm}>
           <section
             className="panel meetings-editor-modal"
@@ -844,7 +845,7 @@ export default function ProjectMeetingsPage({
 
       {!loading && viewMode === "list" ? (
         <section className="meetings-list">
-          {meetingsByDate.size === 0 ? <p className="alert alert-info">No minutes yet. Create the first one.</p> : null}
+          {meetingsByDate.size === 0 ? <p className="alert alert-info">{isReader ? "No minutes available yet." : "No minutes yet. Create the first one."}</p> : null}
           {Array.from(meetingsByDate.entries()).map(([dateKey, items]) => (
             <article key={dateKey} className="panel minutes-list-group">
               <h3 className="section-heading">{displayDay(dateKey)}</h3>

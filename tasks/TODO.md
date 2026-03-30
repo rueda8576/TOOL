@@ -566,3 +566,14 @@
 - The `Selected projects` picker now uses a searchable checklist with summary, bulk actions, and a cleaner empty-search state while keeping `projectIds` submission unchanged.
 - Project rows are now full-width interactive cards showing `KEY`, `name`, and `Pinned` state with clearer selected, hover, and focus affordances.
 - Access-mode behavior and invitation contract remain unchanged; this is a frontend-only UX improvement.
+
+## Reader UX Cleanup - Remove Redundant Warnings (2026-03-30)
+- [x] Remove redundant read-only permission banners from Projects, Wiki, Documents, Tasks, and Meetings.
+- [x] Hide creation CTAs for `reader` users instead of rendering disabled buttons/forms.
+- [x] Replace reader-facing creation empty states with neutral copy in Wiki, Documents, Meetings, and document detail without versions.
+- [x] Validate with `pnpm --filter @doctoral/web build`.
+
+### Review - Reader UX Cleanup - Remove Redundant Warnings (2026-03-30)
+- Reader mode now removes repetitive permission banners and hides create actions in Projects, Wiki, Documents, Tasks, and Meetings while preserving backend/handler guards.
+- Empty states now use neutral reader-safe copy (`No ... available yet`) instead of creation prompts, including document detail when a document has no versions.
+- Editor/admin flows keep their existing create-oriented copy and actions.

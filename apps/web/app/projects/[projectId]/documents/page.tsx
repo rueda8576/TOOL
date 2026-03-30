@@ -277,22 +277,18 @@ export default function ProjectDocumentsPage({
       <section className="panel documents-page-toolbar">
         <div className="task-toolbar-row">
           <h3 className="section-heading">Document library</h3>
-          <button
-            className="button button-secondary"
-            type="button"
-            onClick={() => {
-              if (isReader) {
-                setError("Reader role cannot create documents.");
-                return;
-              }
-              setShowForm((current) => !current);
-            }}
-            disabled={isReader}
-          >
-            {showForm ? "Close" : "New document"}
-          </button>
+          {!isReader ? (
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={() => {
+                setShowForm((current) => !current);
+              }}
+            >
+              {showForm ? "Close" : "New document"}
+            </button>
+          ) : null}
         </div>
-        {isReader ? <p className="alert alert-info">Reader role can view documents but cannot create or upload versions.</p> : null}
         {success ? <p className="alert alert-success">{success}</p> : null}
         {error ? <p className="alert alert-error">{error}</p> : null}
         {retryDocumentId ? (
@@ -304,7 +300,7 @@ export default function ProjectDocumentsPage({
         ) : null}
       </section>
 
-      {showForm ? (
+      {showForm && !isReader ? (
         <section className="panel">
           <h3 className="section-heading">Create document</h3>
           <form className="form-grid" onSubmit={onCreateDocument}>
@@ -419,7 +415,7 @@ export default function ProjectDocumentsPage({
       <section className="panel">
         <h3 className="section-heading">Documents</h3>
         {loading ? <p className="alert alert-info">Loading documents...</p> : null}
-        {!loading && documents.length === 0 ? <p className="alert alert-info">No documents yet. Create your first one.</p> : null}
+        {!loading && documents.length === 0 ? <p className="alert alert-info">{isReader ? "No documents available yet." : "No documents yet. Create your first one."}</p> : null}
         {!loading && documents.length > 0 ? (
           <ul className="list">
             {documents.map((document) => (

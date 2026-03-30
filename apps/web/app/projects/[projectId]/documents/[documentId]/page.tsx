@@ -1523,42 +1523,51 @@ export default function DocumentDetailPage({
 
       {!loadingDocument && documentDetail && !currentVersion ? (
         <section className="panel">
-          <h3 className="section-heading">Upload initial version</h3>
-          <form className="form-grid" onSubmit={createFirstVersion}>
-            <div className="grid cols-2 grid-tight">
-              <label>
-                PDF file (optional)
-                <input
-                  className="input"
-                  type="file"
-                  accept="application/pdf,.pdf"
-                  onChange={(event) => setFirstVersionPdfFile(event.target.files?.[0] ?? null)}
-                  disabled={isReader || submittingFirstVersion}
-                />
-              </label>
-              <label>
-                LaTeX folder (optional)
-                <input
-                  ref={firstVersionFolderInputRef}
-                  className="input"
-                  type="file"
-                  multiple
-                  onChange={onFirstVersionFolderChange}
-                  disabled={isReader || submittingFirstVersion}
-                />
-              </label>
-            </div>
-            {firstVersionLatexFiles.length > 0 ? (
-              <p className="alert alert-info">Selected {firstVersionLatexFiles.length} LaTeX files for first version.</p>
-            ) : null}
-            <p className="documents-list-meta">
-              If you upload nothing, Atlasium creates a blank LaTeX workspace with <code>main.tex</code>, <code>references.bib</code>,
-              and a <code>Figures/</code> folder.
-            </p>
-            <button className="button" type="submit" disabled={isReader || submittingFirstVersion}>
-              {submittingFirstVersion ? "Uploading..." : "Upload first version"}
-            </button>
-          </form>
+          {isReader ? (
+            <>
+              <h3 className="section-heading">No versions available yet</h3>
+              <p className="alert alert-info">This document does not have any uploaded versions yet.</p>
+            </>
+          ) : (
+            <>
+              <h3 className="section-heading">Upload initial version</h3>
+              <form className="form-grid" onSubmit={createFirstVersion}>
+                <div className="grid cols-2 grid-tight">
+                  <label>
+                    PDF file (optional)
+                    <input
+                      className="input"
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      onChange={(event) => setFirstVersionPdfFile(event.target.files?.[0] ?? null)}
+                      disabled={submittingFirstVersion}
+                    />
+                  </label>
+                  <label>
+                    LaTeX folder (optional)
+                    <input
+                      ref={firstVersionFolderInputRef}
+                      className="input"
+                      type="file"
+                      multiple
+                      onChange={onFirstVersionFolderChange}
+                      disabled={submittingFirstVersion}
+                    />
+                  </label>
+                </div>
+                {firstVersionLatexFiles.length > 0 ? (
+                  <p className="alert alert-info">Selected {firstVersionLatexFiles.length} LaTeX files for first version.</p>
+                ) : null}
+                <p className="documents-list-meta">
+                  If you upload nothing, Atlasium creates a blank LaTeX workspace with <code>main.tex</code>, <code>references.bib</code>,
+                  and a <code>Figures/</code> folder.
+                </p>
+                <button className="button" type="submit" disabled={submittingFirstVersion}>
+                  {submittingFirstVersion ? "Uploading..." : "Upload first version"}
+                </button>
+              </form>
+            </>
+          )}
         </section>
       ) : null}
 
