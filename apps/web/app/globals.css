@@ -452,8 +452,34 @@ textarea {
   color: var(--text);
 }
 
+.projects-invite-selector-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.projects-invite-selection-summary {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.projects-invite-selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.projects-invite-search {
+  display: grid;
+  gap: 0.34rem;
+}
+
 .projects-invite-checkboxes {
-  max-height: 200px;
+  max-height: 260px;
   overflow: auto;
   padding-right: 0.22rem;
   display: grid;
@@ -462,9 +488,59 @@ textarea {
 
 .projects-invite-checkbox {
   display: flex;
-  align-items: center;
-  gap: 0.55rem;
+  align-items: flex-start;
+  gap: 0.7rem;
   color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+  padding: 0.72rem 0.78rem;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.projects-invite-checkbox:hover {
+  border-color: #9fb6d9;
+  background: #f8fbff;
+}
+
+.projects-invite-checkbox:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(58, 103, 181, 0.16);
+}
+
+.projects-invite-checkbox input {
+  margin-top: 0.12rem;
+}
+
+.projects-invite-checkbox-selected {
+  border-color: #8caad4;
+  background: #f3f8ff;
+}
+
+.projects-invite-checkbox-content {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.projects-invite-checkbox-main {
+  min-width: 0;
+  display: grid;
+  gap: 0.18rem;
+}
+
+.projects-invite-checkbox-main strong {
+  font-size: 0.9rem;
+  color: var(--brand-strong);
+}
+
+.projects-invite-checkbox-main span {
+  color: var(--text);
+  word-break: break-word;
 }
 
 .projects-directory-list {
@@ -1963,6 +2039,12 @@ body.documents-workspace-dragging * {
   .projects-toolbar-actions {
     width: 100%;
     flex-wrap: wrap;
+  }
+
+  .projects-invite-selector-toolbar,
+  .projects-invite-checkbox-content {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .project-overview-grid {

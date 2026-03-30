@@ -95,6 +95,7 @@ export default function ProjectsPage(): JSX.Element {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<LoginResponse["user"]["globalRole"]>("reader");
   const [inviteAccessMode, setInviteAccessMode] = useState<InviteAccessMode>("all");
+  const [inviteProjectQuery, setInviteProjectQuery] = useState("");
   const [inviteProjectIds, setInviteProjectIds] = useState<string[]>([]);
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -150,6 +151,17 @@ export default function ProjectsPage(): JSX.Element {
       }),
     [orderBy, projects]
   );
+
+  const filteredInviteProjects = useMemo(() => {
+    const query = inviteProjectQuery.trim().toLowerCase();
+    if (!query) {
+      return sortedProjects;
+    }
+
+    return sortedProjects.filter((project) =>
+      project.key.toLowerCase().includes(query) || project.name.toLowerCase().includes(query)
+    );
+  }, [inviteProjectQuery, sortedProjects]);
 
   const onCreateProject = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
@@ -277,6 +289,24 @@ export default function ProjectsPage(): JSX.Element {
     });
   };
 
+  const onSelectAllVisibleInviteProjects = (): void => {
+    if (filteredInviteProjects.length === 0) {
+      return;
+    }
+
+    setInviteProjectIds((current) => {
+      const next = new Set(current);
+      filteredInviteProjects.forEach((project) => {
+        next.add(project.id);
+      });
+      return Array.from(next);
+    });
+  };
+
+  const onClearInviteProjects = (): void => {
+    setInviteProjectIds([]);
+  };
+
   const onSendInvite = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
 
@@ -322,6 +352,7 @@ export default function ProjectsPage(): JSX.Element {
       setInviteEmail("");
       setInviteRole("reader");
       setInviteAccessMode("all");
+      setInviteProjectQuery("");
       setInviteProjectIds([]);
       setInviteSuccess(`Invitation sent to ${email}.`);
     } catch (error) {
@@ -469,7 +500,10 @@ export default function ProjectsPage(): JSX.Element {
                 <select
                   className="input"
                   value={inviteAccessMode}
-                  onChange={(event) => setInviteAccessMode(event.target.value as InviteAccessMode)}
+                  onChange={(event) => {
+                    setInviteAccessMode(event.target.value as InviteAccessMode);
+                    setInviteProjectQuery("");
+                  }}
                   disabled={inviting}
                 >
                   <option value="all">All current projects</option>
@@ -483,21 +517,74 @@ export default function ProjectsPage(): JSX.Element {
                   {sortedProjects.length === 0 ? (
                     <p className="alert alert-info">No projects available.</p>
                   ) : (
-                    <div className="projects-invite-checkboxes">
-                      {sortedProjects.map((project) => (
-                        <label className="projects-invite-checkbox" key={`invite-${project.id}`}>
-                          <input
-                            type="checkbox"
-                            checked={inviteProjectIds.includes(project.id)}
-                            onChange={() => onToggleInviteProject(project.id)}
-                            disabled={inviting}
-                          />
-                          <span>
-                            {project.key} - {project.name}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
+                    <>
+                      <div className="projects-invite-selector-toolbar">
+                        <p className="projects-invite-selection-summary">
+                          {inviteProjectIds.length} selected
+                        </p>
+                        <div className="projects-invite-selection-actions">
+                          <button
+                            className="button button-ghost"
+                            type="button"
+                            onClick={onSelectAllVisibleInviteProjects}
+                            disabled={inviting || filteredInviteProjects.length === 0}
+                          >
+                            Select all visible
+                          </button>
+                          <button
+                            className="button button-ghost"
+                            type="button"
+                            onClick={onClearInviteProjects}
+                            disabled={inviting || inviteProjectIds.length === 0}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+
+                      <label className="projects-invite-search">
+                        Search projects
+                        <input
+                          className="input"
+                          type="search"
+                          value={inviteProjectQuery}
+                          onChange={(event) => setInviteProjectQuery(event.target.value)}
+                          placeholder="Filter by key or name"
+                          disabled={inviting}
+                        />
+                      </label>
+
+                      {filteredInviteProjects.length === 0 ? (
+                        <p className="alert alert-info">No projects match the current search.</p>
+                      ) : (
+                        <div className="projects-invite-checkboxes">
+                          {filteredInviteProjects.map((project) => {
+                            const isSelected = inviteProjectIds.includes(project.id);
+
+                            return (
+                              <label
+                                className={`projects-invite-checkbox${isSelected ? " projects-invite-checkbox-selected" : ""}`}
+                                key={`invite-${project.id}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => onToggleInviteProject(project.id)}
+                                  disabled={inviting}
+                                />
+                                <div className="projects-invite-checkbox-content">
+                                  <div className="projects-invite-checkbox-main">
+                                    <strong>{project.key}</strong>
+                                    <span>{project.name}</span>
+                                  </div>
+                                  {project.isPinned ? <span className="badge projects-pinned-badge">Pinned</span> : null}
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
                   )}
                 </fieldset>
               ) : (

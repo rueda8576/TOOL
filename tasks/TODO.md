@@ -555,3 +555,14 @@
 - Project creation is now admin-only in both Nest service/controller enforcement and `/projects` UI; editors/readers remain browse+pin only.
 - Projects now support soft delete through `DELETE /projects/:projectId`, with `project.delete` audit logging and existing access guards treating deleted projects as not found.
 - `/projects` now exposes an admin-only destructive action with confirmation and list refresh, while invitation scope behavior remains intact and covered by selected-project acceptance tests.
+
+## Invite UX vNext - Project Selector Polish (2026-03-29)
+- [x] Replace the plain selected-project checkbox list with a searchable checklist panel in `/projects`.
+- [x] Add selection summary plus `Select all visible` and `Clear` actions.
+- [x] Restyle each project row to show key, name, and pinned state with clearer selected/hover/focus states.
+- [x] Validate with `pnpm --filter @doctoral/web build`.
+
+### Review - Invite UX vNext - Project Selector Polish (2026-03-29)
+- The `Selected projects` picker now uses a searchable checklist with summary, bulk actions, and a cleaner empty-search state while keeping `projectIds` submission unchanged.
+- Project rows are now full-width interactive cards showing `KEY`, `name`, and `Pinned` state with clearer selected, hover, and focus affordances.
+- Access-mode behavior and invitation contract remain unchanged; this is a frontend-only UX improvement.
