@@ -50,6 +50,11 @@ describe("WikiService", () => {
     };
 
     const accessService: any = {
+      getProjectAccess: jest.fn(async (_userId: string, role: string) => ({
+        isAdmin: role === "admin",
+        projectRole: role === "admin" ? "admin" : role,
+        canWrite: role !== "reader"
+      })),
       ensureProjectReadable: jest.fn().mockResolvedValue(undefined),
       ensureProjectWritable: jest.fn().mockResolvedValue(undefined)
     };
@@ -137,7 +142,7 @@ describe("WikiService", () => {
       }
     );
 
-    expect(accessService.ensureProjectReadable).toHaveBeenCalledWith("user-1", "editor", "project-1");
+    expect(accessService.getProjectAccess).toHaveBeenCalledWith("user-1", "editor", "project-1");
     expect(tree).toEqual([
       {
         type: "folder",
@@ -213,7 +218,7 @@ describe("WikiService", () => {
       }
     );
 
-    expect(accessService.ensureProjectReadable).toHaveBeenCalledWith("reader-1", "reader", "project-1");
+    expect(accessService.getProjectAccess).toHaveBeenCalledWith("reader-1", "reader", "project-1");
     expect(detail.draft).toBeUndefined();
     expect(detail.page.path).toBe("roadmap");
     expect(detail.published.revisionNumber).toBe(1);
@@ -687,7 +692,7 @@ describe("WikiService", () => {
       }
     );
 
-    expect(accessService.ensureProjectReadable).toHaveBeenCalledWith("reader-1", "reader", "project-1");
+    expect(accessService.getProjectAccess).toHaveBeenCalledWith("reader-1", "reader", "project-1");
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     expect(results).toEqual([
       {

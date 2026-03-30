@@ -46,6 +46,7 @@ import {
   updateLatexFile
 } from "../../../../../lib/documents";
 import { inferMonacoDocumentLanguage } from "../../../../../lib/monaco-languages";
+import { getProjectAccess, ProjectAccess } from "../../../../../lib/project-access";
 import { useUnsavedChangesGuard } from "../../../../../lib/use-unsaved-changes-guard";
 
 type LatexTreeEntry = { path: string; isDirectory: boolean };
@@ -277,7 +278,7 @@ export default function DocumentDetailPage({
   const autosaveMarkerTimerRef = useRef<number | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [sessionUser, setSessionUser] = useState<LoginResponse["user"] | null>(null);
-  const [userRole, setUserRole] = useState<LoginResponse["user"]["globalRole"] | null>(null);
+  const [projectAccess, setProjectAccess] = useState<ProjectAccess | null>(null);
   const [documentDetail, setDocumentDetail] = useState<DocumentDetail | null>(null);
   const [loadingDocument, setLoadingDocument] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -313,7 +314,7 @@ export default function DocumentDetailPage({
   const [realtimeStatusNote, setRealtimeStatusNote] = useState<string | null>(null);
   const [monacoReadyTick, setMonacoReadyTick] = useState(0);
 
-  const isReader = userRole === "reader";
+  const canWrite = projectAccess?.canWrite ?? false;
   const { collaborationServerUrl, collaborationConfigError } = useMemo(() => {
     try {
       return {
@@ -488,6 +489,19 @@ export default function DocumentDetailPage({
     [loadLatexWorkspace, loadPdfPreview, params.documentId, params.projectId, updatePdfUrl]
   );
 
+  const loadAccess = useCallback(
+    async (authToken: string): Promise<void> => {
+      try {
+        const access = await getProjectAccess(params.projectId, authToken);
+        setProjectAccess(access);
+      } catch (accessError) {
+        setProjectAccess(null);
+        setError((accessError as Error).message);
+      }
+    },
+    [params.projectId]
+  );
+
   const refreshDocumentAfterCompile = useCallback(
     async (authToken: string, previousVersionId: string): Promise<void> => {
       try {
@@ -587,9 +601,9 @@ export default function DocumentDetailPage({
     setToken(storedToken);
     const parsedUser = parseStoredUser(localStorage.getItem("doctoral_user"));
     setSessionUser(parsedUser);
-    setUserRole(parsedUser?.globalRole ?? null);
+    void loadAccess(storedToken);
     void loadDocumentDetail(storedToken);
-  }, [loadDocumentDetail, router]);
+  }, [loadAccess, loadDocumentDetail, router]);
 
   useEffect(() => {
     setIsEditorOpen(false);
@@ -610,7 +624,7 @@ export default function DocumentDetailPage({
   const currentVersion = documentDetail?.latestMainVersion ?? null;
   const hasLatex = Boolean(currentVersion?.hasLatex);
   const hasPdf = Boolean(currentVersion?.hasPdf);
-  const hasEditableLatex = hasLatex && !isReader;
+  const hasEditableLatex = hasLatex && canWrite;
   const showLatexWorkspace = hasLatex && isEditorOpen;
   const downloadFileName = useMemo(() => sanitizePdfFilename(documentDetail?.title), [documentDetail?.title]);
   const directoryPaths = useMemo(() => collectDirectoryPaths(latexTree), [latexTree]);
@@ -859,7 +873,7 @@ export default function DocumentDetailPage({
 
   useEffect(() => {
     const fileProvider = fileCollabProviderRef.current;
-    if (!fileProvider || !showLatexWorkspace || isReader || !selectedLatexPath || latexContent === savedLatexContent) {
+    if (!fileProvider || !showLatexWorkspace || !canWrite || !selectedLatexPath || latexContent === savedLatexContent) {
       if (autosaveMarkerTimerRef.current !== null) {
         window.clearTimeout(autosaveMarkerTimerRef.current);
         autosaveMarkerTimerRef.current = null;
@@ -885,7 +899,7 @@ export default function DocumentDetailPage({
         autosaveMarkerTimerRef.current = null;
       }
     };
-  }, [compileBusy, isReader, latexContent, savedLatexContent, selectedLatexPath, showLatexWorkspace]);
+  }, [canWrite, compileBusy, latexContent, savedLatexContent, selectedLatexPath, showLatexWorkspace]);
 
   useEffect(
     () => () => {
@@ -972,8 +986,8 @@ export default function DocumentDetailPage({
       return false;
     }
 
-    if (isReader) {
-      setError("Reader role cannot edit LaTeX files.");
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
       return false;
     }
 
@@ -992,7 +1006,7 @@ export default function DocumentDetailPage({
     } finally {
       setSavingLatexFile(false);
     }
-  }, [currentVersion, isReader, latexContent, selectedLatexPath, token]);
+  }, [canWrite, currentVersion, latexContent, selectedLatexPath, token]);
 
   const compileLatex = useCallback(async (options?: { silent?: boolean }): Promise<boolean> => {
     if (!token || !currentVersion) {
@@ -1000,8 +1014,8 @@ export default function DocumentDetailPage({
       return false;
     }
 
-    if (isReader) {
-      setError("Reader role cannot compile documents.");
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
       return false;
     }
 
@@ -1041,7 +1055,7 @@ export default function DocumentDetailPage({
     } finally {
       setCompileBusy(false);
     }
-  }, [currentVersion, isReader, refreshDocumentAfterCompile, token]);
+  }, [canWrite, currentVersion, refreshDocumentAfterCompile, token]);
 
   const runSaveThenCompile = useCallback(async (): Promise<void> => {
     if (savingLatexFile || compileBusy) {
@@ -1056,7 +1070,7 @@ export default function DocumentDetailPage({
   }, [compileBusy, compileLatex, saveLatexChanges, savingLatexFile]);
 
   useEffect(() => {
-    if (!token || !currentVersion || !hasLatex || isReader) {
+    if (!token || !currentVersion || !hasLatex || !canWrite) {
       return;
     }
 
@@ -1066,7 +1080,7 @@ export default function DocumentDetailPage({
 
     autoCompileVersionRef.current = currentVersion.id;
     void compileLatex({ silent: true });
-  }, [compileLatex, currentVersion, hasLatex, isReader, token]);
+  }, [canWrite, compileLatex, currentVersion, hasLatex, token]);
 
   const toggleTreeCollapsed = useCallback((): void => {
     setIsTreeCollapsed((current) => !current);
@@ -1372,8 +1386,8 @@ export default function DocumentDetailPage({
       return;
     }
 
-    if (isReader) {
-      setError("Reader role cannot upload document versions.");
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
       return;
     }
 
@@ -1402,7 +1416,7 @@ export default function DocumentDetailPage({
   };
 
   const onDeleteDocument = useCallback(async (): Promise<void> => {
-    if (!token || !documentDetail || isReader) {
+    if (!token || !documentDetail || !canWrite) {
       return;
     }
 
@@ -1429,7 +1443,7 @@ export default function DocumentDetailPage({
     destroyFileCollaboration,
     destroyPresenceCollaboration,
     documentDetail,
-    isReader,
+    canWrite,
     params.projectId,
     router,
     token
@@ -1495,7 +1509,7 @@ export default function DocumentDetailPage({
               {showLatexWorkspace ? "Close editor" : "Edit"}
             </button>
           ) : null}
-          {hasLatex && !isReader && !showLatexWorkspace ? (
+          {hasLatex && canWrite && !showLatexWorkspace ? (
             <button className="button button-secondary" type="button" onClick={() => void compileLatex()} disabled={compileBusy}>
               {compileBusy ? "Compiling..." : "Compile"}
             </button>
@@ -1505,7 +1519,7 @@ export default function DocumentDetailPage({
               Download PDF
             </button>
           ) : null}
-          {documentDetail && !isReader ? (
+          {documentDetail && canWrite ? (
             <button className="button button-danger" type="button" onClick={() => void onDeleteDocument()} disabled={deletingDocument}>
               {deletingDocument ? "Deleting..." : "Delete"}
             </button>
@@ -1523,7 +1537,7 @@ export default function DocumentDetailPage({
 
       {!loadingDocument && documentDetail && !currentVersion ? (
         <section className="panel">
-          {isReader ? (
+          {!canWrite ? (
             <>
               <h3 className="section-heading">No versions available yet</h3>
               <p className="alert alert-info">This document does not have any uploaded versions yet.</p>
@@ -1614,7 +1628,7 @@ export default function DocumentDetailPage({
                         onClick={() => {
                           void saveLatexChanges();
                         }}
-                        disabled={isReader || savingLatexFile}
+                        disabled={!canWrite || savingLatexFile}
                       >
                         {savingLatexFile ? "Saving..." : "Save"}
                       </button>
@@ -1624,7 +1638,7 @@ export default function DocumentDetailPage({
                         onClick={() => {
                           void compileLatex();
                         }}
-                        disabled={isReader || compileBusy}
+                        disabled={!canWrite || compileBusy}
                       >
                         {compileBusy ? "Compiling..." : "Compile"}
                       </button>
@@ -1635,7 +1649,7 @@ export default function DocumentDetailPage({
                     className="documents-code-editor"
                     value={latexContent}
                     language={monacoLanguage}
-                    readOnly={!selectedLatexPath || loadingLatexFile || savingLatexFile || isReader}
+                    readOnly={!selectedLatexPath || loadingLatexFile || savingLatexFile || !canWrite}
                     onChange={(nextContent) => {
                       setLatexContent(nextContent);
                     }}

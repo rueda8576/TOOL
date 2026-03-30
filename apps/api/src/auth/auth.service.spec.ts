@@ -1,5 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
-import { GlobalRole, InviteAccessMode, InviteStatus } from "@prisma/client";
+import { GlobalRole, InviteAccessMode, InviteStatus, ProjectRole } from "@prisma/client";
 
 import { AuthService } from "./auth.service";
 
@@ -59,7 +59,7 @@ describe("AuthService", () => {
     };
   };
 
-  it("creates selected-project invite with inviteProjects and acceptance URL", async () => {
+  it("creates selected-project invite with per-project roles and acceptance URL", async () => {
     const { service, prisma, queueService } = makeService();
 
     prisma.project.findMany.mockResolvedValue([
@@ -76,7 +76,10 @@ describe("AuthService", () => {
         email: "invitee@example.com",
         globalRole: "editor",
         accessMode: "selected",
-        projectIds: ["p1", "p2"]
+        projectAccess: [
+          { projectId: "p1", role: "editor" },
+          { projectId: "p2", role: "reader" }
+        ]
       },
       "sender-1"
     );
@@ -94,8 +97,12 @@ describe("AuthService", () => {
         data: expect.objectContaining({
           accessMode: InviteAccessMode.SELECTED_PROJECTS,
           globalRole: GlobalRole.EDITOR,
+          defaultProjectRole: undefined,
           inviteProjects: {
-            create: [{ projectId: "p1" }, { projectId: "p2" }]
+            create: [
+              { projectId: "p1", role: ProjectRole.EDITOR },
+              { projectId: "p2", role: ProjectRole.READER }
+            ]
           }
         })
       })
@@ -127,7 +134,7 @@ describe("AuthService", () => {
     expect(result.expiresAt).toBeInstanceOf(Date);
   });
 
-  it("rejects all-projects invite payload when projectIds are provided", async () => {
+  it("rejects all-projects invite payload when project-specific assignments are provided", async () => {
     const { service } = makeService();
 
     await expect(
@@ -136,14 +143,30 @@ describe("AuthService", () => {
           email: "invitee@example.com",
           globalRole: "reader",
           accessMode: "all",
-          projectIds: ["p1"]
+          projectAccess: [{ projectId: "p1", role: "reader" }],
+          defaultProjectRole: "reader"
         },
         "sender-1"
       )
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("accepts all-projects invite and assigns all active projects", async () => {
+  it("requires defaultProjectRole for non-admin all-project invites", async () => {
+    const { service } = makeService();
+
+    await expect(
+      service.invite(
+        {
+          email: "invitee@example.com",
+          globalRole: "reader",
+          accessMode: "all"
+        },
+        "sender-1"
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("accepts all-projects invite and assigns all active projects with the default role", async () => {
     const { service, prisma } = makeService();
 
     prisma.invite.findFirst.mockResolvedValue({
@@ -151,6 +174,7 @@ describe("AuthService", () => {
       email: "invitee@example.com",
       globalRole: GlobalRole.READER,
       accessMode: InviteAccessMode.ALL_CURRENT_PROJECTS,
+      defaultProjectRole: ProjectRole.READER,
       status: InviteStatus.PENDING,
       expiresAt: new Date(Date.now() + 60_000),
       projectId: null,
@@ -182,13 +206,21 @@ describe("AuthService", () => {
             projectId: "p1",
             userId: "user-1"
           }
+        },
+        create: {
+          projectId: "p1",
+          userId: "user-1",
+          role: ProjectRole.READER
+        },
+        update: {
+          role: ProjectRole.READER
         }
       })
     );
     expect(result.projectIds).toEqual(["p1", "p2"]);
   });
 
-  it("accepts selected-project invite and assigns only selected active projects", async () => {
+  it("accepts selected-project invite and assigns only selected active projects with their roles", async () => {
     const { service, prisma } = makeService();
 
     prisma.invite.findFirst.mockResolvedValue({
@@ -196,10 +228,14 @@ describe("AuthService", () => {
       email: "invitee@example.com",
       globalRole: GlobalRole.EDITOR,
       accessMode: InviteAccessMode.SELECTED_PROJECTS,
+      defaultProjectRole: null,
       status: InviteStatus.PENDING,
       expiresAt: new Date(Date.now() + 60_000),
       projectId: null,
-      inviteProjects: [{ projectId: "p2" }, { projectId: "p4" }]
+      inviteProjects: [
+        { projectId: "p2", role: ProjectRole.EDITOR },
+        { projectId: "p4", role: ProjectRole.READER }
+      ]
     });
     prisma.user.findUnique.mockResolvedValue({
       id: "user-1",
@@ -230,6 +266,32 @@ describe("AuthService", () => {
       }
     });
     expect(prisma.projectMember.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.projectMember.upsert).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        create: {
+          projectId: "p2",
+          userId: "user-1",
+          role: ProjectRole.EDITOR
+        },
+        update: {
+          role: ProjectRole.EDITOR
+        }
+      })
+    );
+    expect(prisma.projectMember.upsert).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        create: {
+          projectId: "p4",
+          userId: "user-1",
+          role: ProjectRole.READER
+        },
+        update: {
+          role: ProjectRole.READER
+        }
+      })
+    );
     expect(result.projectIds).toEqual(["p2", "p4"]);
   });
 
@@ -241,6 +303,7 @@ describe("AuthService", () => {
       email: "invitee@example.com",
       globalRole: GlobalRole.EDITOR,
       accessMode: InviteAccessMode.SELECTED_PROJECTS,
+      defaultProjectRole: ProjectRole.EDITOR,
       status: InviteStatus.PENDING,
       expiresAt: new Date(Date.now() + 60_000),
       projectId: "legacy-project",
@@ -264,6 +327,18 @@ describe("AuthService", () => {
     });
 
     expect(prisma.projectMember.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.projectMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: {
+          projectId: "legacy-project",
+          userId: "user-2",
+          role: ProjectRole.EDITOR
+        },
+        update: {
+          role: ProjectRole.EDITOR
+        }
+      })
+    );
     expect(result.projectId).toBe("legacy-project");
     expect(result.projectIds).toEqual(["legacy-project"]);
   });

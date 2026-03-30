@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
-import { LoginResponse } from "../../../../lib/client-api";
 import {
   createDocumentVersionUpload,
   createProjectDocument,
@@ -16,6 +15,7 @@ import {
   DocumentTypeValue,
   listProjectDocuments
 } from "../../../../lib/documents";
+import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 
 const documentTypes: Array<{ value: DocumentTypeValue; label: string }> = [
   { value: "paper", label: "Paper" },
@@ -25,18 +25,6 @@ const documentTypes: Array<{ value: DocumentTypeValue; label: string }> = [
   { value: "minutes", label: "Minutes" },
   { value: "other", label: "Other" }
 ];
-
-function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
-  if (!rawUser) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(rawUser) as LoginResponse["user"];
-  } catch {
-    return null;
-  }
-}
 
 function parseCommaSeparatedList(rawValue: string): string[] {
   return rawValue
@@ -71,7 +59,7 @@ export default function ProjectDocumentsPage({
   const router = useRouter();
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<LoginResponse["user"]["globalRole"] | null>(null);
+  const [projectAccess, setProjectAccess] = useState<ProjectAccess | null>(null);
   const [documents, setDocuments] = useState<DocumentListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -89,7 +77,7 @@ export default function ProjectDocumentsPage({
   const [retryDocumentId, setRetryDocumentId] = useState<string | null>(null);
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
 
-  const isReader = userRole === "reader";
+  const canWrite = projectAccess?.canWrite ?? false;
 
   const loadDocuments = useCallback(
     async (authToken: string): Promise<void> => {
@@ -102,6 +90,19 @@ export default function ProjectDocumentsPage({
         setError((fetchError as Error).message);
       } finally {
         setLoading(false);
+      }
+    },
+    [params.projectId]
+  );
+
+  const loadAccess = useCallback(
+    async (authToken: string): Promise<void> => {
+      try {
+        const access = await getProjectAccess(params.projectId, authToken);
+        setProjectAccess(access);
+      } catch (fetchError) {
+        setProjectAccess(null);
+        setError((fetchError as Error).message);
       }
     },
     [params.projectId]
@@ -134,9 +135,9 @@ export default function ProjectDocumentsPage({
     }
 
     setToken(storedToken);
-    setUserRole(parseStoredUser(localStorage.getItem("doctoral_user"))?.globalRole ?? null);
+    void loadAccess(storedToken);
     void loadDocuments(storedToken);
-  }, [loadDocuments, router]);
+  }, [loadAccess, loadDocuments, router]);
 
   const newestDocument = useMemo(() => documents[0] ?? null, [documents]);
 
@@ -172,8 +173,8 @@ export default function ProjectDocumentsPage({
       return;
     }
 
-    if (isReader) {
-      setError("Reader role cannot create documents.");
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
       return;
     }
 
@@ -244,7 +245,7 @@ export default function ProjectDocumentsPage({
   };
 
   const onDeleteDocument = async (document: DocumentListItem): Promise<void> => {
-    if (!token || isReader) {
+    if (!token || !canWrite) {
       return;
     }
 
@@ -277,7 +278,7 @@ export default function ProjectDocumentsPage({
       <section className="panel documents-page-toolbar">
         <div className="task-toolbar-row">
           <h3 className="section-heading">Document library</h3>
-          {!isReader ? (
+          {canWrite ? (
             <button
               className="button button-secondary"
               type="button"
@@ -300,7 +301,7 @@ export default function ProjectDocumentsPage({
         ) : null}
       </section>
 
-      {showForm && !isReader ? (
+      {showForm && canWrite ? (
         <section className="panel">
           <h3 className="section-heading">Create document</h3>
           <form className="form-grid" onSubmit={onCreateDocument}>
@@ -313,7 +314,7 @@ export default function ProjectDocumentsPage({
                   onChange={(event) => setTitle(event.target.value)}
                   maxLength={300}
                   required
-                  disabled={isReader || submitting}
+                  disabled={!canWrite || submitting}
                 />
               </label>
               <label>
@@ -322,7 +323,7 @@ export default function ProjectDocumentsPage({
                   className="input"
                   value={type}
                   onChange={(event) => setType(event.target.value as DocumentTypeValue)}
-                  disabled={isReader || submitting}
+                  disabled={!canWrite || submitting}
                 >
                   {documentTypes.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -339,7 +340,7 @@ export default function ProjectDocumentsPage({
                   className="input"
                   value={authors}
                   onChange={(event) => setAuthors(event.target.value)}
-                  disabled={isReader || submitting}
+                  disabled={!canWrite || submitting}
                 />
               </label>
               <label>
@@ -348,7 +349,7 @@ export default function ProjectDocumentsPage({
                   className="input"
                   value={tags}
                   onChange={(event) => setTags(event.target.value)}
-                  disabled={isReader || submitting}
+                  disabled={!canWrite || submitting}
                 />
               </label>
             </div>
@@ -359,7 +360,7 @@ export default function ProjectDocumentsPage({
                 type="date"
                 value={publishedAt}
                 onChange={(event) => setPublishedAt(event.target.value)}
-                disabled={isReader || submitting}
+                disabled={!canWrite || submitting}
               />
             </label>
             <div className="grid cols-2 grid-tight">
@@ -370,7 +371,7 @@ export default function ProjectDocumentsPage({
                   type="file"
                   accept="application/pdf,.pdf"
                   onChange={(event) => setPdfFile(event.target.files?.[0] ?? null)}
-                  disabled={isReader || submitting}
+                  disabled={!canWrite || submitting}
                 />
               </label>
               <label>
@@ -381,7 +382,7 @@ export default function ProjectDocumentsPage({
                   type="file"
                   multiple
                   onChange={onFolderChange}
-                  disabled={isReader || submitting}
+                  disabled={!canWrite || submitting}
                 />
               </label>
             </div>
@@ -393,7 +394,7 @@ export default function ProjectDocumentsPage({
               and a <code>Figures/</code> folder.
             </p>
             <div className="task-form-actions">
-              <button className="button" type="submit" disabled={isReader || submitting}>
+              <button className="button" type="submit" disabled={!canWrite || submitting}>
                 {submitting ? "Creating..." : "Create document"}
               </button>
               <button
@@ -415,7 +416,7 @@ export default function ProjectDocumentsPage({
       <section className="panel">
         <h3 className="section-heading">Documents</h3>
         {loading ? <p className="alert alert-info">Loading documents...</p> : null}
-        {!loading && documents.length === 0 ? <p className="alert alert-info">{isReader ? "No documents available yet." : "No documents yet. Create your first one."}</p> : null}
+        {!loading && documents.length === 0 ? <p className="alert alert-info">{canWrite ? "No documents yet. Create your first one." : "No documents available yet."}</p> : null}
         {!loading && documents.length > 0 ? (
           <ul className="list">
             {documents.map((document) => (
@@ -442,7 +443,7 @@ export default function ProjectDocumentsPage({
                     <Link className="button button-secondary" href={`/projects/${params.projectId}/documents/${document.id}`}>
                       Open
                     </Link>
-                    {!isReader ? (
+                    {canWrite ? (
                       <button
                         className="button button-danger"
                         type="button"

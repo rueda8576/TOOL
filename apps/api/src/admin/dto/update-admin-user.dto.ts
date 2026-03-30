@@ -1,5 +1,13 @@
 import { Type } from "class-transformer";
-import { ArrayUnique, IsArray, IsIn, IsOptional, IsString } from "class-validator";
+import { IsArray, IsIn, IsOptional, IsString, ValidateNested } from "class-validator";
+
+export class UpdateAdminUserProjectAccessDto {
+  @IsString()
+  projectId!: string;
+
+  @IsIn(["editor", "reader"])
+  role!: "editor" | "reader";
+}
 
 export class UpdateAdminUserDto {
   @IsIn(["admin", "editor", "reader"])
@@ -7,8 +15,7 @@ export class UpdateAdminUserDto {
 
   @IsOptional()
   @IsArray()
-  @ArrayUnique()
-  @Type(() => String)
-  @IsString({ each: true })
-  projectIds?: string[];
+  @ValidateNested({ each: true })
+  @Type(() => UpdateAdminUserProjectAccessDto)
+  projectAccess?: UpdateAdminUserProjectAccessDto[];
 }

@@ -1,18 +1,47 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { GlobalRole, Prisma, type Project, type User } from "@prisma/client";
+import { GlobalRole, Prisma, ProjectRole } from "@prisma/client";
 
 import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { apiRoleToPrismaRole, prismaRoleToApiRole } from "../common/role-map";
 import { getDocumentsCollaborationServer } from "../documents/collaboration-server-registry";
 import { PrismaService } from "../prisma/prisma.service";
-import { UpdateAdminUserDto } from "./dto/update-admin-user.dto";
+import { UpdateAdminUserDto, UpdateAdminUserProjectAccessDto } from "./dto/update-admin-user.dto";
 
-type UserSummaryRecord = Pick<User, "id" | "name" | "email" | "isActive" | "createdAt" | "globalRole"> & {
-  projectMemberships: Array<{
-    project: Pick<Project, "id" | "key" | "name">;
-  }>;
-};
+const adminUserSummaryArgs = Prisma.validator<Prisma.UserDefaultArgs>()({
+  select: {
+    id: true,
+    name: true,
+    email: true,
+    isActive: true,
+    createdAt: true,
+    globalRole: true,
+    projectMemberships: {
+      where: {
+        project: {
+          deletedAt: null
+        }
+      },
+      orderBy: {
+        project: {
+          key: "asc"
+        }
+      },
+      select: {
+        role: true,
+        project: {
+          select: {
+            id: true,
+            key: true,
+            name: true
+          }
+        }
+      }
+    }
+  }
+});
+
+type UserSummaryRecord = Prisma.UserGetPayload<typeof adminUserSummaryArgs>;
 
 export type AdminUserSummary = {
   id: string;
@@ -22,7 +51,7 @@ export type AdminUserSummary = {
   isActive: boolean;
   createdAt: string;
   projectAccessMode: "all_projects" | "selected_projects";
-  projects: Array<{ id: string; key: string; name: string }>;
+  projects: Array<{ id: string; key: string; name: string; role: "editor" | "reader" }>;
 };
 
 @Injectable()
@@ -40,39 +69,8 @@ export class AdminUsersService {
         deletedAt: null,
         isActive: true
       },
-      orderBy: [
-        { name: "asc" },
-        { email: "asc" }
-      ],
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        isActive: true,
-        createdAt: true,
-        globalRole: true,
-        projectMemberships: {
-          where: {
-            project: {
-              deletedAt: null
-            }
-          },
-          orderBy: {
-            project: {
-              key: "asc"
-            }
-          },
-          select: {
-            project: {
-              select: {
-                id: true,
-                key: true,
-                name: true
-              }
-            }
-          }
-        }
-      }
+      orderBy: [{ name: "asc" }, { email: "asc" }],
+      ...adminUserSummaryArgs
     });
 
     return users.map((targetUser) => this.mapUserSummary(targetUser));
@@ -82,7 +80,7 @@ export class AdminUsersService {
     this.ensureAdminActor(actor);
 
     const nextRole = apiRoleToPrismaRole(dto.globalRole);
-    const normalizedProjectIds = this.normalizeProjectIds(dto.projectIds);
+    const normalizedProjectAccess = this.normalizeProjectAccess(dto.projectAccess);
 
     const updatedUser = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const targetUser = await tx.user.findFirst({
@@ -91,35 +89,7 @@ export class AdminUsersService {
           deletedAt: null,
           isActive: true
         },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          isActive: true,
-          createdAt: true,
-          globalRole: true,
-          projectMemberships: {
-            where: {
-              project: {
-                deletedAt: null
-              }
-            },
-            orderBy: {
-              project: {
-                key: "asc"
-              }
-            },
-            select: {
-              project: {
-                select: {
-                  id: true,
-                  key: true,
-                  name: true
-                }
-              }
-            }
-          }
-        }
+        ...adminUserSummaryArgs
       });
 
       if (!targetUser) {
@@ -131,18 +101,22 @@ export class AdminUsersService {
       }
 
       if (nextRole !== GlobalRole.ADMIN) {
-        await this.ensureProjectsExist(tx, normalizedProjectIds);
+        await this.ensureProjectsExist(
+          tx,
+          normalizedProjectAccess.map((projectAccess) => projectAccess.projectId)
+        );
         await tx.projectMember.deleteMany({
           where: {
             userId: targetUser.id
           }
         });
 
-        if (normalizedProjectIds.length > 0) {
+        if (normalizedProjectAccess.length > 0) {
           await tx.projectMember.createMany({
-            data: normalizedProjectIds.map((projectId) => ({
-              projectId,
-              userId: targetUser.id
+            data: normalizedProjectAccess.map((projectAccess) => ({
+              projectId: projectAccess.projectId,
+              userId: targetUser.id,
+              role: projectAccess.role
             })),
             skipDuplicates: true
           });
@@ -172,45 +146,14 @@ export class AdminUsersService {
         where: {
           id: targetUser.id
         },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          isActive: true,
-          createdAt: true,
-          globalRole: true,
-          projectMemberships: {
-            where: {
-              project: {
-                deletedAt: null
-              }
-            },
-            orderBy: {
-              project: {
-                key: "asc"
-              }
-            },
-            select: {
-              project: {
-                select: {
-                  id: true,
-                  key: true,
-                  name: true
-                }
-              }
-            }
-          }
-        }
+        ...adminUserSummaryArgs
       });
 
       if (!refreshedUser) {
         throw new NotFoundException("User not found");
       }
 
-      return {
-        refreshedUser,
-        roleChanged
-      };
+      return refreshedUser;
     });
 
     await this.auditService.log({
@@ -220,13 +163,19 @@ export class AdminUsersService {
       action: "user.update",
       metadata: {
         globalRole: dto.globalRole,
-        projectIds: dto.globalRole === "admin" ? [] : normalizedProjectIds
+        projectAccess:
+          dto.globalRole === "admin"
+            ? []
+            : normalizedProjectAccess.map((projectAccess) => ({
+                projectId: projectAccess.projectId,
+                role: this.projectRoleToApi(projectAccess.role)
+              }))
       }
     });
 
     this.disconnectUser(userId, "Permissions updated by an administrator");
 
-    return this.mapUserSummary(updatedUser.refreshedUser);
+    return this.mapUserSummary(updatedUser);
   }
 
   async deleteUser(userId: string, actor: AuthenticatedUser): Promise<{ id: string; deletedAt: string }> {
@@ -313,14 +262,24 @@ export class AdminUsersService {
     }
   }
 
-  private normalizeProjectIds(projectIds: string[] | undefined): string[] {
-    return Array.from(
-      new Set(
-        (projectIds ?? [])
-          .map((projectId) => projectId.trim())
-          .filter((projectId) => projectId.length > 0)
-      )
-    );
+  private normalizeProjectAccess(
+    projectAccess: UpdateAdminUserProjectAccessDto[] | undefined
+  ): Array<{ projectId: string; role: ProjectRole }> {
+    const normalized = new Map<string, ProjectRole>();
+
+    (projectAccess ?? []).forEach((entry) => {
+      const projectId = entry.projectId.trim();
+      if (!projectId) {
+        return;
+      }
+
+      normalized.set(projectId, this.apiProjectRoleToPrisma(entry.role));
+    });
+
+    return Array.from(normalized.entries()).map(([projectId, role]) => ({
+      projectId,
+      role
+    }));
   }
 
   private async ensureProjectsExist(tx: Prisma.TransactionClient, projectIds: string[]): Promise<void> {
@@ -405,8 +364,17 @@ export class AdminUsersService {
       projects: user.projectMemberships.map((membership) => ({
         id: membership.project.id,
         key: membership.project.key,
-        name: membership.project.name
+        name: membership.project.name,
+        role: this.projectRoleToApi(membership.role)
       }))
     };
+  }
+
+  private apiProjectRoleToPrisma(role: "editor" | "reader"): ProjectRole {
+    return role === "editor" ? ProjectRole.EDITOR : ProjectRole.READER;
+  }
+
+  private projectRoleToApi(role: ProjectRole): "editor" | "reader" {
+    return role === ProjectRole.EDITOR ? "editor" : "reader";
   }
 }

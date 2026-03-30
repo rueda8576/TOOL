@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
-import { LoginResponse } from "../../../../lib/client-api";
+import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import {
   createProjectTask,
   deleteTask as deleteTaskApi,
@@ -42,18 +42,6 @@ const statusOptions: Array<{ value: TaskStatus; label: string }> = [
 type TaskFormMode = "create" | "edit";
 type ContextMenuState = { taskId: string; x: number; y: number } | null;
 
-function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
-  if (!rawUser) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(rawUser) as LoginResponse["user"];
-  } catch {
-    return null;
-  }
-}
-
 export default function ProjectTasksPage({
   params
 }: {
@@ -61,7 +49,7 @@ export default function ProjectTasksPage({
 }): JSX.Element {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<LoginResponse["user"]["globalRole"] | null>(null);
+  const [projectAccess, setProjectAccess] = useState<ProjectAccess | null>(null);
   const [tasks, setTasks] = useState<TaskListItem[]>([]);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,6 +95,19 @@ export default function ProjectTasksPage({
     [params.projectId]
   );
 
+  const loadAccess = useCallback(
+    async (authToken: string): Promise<void> => {
+      try {
+        const access = await getProjectAccess(params.projectId, authToken);
+        setProjectAccess(access);
+      } catch (fetchError) {
+        setProjectAccess(null);
+        setError((fetchError as Error).message);
+      }
+    },
+    [params.projectId]
+  );
+
   useEffect(() => {
     const storedToken = localStorage.getItem("doctoral_token");
     if (!storedToken) {
@@ -115,10 +116,10 @@ export default function ProjectTasksPage({
     }
 
     setToken(storedToken);
-    setUserRole(parseStoredUser(localStorage.getItem("doctoral_user"))?.globalRole ?? null);
+    void loadAccess(storedToken);
     void loadTasks(storedToken);
     void loadMembers(storedToken);
-  }, [loadMembers, loadTasks, router]);
+  }, [loadAccess, loadMembers, loadTasks, router]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -159,7 +160,7 @@ export default function ProjectTasksPage({
     );
   }, [tasks]);
 
-  const isReader = userRole === "reader";
+  const canWrite = projectAccess?.canWrite ?? false;
 
   const resetForm = (): void => {
     setTitle("");
@@ -199,8 +200,8 @@ export default function ProjectTasksPage({
   };
 
   const onNewTaskClick = (): void => {
-    if (isReader) {
-      setError("Reader role cannot create tasks.");
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
       return;
     }
 
@@ -221,8 +222,8 @@ export default function ProjectTasksPage({
       return;
     }
 
-    if (isReader) {
-      setError("Reader role cannot create tasks.");
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
       return;
     }
 
@@ -273,8 +274,8 @@ export default function ProjectTasksPage({
       return;
     }
 
-    if (isReader) {
-      setError("Reader role cannot delete tasks.");
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
       return;
     }
 
@@ -301,7 +302,7 @@ export default function ProjectTasksPage({
   };
 
   const openContextMenu = (taskId: string, x: number, y: number): void => {
-    if (isReader) {
+    if (!canWrite) {
       return;
     }
 
@@ -335,7 +336,7 @@ export default function ProjectTasksPage({
       <section className="panel task-toolbar">
         <div className="task-toolbar-row">
           <h3 className="section-heading">Board</h3>
-          {!isReader ? (
+          {canWrite ? (
             <button className="button button-secondary" type="button" onClick={onNewTaskClick}>
               {showForm && formMode === "create" ? "Close" : "New task"}
             </button>
@@ -345,7 +346,7 @@ export default function ProjectTasksPage({
         {error ? <p className="alert alert-error">{error}</p> : null}
       </section>
 
-      {showForm && !isReader ? (
+      {showForm && canWrite ? (
         <section className="panel">
           <h3 className="section-heading">{formMode === "edit" ? "Edit task" : "Create task"}</h3>
           <form className="form-grid" onSubmit={onSubmit}>
@@ -357,7 +358,7 @@ export default function ProjectTasksPage({
                 onChange={(event) => setTitle(event.target.value)}
                 maxLength={200}
                 required
-                disabled={isReader || submitting}
+                disabled={!canWrite || submitting}
               />
             </label>
             <label>
@@ -367,7 +368,7 @@ export default function ProjectTasksPage({
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 maxLength={20_000}
-                disabled={isReader || submitting}
+                disabled={!canWrite || submitting}
               />
             </label>
             <div className="grid cols-2 grid-tight">
@@ -377,7 +378,7 @@ export default function ProjectTasksPage({
                   className="input"
                   value={status}
                   onChange={(event) => setStatus(event.target.value as TaskStatus)}
-                  disabled={isReader || submitting}
+                  disabled={!canWrite || submitting}
                 >
                   {statusOptions.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -392,7 +393,7 @@ export default function ProjectTasksPage({
                   className="input"
                   value={priority}
                   onChange={(event) => setPriority(event.target.value as TaskPriority)}
-                  disabled={isReader || submitting}
+                  disabled={!canWrite || submitting}
                 >
                   {priorityOptions.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -408,7 +409,7 @@ export default function ProjectTasksPage({
                 className="input"
                 value={assigneeId}
                 onChange={(event) => setAssigneeId(event.target.value)}
-                disabled={isReader || submitting}
+                disabled={!canWrite || submitting}
               >
                 <option value="">Unassigned</option>
                 {members.map((member) => (
@@ -419,7 +420,7 @@ export default function ProjectTasksPage({
               </select>
             </label>
             <div className="task-form-actions">
-              <button className="button" type="submit" disabled={isReader || submitting}>
+              <button className="button" type="submit" disabled={!canWrite || submitting}>
                 {submitting ? "Saving..." : formMode === "edit" ? "Save changes" : "Create task"}
               </button>
               <button
@@ -449,7 +450,7 @@ export default function ProjectTasksPage({
               <div className="list-item task-card" key={task.id} onContextMenu={(event) => onCardContextMenu(task.id, event)}>
                 <div className="task-card-header">
                   <strong>{task.title}</strong>
-                  {!isReader ? (
+                  {canWrite ? (
                     <button
                       className="task-actions-button"
                       type="button"

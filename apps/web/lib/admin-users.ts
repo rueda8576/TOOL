@@ -8,7 +8,7 @@ export type AdminManagedUser = {
   isActive: boolean;
   createdAt: string;
   projectAccessMode: "all_projects" | "selected_projects";
-  projects: Array<{ id: string; key: string; name: string }>;
+  projects: Array<{ id: string; key: string; name: string; role: "editor" | "reader" }>;
 };
 
 export async function listAdminUsers(token: string): Promise<AdminManagedUser[]> {
@@ -20,7 +20,10 @@ export async function updateAdminUser(
   token: string,
   payload: {
     globalRole: "admin" | "editor" | "reader";
-    projectIds?: string[];
+    projectAccess?: Array<{
+      projectId: string;
+      role: "editor" | "reader";
+    }>;
   }
 ): Promise<AdminManagedUser> {
   return authFetch<AdminManagedUser>(`/admin/users/${userId}`, {

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
-import { InviteAccessMode, InviteStatus, NotificationEventType, NotificationStatus } from "@prisma/client";
+import { InviteAccessMode, InviteStatus, NotificationEventType, NotificationStatus, ProjectRole } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { JwtService } from "@nestjs/jwt";
 
@@ -115,11 +115,15 @@ export class AuthService {
         tokenHash,
         senderId,
         accessMode: access.accessMode,
-        projectId: access.projectIds.length === 1 ? access.projectIds[0] : undefined,
+        defaultProjectRole: access.defaultProjectRole ?? undefined,
+        projectId: access.projectAccess.length === 1 ? access.projectAccess[0]?.projectId : undefined,
         inviteProjects:
-          access.projectIds.length > 0
+          access.projectAccess.length > 0
             ? {
-                create: access.projectIds.map((projectId) => ({ projectId }))
+                create: access.projectAccess.map((projectAccess) => ({
+                  projectId: projectAccess.projectId,
+                  role: projectAccess.role
+                }))
               }
             : undefined,
         globalRole: apiRoleToPrismaRole(canonicalRole),
@@ -162,7 +166,7 @@ export class AuthService {
 
     await this.auditService.log({
       userId: senderId,
-      projectId: access.projectIds.length === 1 ? access.projectIds[0] : undefined,
+      projectId: access.projectAccess.length === 1 ? access.projectAccess[0]?.projectId : undefined,
       entityType: "invite",
       entityId: invite.id,
       action: "auth.invite.create",
@@ -170,7 +174,11 @@ export class AuthService {
         email: invite.email,
         role: canonicalRole,
         accessMode: access.accessMode,
-        projectIds: access.projectIds
+        defaultProjectRole: access.defaultProjectRole ? this.projectRoleToApi(access.defaultProjectRole) : null,
+        projectAccess: access.projectAccess.map((projectAccess) => ({
+          projectId: projectAccess.projectId,
+          role: this.projectRoleToApi(projectAccess.role)
+        }))
       }
     });
 
@@ -196,7 +204,8 @@ export class AuthService {
       include: {
         inviteProjects: {
           select: {
-            projectId: true
+            projectId: true,
+            role: true
           }
         }
       }
@@ -238,22 +247,26 @@ export class AuthService {
       });
     }
 
-    const targetProjectIds = await this.resolveInviteProjectAssignments(invite);
-    if (targetProjectIds.length > 0) {
+    const targetProjectAssignments = await this.resolveInviteProjectAssignments(invite);
+    const targetProjectIds = targetProjectAssignments.map((assignment) => assignment.projectId);
+    if (targetProjectAssignments.length > 0 && invitedRole !== "admin") {
       await this.prisma.$transaction(
-        targetProjectIds.map((projectId) =>
+        targetProjectAssignments.map((assignment) =>
           this.prisma.projectMember.upsert({
             where: {
               projectId_userId: {
-                projectId,
+                projectId: assignment.projectId,
                 userId: user.id
               }
             },
             create: {
-              projectId,
-              userId: user.id
+              projectId: assignment.projectId,
+              userId: user.id,
+              role: assignment.role
             },
-            update: {}
+            update: {
+              role: assignment.role
+            }
           })
         )
       );
@@ -290,7 +303,10 @@ export class AuthService {
       action: "auth.invite.accept",
       metadata: {
         accessMode: invite.accessMode,
-        projectIds: targetProjectIds
+        projectAccess: targetProjectAssignments.map((assignment) => ({
+          projectId: assignment.projectId,
+          role: this.projectRoleToApi(assignment.role)
+        }))
       }
     });
 
@@ -335,41 +351,47 @@ export class AuthService {
 
   private async resolveInviteAccess(dto: InviteDto): Promise<{
     accessMode: InviteAccessMode;
-    projectIds: string[];
-    projects: Array<{ id: string; key: string; name: string }>;
+    defaultProjectRole: ProjectRole | null;
+    projectAccess: Array<{ projectId: string; role: ProjectRole; key: string; name: string }>;
   }> {
     const legacyProjectId = dto.projectId?.trim();
-    const projectIds = Array.from(new Set((dto.projectIds ?? []).map((projectId) => projectId.trim()).filter(Boolean)));
+    const legacyProjectIds = Array.from(new Set((dto.projectIds ?? []).map((projectId) => projectId.trim()).filter(Boolean)));
+    const normalizedProjectAccess = this.normalizeProjectAccess(dto.projectAccess);
 
     if (dto.accessMode === "all") {
-      if (legacyProjectId || projectIds.length > 0) {
-        throw new BadRequestException("accessMode 'all' does not accept projectId or projectIds");
+      if (legacyProjectId || legacyProjectIds.length > 0 || normalizedProjectAccess.length > 0) {
+        throw new BadRequestException("accessMode 'all' does not accept project-specific assignments");
+      }
+
+      if (dto.globalRole !== "admin" && !dto.defaultProjectRole) {
+        throw new BadRequestException("defaultProjectRole is required when accessMode is 'all'");
       }
 
       return {
         accessMode: InviteAccessMode.ALL_CURRENT_PROJECTS,
-        projectIds: [],
-        projects: []
+        defaultProjectRole: dto.globalRole === "admin" ? null : this.apiProjectRoleToPrisma(dto.defaultProjectRole ?? "reader"),
+        projectAccess: []
       };
     }
 
-    const selectedProjectIds = [...projectIds];
-    if (legacyProjectId && !selectedProjectIds.includes(legacyProjectId)) {
-      selectedProjectIds.push(legacyProjectId);
+    const selectedProjectAccess =
+      normalizedProjectAccess.length > 0
+        ? normalizedProjectAccess
+        : this.normalizeLegacyInviteProjects(legacyProjectId, legacyProjectIds, dto.globalRole);
+
+    if (dto.accessMode === "selected" && selectedProjectAccess.length === 0) {
+      throw new BadRequestException("projectAccess must contain at least one project when accessMode is 'selected'");
     }
 
-    if (dto.accessMode === "selected" && selectedProjectIds.length === 0) {
-      throw new BadRequestException("projectIds must contain at least one project when accessMode is 'selected'");
-    }
-
-    if (!dto.accessMode && selectedProjectIds.length === 0) {
+    if (!dto.accessMode && selectedProjectAccess.length === 0) {
       throw new BadRequestException("accessMode is required and must be either 'all' or 'selected'");
     }
 
-    if (selectedProjectIds.length === 0) {
-      throw new BadRequestException("projectIds must contain at least one project");
+    if (selectedProjectAccess.length === 0) {
+      throw new BadRequestException("projectAccess must contain at least one project");
     }
 
+    const selectedProjectIds = selectedProjectAccess.map((projectAccess) => projectAccess.projectId);
     const projects = await this.prisma.project.findMany({
       where: {
         id: { in: selectedProjectIds },
@@ -387,24 +409,33 @@ export class AuthService {
     }
 
     const projectsById = new Map(projects.map((project) => [project.id, project]));
-    const orderedProjects = selectedProjectIds.map((projectId) => projectsById.get(projectId)).filter(Boolean) as Array<{
-      id: string;
-      key: string;
-      name: string;
-    }>;
+    const orderedProjectAccess = selectedProjectAccess.map((projectAccess) => {
+      const project = projectsById.get(projectAccess.projectId);
+      if (!project) {
+        throw new BadRequestException("One or more selected projects are missing or archived");
+      }
+
+      return {
+        projectId: project.id,
+        role: projectAccess.role,
+        key: project.key,
+        name: project.name
+      };
+    });
 
     return {
       accessMode: InviteAccessMode.SELECTED_PROJECTS,
-      projectIds: selectedProjectIds,
-      projects: orderedProjects
+      defaultProjectRole: null,
+      projectAccess: orderedProjectAccess
     };
   }
 
   private async resolveInviteProjectAssignments(invite: {
     accessMode: InviteAccessMode;
+    defaultProjectRole: ProjectRole | null;
     projectId: string | null;
-    inviteProjects: Array<{ projectId: string }>;
-  }): Promise<string[]> {
+    inviteProjects: Array<{ projectId: string; role: ProjectRole }>;
+  }): Promise<Array<{ projectId: string; role: ProjectRole }>> {
     if (invite.accessMode === InviteAccessMode.ALL_CURRENT_PROJECTS) {
       const allProjects = await this.prisma.project.findMany({
         where: {
@@ -415,17 +446,27 @@ export class AuthService {
         }
       });
 
-      return allProjects.map((project) => project.id);
+      const role = invite.defaultProjectRole ?? ProjectRole.READER;
+      return allProjects.map((project) => ({
+        projectId: project.id,
+        role
+      }));
     }
 
-    const selectedProjectIds = Array.from(new Set(invite.inviteProjects.map((item) => item.projectId)));
-    if (selectedProjectIds.length === 0 && invite.projectId) {
-      selectedProjectIds.push(invite.projectId);
+    const selectedProjectAccess = new Map<string, ProjectRole>();
+    invite.inviteProjects.forEach((item) => {
+      if (!selectedProjectAccess.has(item.projectId)) {
+        selectedProjectAccess.set(item.projectId, item.role);
+      }
+    });
+    if (selectedProjectAccess.size === 0 && invite.projectId) {
+      selectedProjectAccess.set(invite.projectId, invite.defaultProjectRole ?? ProjectRole.READER);
     }
-    if (selectedProjectIds.length === 0) {
+    if (selectedProjectAccess.size === 0) {
       return [];
     }
 
+    const selectedProjectIds = Array.from(selectedProjectAccess.keys());
     const activeProjects = await this.prisma.project.findMany({
       where: {
         id: { in: selectedProjectIds },
@@ -437,6 +478,56 @@ export class AuthService {
     });
 
     const activeProjectIds = new Set(activeProjects.map((project) => project.id));
-    return selectedProjectIds.filter((projectId) => activeProjectIds.has(projectId));
+    return selectedProjectIds
+      .filter((projectId) => activeProjectIds.has(projectId))
+      .map((projectId) => ({
+        projectId,
+        role: selectedProjectAccess.get(projectId) ?? ProjectRole.READER
+      }));
+  }
+
+  private normalizeProjectAccess(
+    projectAccess: InviteDto["projectAccess"]
+  ): Array<{ projectId: string; role: ProjectRole }> {
+    const normalized = new Map<string, ProjectRole>();
+
+    (projectAccess ?? []).forEach((entry) => {
+      const projectId = entry.projectId.trim();
+      if (!projectId) {
+        return;
+      }
+
+      normalized.set(projectId, this.apiProjectRoleToPrisma(entry.role));
+    });
+
+    return Array.from(normalized.entries()).map(([projectId, role]) => ({
+      projectId,
+      role
+    }));
+  }
+
+  private normalizeLegacyInviteProjects(
+    legacyProjectId: string | undefined,
+    legacyProjectIds: string[],
+    globalRole: InviteDto["globalRole"]
+  ): Array<{ projectId: string; role: ProjectRole }> {
+    const normalized = new Set(legacyProjectIds);
+    if (legacyProjectId) {
+      normalized.add(legacyProjectId);
+    }
+
+    const fallbackRole = this.apiProjectRoleToPrisma(globalRole === "editor" ? "editor" : "reader");
+    return Array.from(normalized).map((projectId) => ({
+      projectId,
+      role: fallbackRole
+    }));
+  }
+
+  private apiProjectRoleToPrisma(role: "editor" | "reader"): ProjectRole {
+    return role === "editor" ? ProjectRole.EDITOR : ProjectRole.READER;
+  }
+
+  private projectRoleToApi(role: ProjectRole): "editor" | "reader" {
+    return role === ProjectRole.EDITOR ? "editor" : "reader";
   }
 }

@@ -1,6 +1,15 @@
-import { IsArray, IsEmail, IsIn, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
+import { Type } from "class-transformer";
+import { IsArray, IsEmail, IsIn, IsInt, IsOptional, IsString, Max, Min, ValidateNested } from "class-validator";
 
 export type InviteAccessModeInput = "all" | "selected";
+
+export class InviteProjectAccessDto {
+  @IsString()
+  projectId!: string;
+
+  @IsIn(["editor", "reader"])
+  role!: "editor" | "reader";
+}
 
 export class InviteDto {
   @IsEmail()
@@ -19,9 +28,19 @@ export class InviteDto {
   accessMode?: InviteAccessModeInput;
 
   @IsOptional()
+  @IsIn(["editor", "reader"])
+  defaultProjectRole?: "editor" | "reader";
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   projectIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InviteProjectAccessDto)
+  projectAccess?: InviteProjectAccessDto[];
 
   @IsOptional()
   @IsInt()

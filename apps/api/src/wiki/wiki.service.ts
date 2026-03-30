@@ -81,10 +81,6 @@ export class WikiService {
     private readonly storageService: StorageService
   ) {}
 
-  private canReadDraft(user: AuthenticatedUser): boolean {
-    return user.globalRole !== "reader";
-  }
-
   private normalizeSlug(rawSlug: string): string {
     const slug = rawSlug.trim().toLowerCase();
     if (!WIKI_SEGMENT_PATTERN.test(slug)) {
@@ -528,8 +524,8 @@ export class WikiService {
   }
 
   async listTree(projectId: string, user: AuthenticatedUser): Promise<WikiTreeNode[]> {
-    await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
-    const canReadDraft = this.canReadDraft(user);
+    const access = await this.accessService.getProjectAccess(user.userId, user.globalRole, projectId);
+    const canReadDraft = access.canWrite;
 
     const pages = await this.prisma.wikiPage.findMany({
       where: {
@@ -589,7 +585,7 @@ export class WikiService {
   }
 
   async getByPath(projectId: string, path: string, user: AuthenticatedUser): Promise<WikiPageDetail> {
-    await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
+    const access = await this.accessService.getProjectAccess(user.userId, user.globalRole, projectId);
     const normalizedPath = this.normalizePath(path);
 
     const page = await this.prisma.wikiPage.findFirst({
@@ -704,7 +700,7 @@ export class WikiService {
       path: link.toPage?.path ?? null
     }));
 
-    const canReadDraft = this.canReadDraft(user);
+    const canReadDraft = access.canWrite;
     const draft: WikiDraftView | undefined =
       canReadDraft && page.draft
         ? {
@@ -726,7 +722,7 @@ export class WikiService {
   }
 
   async searchPages(projectId: string, query: SearchWikiPagesQueryDto, user: AuthenticatedUser): Promise<WikiSearchResult[]> {
-    await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
+    const access = await this.accessService.getProjectAccess(user.userId, user.globalRole, projectId);
 
     const searchText = query.q.trim();
     if (searchText.length < 2) {
@@ -734,7 +730,7 @@ export class WikiService {
     }
 
     const limit = Math.min(Math.max(query.limit ?? 20, 1), 50);
-    const includeDraft = this.canReadDraft(user);
+    const includeDraft = access.canWrite;
 
     const draftVectorPart = includeDraft
       ? Prisma.sql`COALESCE(d."contentMarkdown", '')`

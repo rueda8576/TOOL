@@ -323,7 +323,7 @@ export class DocumentsCollaborationServer {
         throw new NotFoundException("Document not found");
       }
 
-      await this.accessService.ensureProjectReadable(user.userId, user.globalRole, document.projectId);
+      const access = await this.accessService.getProjectAccess(user.userId, user.globalRole, document.projectId);
 
       const roomKey = `presence:${document.id}`;
       const room = this.getOrCreatePresenceRoom(roomKey);
@@ -332,7 +332,7 @@ export class DocumentsCollaborationServer {
 
       return {
         room,
-        canWrite: user.globalRole !== "reader",
+        canWrite: access.canWrite,
         userId: user.userId
       };
     }
@@ -353,7 +353,7 @@ export class DocumentsCollaborationServer {
         throw new NotFoundException("Wiki page not found");
       }
 
-      await this.accessService.ensureProjectReadable(user.userId, user.globalRole, page.projectId);
+      const access = await this.accessService.getProjectAccess(user.userId, user.globalRole, page.projectId);
 
       const roomKey = `wiki-presence:${page.id}`;
       const room = this.getOrCreateWikiPresenceRoom(roomKey);
@@ -362,7 +362,7 @@ export class DocumentsCollaborationServer {
 
       return {
         room,
-        canWrite: user.globalRole !== "reader",
+        canWrite: access.canWrite,
         userId: user.userId
       };
     }
@@ -397,7 +397,7 @@ export class DocumentsCollaborationServer {
         throw new NotFoundException("Wiki page not found");
       }
 
-      await this.accessService.ensureProjectReadable(user.userId, user.globalRole, page.projectId);
+      const access = await this.accessService.getProjectAccess(user.userId, user.globalRole, page.projectId);
 
       const roomKey = `wiki-page:${page.id}`;
       const room = this.getOrCreateWikiPageRoom({
@@ -413,7 +413,7 @@ export class DocumentsCollaborationServer {
 
       return {
         room,
-        canWrite: user.globalRole !== "reader",
+        canWrite: access.canWrite,
         userId: user.userId
       };
     }
@@ -444,7 +444,7 @@ export class DocumentsCollaborationServer {
       throw new NotFoundException("Document version not found");
     }
 
-    await this.accessService.ensureProjectReadable(user.userId, user.globalRole, version.document.projectId);
+    const access = await this.accessService.getProjectAccess(user.userId, user.globalRole, version.document.projectId);
 
     if (!version.latexWorkspacePath) {
       throw new NotFoundException("Document version has no editable LaTeX workspace");
@@ -470,7 +470,7 @@ export class DocumentsCollaborationServer {
 
     return {
       room,
-      canWrite: user.globalRole !== "reader",
+      canWrite: access.canWrite,
       userId: user.userId
     };
   }

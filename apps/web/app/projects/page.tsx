@@ -5,12 +5,15 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../components/app-shell";
-import { authFetch, LoginResponse } from "../../lib/client-api";
 import { AdminManagedUser, deleteAdminUser, listAdminUsers, updateAdminUser } from "../../lib/admin-users";
+import { authFetch, LoginResponse } from "../../lib/client-api";
 import { ProjectSummary } from "../../lib/api";
 
 type ProjectOrderBy = "newest" | "key" | "name";
 type InviteAccessMode = "all" | "selected";
+type WorkspaceMode = "projects" | "users";
+type ProjectScopedRole = "editor" | "reader";
+type ProjectRoleMap = Record<string, ProjectScopedRole>;
 
 type CreateProjectResponse = {
   id: string;
@@ -72,6 +75,14 @@ function compareProjectsWithinGroup(left: ProjectSummary, right: ProjectSummary,
   return left.key.localeCompare(right.key, undefined, { sensitivity: "base" });
 }
 
+function buildProjectRoleMap(projects: Array<{ id: string; role: ProjectScopedRole }>): ProjectRoleMap {
+  return Object.fromEntries(projects.map((project) => [project.id, project.role]));
+}
+
+function countProjectRoleMap(projectRoleMap: ProjectRoleMap): number {
+  return Object.keys(projectRoleMap).length;
+}
+
 export default function ProjectsPage(): JSX.Element {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
@@ -81,6 +92,7 @@ export default function ProjectsPage(): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [orderBy, setOrderBy] = useState<ProjectOrderBy>("newest");
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("projects");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [projectKey, setProjectKey] = useState("");
@@ -97,20 +109,20 @@ export default function ProjectsPage(): JSX.Element {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<LoginResponse["user"]["globalRole"]>("reader");
   const [inviteAccessMode, setInviteAccessMode] = useState<InviteAccessMode>("all");
+  const [inviteDefaultProjectRole, setInviteDefaultProjectRole] = useState<ProjectScopedRole>("reader");
   const [inviteProjectQuery, setInviteProjectQuery] = useState("");
-  const [inviteProjectIds, setInviteProjectIds] = useState<string[]>([]);
+  const [inviteProjectAccess, setInviteProjectAccess] = useState<ProjectRoleMap>({});
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
-  const [isManageUsersOpen, setIsManageUsersOpen] = useState(false);
   const [adminUsers, setAdminUsers] = useState<AdminManagedUser[]>([]);
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
   const [adminUsersError, setAdminUsersError] = useState<string | null>(null);
   const [adminUsersSuccess, setAdminUsersSuccess] = useState<string | null>(null);
   const [adminUsersQuery, setAdminUsersQuery] = useState("");
-  const [editingUser, setEditingUser] = useState<AdminManagedUser | null>(null);
+  const [selectedManagedUserId, setSelectedManagedUserId] = useState<string | null>(null);
   const [editingUserRole, setEditingUserRole] = useState<LoginResponse["user"]["globalRole"]>("reader");
-  const [editingUserProjectIds, setEditingUserProjectIds] = useState<string[]>([]);
+  const [editingUserProjectAccess, setEditingUserProjectAccess] = useState<ProjectRoleMap>({});
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
@@ -163,10 +175,21 @@ export default function ProjectsPage(): JSX.Element {
   const isAdmin = userRole === "admin";
 
   useEffect(() => {
-    setInviteProjectIds((current) => {
-      const availableProjectIds = new Set(projects.map((project) => project.id));
-      return current.filter((projectId) => availableProjectIds.has(projectId));
-    });
+    if (workspaceMode !== "users" || !token || !isAdmin) {
+      return;
+    }
+
+    void loadAdminUsers(token);
+  }, [isAdmin, loadAdminUsers, token, workspaceMode]);
+
+  useEffect(() => {
+    const availableProjectIds = new Set(projects.map((project) => project.id));
+    setInviteProjectAccess((current) =>
+      Object.fromEntries(Object.entries(current).filter(([projectId]) => availableProjectIds.has(projectId)))
+    );
+    setEditingUserProjectAccess((current) =>
+      Object.fromEntries(Object.entries(current).filter(([projectId]) => availableProjectIds.has(projectId)))
+    );
   }, [projects]);
 
   const sortedProjects = useMemo(
@@ -202,6 +225,36 @@ export default function ProjectsPage(): JSX.Element {
       managedUser.name.toLowerCase().includes(query) || managedUser.email.toLowerCase().includes(query)
     );
   }, [adminUsers, adminUsersQuery]);
+
+  const selectedManagedUser = useMemo(
+    () => adminUsers.find((managedUser) => managedUser.id === selectedManagedUserId) ?? null,
+    [adminUsers, selectedManagedUserId]
+  );
+
+  useEffect(() => {
+    if (workspaceMode !== "users") {
+      return;
+    }
+
+    if (filteredAdminUsers.length === 0) {
+      setSelectedManagedUserId(null);
+      return;
+    }
+
+    const hasSelectedUser = filteredAdminUsers.some((managedUser) => managedUser.id === selectedManagedUserId);
+    if (!hasSelectedUser) {
+      setSelectedManagedUserId(filteredAdminUsers[0]?.id ?? null);
+    }
+  }, [filteredAdminUsers, selectedManagedUserId, workspaceMode]);
+
+  useEffect(() => {
+    if (!selectedManagedUser) {
+      return;
+    }
+
+    setEditingUserRole(selectedManagedUser.globalRole);
+    setEditingUserProjectAccess(buildProjectRoleMap(selectedManagedUser.projects));
+  }, [selectedManagedUser]);
 
   const onCreateProject = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
@@ -321,12 +374,24 @@ export default function ProjectsPage(): JSX.Element {
   };
 
   const onToggleInviteProject = (projectId: string): void => {
-    setInviteProjectIds((current) => {
-      if (current.includes(projectId)) {
-        return current.filter((id) => id !== projectId);
+    setInviteProjectAccess((current) => {
+      if (current[projectId]) {
+        const { [projectId]: _removed, ...rest } = current;
+        return rest;
       }
-      return [...current, projectId];
+
+      return {
+        ...current,
+        [projectId]: inviteDefaultProjectRole
+      };
     });
+  };
+
+  const onSetInviteProjectRole = (projectId: string, role: ProjectScopedRole): void => {
+    setInviteProjectAccess((current) => ({
+      ...current,
+      [projectId]: role
+    }));
   };
 
   const onSelectAllVisibleInviteProjects = (): void => {
@@ -334,17 +399,19 @@ export default function ProjectsPage(): JSX.Element {
       return;
     }
 
-    setInviteProjectIds((current) => {
-      const next = new Set(current);
+    setInviteProjectAccess((current) => {
+      const next = { ...current };
       filteredInviteProjects.forEach((project) => {
-        next.add(project.id);
+        if (!next[project.id]) {
+          next[project.id] = inviteDefaultProjectRole;
+        }
       });
-      return Array.from(next);
+      return next;
     });
   };
 
   const onClearInviteProjects = (): void => {
-    setInviteProjectIds([]);
+    setInviteProjectAccess({});
   };
 
   const onSendInvite = async (event: FormEvent): Promise<void> => {
@@ -366,7 +433,12 @@ export default function ProjectsPage(): JSX.Element {
       return;
     }
 
-    if (inviteAccessMode === "selected" && inviteProjectIds.length === 0) {
+    const inviteSelectedProjects = Object.entries(inviteProjectAccess).map(([projectId, role]) => ({
+      projectId,
+      role
+    }));
+
+    if (inviteRole !== "admin" && inviteAccessMode === "selected" && inviteSelectedProjects.length === 0) {
       setInviteError("Select at least one project or choose all current projects.");
       return;
     }
@@ -380,20 +452,30 @@ export default function ProjectsPage(): JSX.Element {
         token,
         init: {
           method: "POST",
-          body: JSON.stringify({
-            email,
-            globalRole: inviteRole,
-            accessMode: inviteAccessMode,
-            projectIds: inviteAccessMode === "selected" ? inviteProjectIds : undefined
-          })
+          body: JSON.stringify(
+            inviteRole === "admin"
+              ? {
+                  email,
+                  globalRole: inviteRole,
+                  accessMode: "all"
+                }
+              : {
+                  email,
+                  globalRole: inviteRole,
+                  accessMode: inviteAccessMode,
+                  defaultProjectRole: inviteAccessMode === "all" ? inviteDefaultProjectRole : undefined,
+                  projectAccess: inviteAccessMode === "selected" ? inviteSelectedProjects : undefined
+                }
+          )
         }
       });
 
       setInviteEmail("");
       setInviteRole("reader");
       setInviteAccessMode("all");
+      setInviteDefaultProjectRole("reader");
       setInviteProjectQuery("");
-      setInviteProjectIds([]);
+      setInviteProjectAccess({});
       setInviteSuccess(`Invitation sent to ${email}.`);
     } catch (error) {
       setInviteError((error as Error).message);
@@ -409,66 +491,85 @@ export default function ProjectsPage(): JSX.Element {
 
     setAdminUsersError(null);
     setAdminUsersSuccess(null);
-    setIsManageUsersOpen((current) => {
-      const next = !current;
-      if (next) {
+    setWorkspaceMode((current) => {
+      const next = current === "users" ? "projects" : "users";
+      if (next === "users") {
+        setIsCreateOpen(false);
+        setIsInviteOpen(false);
         void loadAdminUsers(token);
-      } else {
-        setEditingUser(null);
-        setAdminUsersQuery("");
       }
       return next;
     });
   };
 
-  const onStartEditingUser = (managedUser: AdminManagedUser): void => {
+  const onSelectManagedUser = (managedUser: AdminManagedUser): void => {
     setAdminUsersError(null);
     setAdminUsersSuccess(null);
-    setEditingUser(managedUser);
-    setEditingUserRole(managedUser.globalRole);
-    setEditingUserProjectIds(managedUser.projects.map((project) => project.id));
+    setSelectedManagedUserId(managedUser.id);
   };
 
   const onToggleEditingUserProject = (projectId: string): void => {
-    setEditingUserProjectIds((current) => {
-      if (current.includes(projectId)) {
-        return current.filter((id) => id !== projectId);
+    setEditingUserProjectAccess((current) => {
+      if (current[projectId]) {
+        const { [projectId]: _removed, ...rest } = current;
+        return rest;
       }
-      return [...current, projectId];
+
+      return {
+        ...current,
+        [projectId]: "reader"
+      };
     });
+  };
+
+  const onSetEditingUserProjectRole = (projectId: string, role: ProjectScopedRole): void => {
+    setEditingUserProjectAccess((current) => ({
+      ...current,
+      [projectId]: role
+    }));
+  };
+
+  const onResetManagedUserForm = (): void => {
+    if (!selectedManagedUser) {
+      return;
+    }
+
+    setEditingUserRole(selectedManagedUser.globalRole);
+    setEditingUserProjectAccess(buildProjectRoleMap(selectedManagedUser.projects));
   };
 
   const onSaveManagedUser = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
 
-    if (!token || !editingUser) {
+    if (!token || !selectedManagedUser) {
       return;
     }
 
-    setSavingUserId(editingUser.id);
+    setSavingUserId(selectedManagedUser.id);
     setAdminUsersError(null);
     setAdminUsersSuccess(null);
 
     try {
-      const updatedUser = await updateAdminUser(editingUser.id, token, {
+      const updatedUser = await updateAdminUser(selectedManagedUser.id, token, {
         globalRole: editingUserRole,
-        projectIds: editingUserRole === "admin" ? undefined : editingUserProjectIds
+        projectAccess:
+          editingUserRole === "admin"
+            ? undefined
+            : Object.entries(editingUserProjectAccess).map(([projectId, role]) => ({
+                projectId,
+                role
+              }))
       });
 
       setAdminUsers((current) => current.map((managedUser) => (managedUser.id === updatedUser.id ? updatedUser : managedUser)));
-      setEditingUser(updatedUser);
-      setEditingUserProjectIds(updatedUser.projects.map((project) => project.id));
+      setSelectedManagedUserId(updatedUser.id);
+      setEditingUserProjectAccess(buildProjectRoleMap(updatedUser.projects));
       setAdminUsersSuccess(`${updatedUser.name} updated successfully.`);
 
       if (updatedUser.id === currentUserId && updatedUser.globalRole !== userRole) {
         localStorage.removeItem("doctoral_token");
         localStorage.removeItem("doctoral_user");
         router.replace("/login");
-        return;
-      }
-
-      if (updatedUser.globalRole === "admin") {
-        setEditingUserProjectIds([]);
       }
     } catch (error) {
       setAdminUsersError((error as Error).message);
@@ -495,9 +596,7 @@ export default function ProjectsPage(): JSX.Element {
       await deleteAdminUser(managedUser.id, token);
       setAdminUsers((current) => current.filter((user) => user.id !== managedUser.id));
       setAdminUsersSuccess(`${managedUser.name} deleted successfully.`);
-      if (editingUser?.id === managedUser.id) {
-        setEditingUser(null);
-      }
+      setSelectedManagedUserId((current) => (current === managedUser.id ? null : current));
     } catch (error) {
       setAdminUsersError((error as Error).message);
     } finally {
@@ -505,24 +604,31 @@ export default function ProjectsPage(): JSX.Element {
     }
   };
 
+  const workspaceTitle = workspaceMode === "users" ? "Manage users" : "Project directory";
+  const workspaceHelper = workspaceMode === "users"
+    ? "Admins can edit account roles, adjust per-project permissions, and revoke access."
+    : "Pinned projects always stay at the top.";
+
   return (
-    <AppShell title="Projects" subtitle="Browse, pin, and open your research workspaces.">
+    <AppShell title="Projects" subtitle="Browse workspaces and manage access.">
       <section className="panel projects-directory-panel">
         <div className="projects-toolbar-row">
           <div>
-            <h2 className="section-heading">Project directory</h2>
-            <p className="projects-toolbar-helper">Pinned projects always stay at the top.</p>
+            <h2 className="section-heading">{workspaceTitle}</h2>
+            <p className="projects-toolbar-helper">{workspaceHelper}</p>
           </div>
           <div className="projects-toolbar-actions">
-            <label className="projects-order-control">
-              Order by
-              <select className="input" value={orderBy} onChange={(event) => setOrderBy(event.target.value as ProjectOrderBy)}>
-                <option value="newest">Newest</option>
-                <option value="key">Key</option>
-                <option value="name">Name</option>
-              </select>
-            </label>
-            {isAdmin ? (
+            {workspaceMode === "projects" ? (
+              <label className="projects-order-control">
+                Order by
+                <select className="input" value={orderBy} onChange={(event) => setOrderBy(event.target.value as ProjectOrderBy)}>
+                  <option value="newest">Newest</option>
+                  <option value="key">Key</option>
+                  <option value="name">Name</option>
+                </select>
+              </label>
+            ) : null}
+            {isAdmin && workspaceMode === "projects" ? (
               <button
                 className="button button-secondary projects-invite-toggle-button"
                 type="button"
@@ -536,15 +642,11 @@ export default function ProjectsPage(): JSX.Element {
               </button>
             ) : null}
             {isAdmin ? (
-              <button
-                className="button button-secondary projects-invite-toggle-button"
-                type="button"
-                onClick={onToggleManageUsers}
-              >
-                {isManageUsersOpen ? "Close users" : "Manage users"}
+              <button className="button button-secondary projects-invite-toggle-button" type="button" onClick={onToggleManageUsers}>
+                {workspaceMode === "users" ? "Back to projects" : "Manage users"}
               </button>
             ) : null}
-            {isAdmin ? (
+            {isAdmin && workspaceMode === "projects" ? (
               <button
                 className="button"
                 type="button"
@@ -577,414 +679,467 @@ export default function ProjectsPage(): JSX.Element {
           </p>
         ) : null}
 
-        {isCreateOpen && isAdmin ? (
-          <div className="projects-create-collapsible">
-            <h3 className="section-heading">Create project</h3>
-            <form className="form-grid" onSubmit={onCreateProject}>
-              <div className="grid cols-2 grid-tight">
-                <label>
-                  Key
-                  <input
-                    className="input"
-                    value={projectKey}
-                    onChange={(event) => setProjectKey(event.target.value.toUpperCase())}
-                    placeholder="PHD1"
-                    maxLength={20}
-                    required
-                    disabled={creating}
-                  />
-                </label>
-                <label>
-                  Name
-                  <input className="input" value={projectName} onChange={(event) => setProjectName(event.target.value)} maxLength={150} required disabled={creating} />
-                </label>
+        {workspaceMode === "projects" ? (
+          <>
+            {isCreateOpen && isAdmin ? (
+              <div className="projects-create-collapsible">
+                <h3 className="section-heading">Create project</h3>
+                <form className="form-grid" onSubmit={onCreateProject}>
+                  <div className="grid cols-2 grid-tight">
+                    <label>
+                      Key
+                      <input
+                        className="input"
+                        value={projectKey}
+                        onChange={(event) => setProjectKey(event.target.value.toUpperCase())}
+                        placeholder="PHD1"
+                        maxLength={20}
+                        required
+                        disabled={creating}
+                      />
+                    </label>
+                    <label>
+                      Name
+                      <input className="input" value={projectName} onChange={(event) => setProjectName(event.target.value)} maxLength={150} required disabled={creating} />
+                    </label>
+                  </div>
+                  <label>
+                    Description
+                    <textarea
+                      className="input textarea-sm"
+                      value={projectDescription}
+                      onChange={(event) => setProjectDescription(event.target.value)}
+                      maxLength={5000}
+                      disabled={creating}
+                    />
+                  </label>
+                  <button className="button" type="submit" disabled={creating}>
+                    {creating ? "Creating..." : "Create project"}
+                  </button>
+                </form>
               </div>
-              <label>
-                Description
-                <textarea
-                  className="input textarea-sm"
-                  value={projectDescription}
-                  onChange={(event) => setProjectDescription(event.target.value)}
-                  maxLength={5000}
-                  disabled={creating}
-                />
-              </label>
-              <button className="button" type="submit" disabled={creating}>
-                {creating ? "Creating..." : "Create project"}
-              </button>
-            </form>
-          </div>
-        ) : null}
+            ) : null}
 
-        {isAdmin && isInviteOpen ? (
-          <div className="projects-create-collapsible projects-invite-panel">
-            <h3 className="section-heading">Invite user</h3>
-            <form className="form-grid" onSubmit={onSendInvite}>
-              <div className="grid cols-2 grid-tight">
-                <label>
-                  Email
-                  <input
-                    className="input"
-                    type="email"
-                    value={inviteEmail}
-                    onChange={(event) => setInviteEmail(event.target.value)}
-                    placeholder="user@example.com"
-                    required
-                    disabled={inviting}
-                  />
-                </label>
-                <label>
-                  Global role
-                  <select
-                    className="input"
-                    value={inviteRole}
-                    onChange={(event) => setInviteRole(event.target.value as LoginResponse["user"]["globalRole"])}
-                    disabled={inviting}
-                  >
-                    <option value="reader">Reader</option>
-                    <option value="editor">Editor</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                </label>
-              </div>
+            {isAdmin && isInviteOpen ? (
+              <div className="projects-create-collapsible projects-invite-panel">
+                <h3 className="section-heading">Invite user</h3>
+                <form className="form-grid" onSubmit={onSendInvite}>
+                  <div className="grid cols-2 grid-tight">
+                    <label>
+                      Email
+                      <input
+                        className="input"
+                        type="email"
+                        value={inviteEmail}
+                        onChange={(event) => setInviteEmail(event.target.value)}
+                        placeholder="user@example.com"
+                        required
+                        disabled={inviting}
+                      />
+                    </label>
+                    <label>
+                      Account role
+                      <select
+                        className="input"
+                        value={inviteRole}
+                        onChange={(event) => {
+                          const nextRole = event.target.value as LoginResponse["user"]["globalRole"];
+                          setInviteRole(nextRole);
+                          if (nextRole === "admin") {
+                            setInviteAccessMode("all");
+                            setInviteProjectAccess({});
+                            setInviteProjectQuery("");
+                          }
+                        }}
+                        disabled={inviting}
+                      >
+                        <option value="reader">Reader</option>
+                        <option value="editor">Editor</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </label>
+                  </div>
 
-              <label>
-                Access mode
-                <select
-                  className="input"
-                  value={inviteAccessMode}
-                  onChange={(event) => {
-                    setInviteAccessMode(event.target.value as InviteAccessMode);
-                    setInviteProjectQuery("");
-                  }}
-                  disabled={inviting}
-                >
-                  <option value="all">All current projects</option>
-                  <option value="selected">Selected projects</option>
-                </select>
-              </label>
-
-              {inviteAccessMode === "selected" ? (
-                <fieldset className="projects-invite-projects">
-                  <legend>Select projects</legend>
-                  {sortedProjects.length === 0 ? (
-                    <p className="alert alert-info">No projects available.</p>
+                  {inviteRole === "admin" ? (
+                    <p className="alert alert-info">Admins have global access to every project.</p>
                   ) : (
                     <>
-                      <div className="projects-invite-selector-toolbar">
-                        <p className="projects-invite-selection-summary">
-                          {inviteProjectIds.length} selected
-                        </p>
-                        <div className="projects-invite-selection-actions">
-                          <button
-                            className="button button-ghost"
-                            type="button"
-                            onClick={onSelectAllVisibleInviteProjects}
-                            disabled={inviting || filteredInviteProjects.length === 0}
+                      <div className="grid cols-2 grid-tight">
+                        <label>
+                          Access mode
+                          <select
+                            className="input"
+                            value={inviteAccessMode}
+                            onChange={(event) => {
+                              setInviteAccessMode(event.target.value as InviteAccessMode);
+                              setInviteProjectQuery("");
+                            }}
+                            disabled={inviting}
                           >
-                            Select all visible
-                          </button>
-                          <button
-                            className="button button-ghost"
-                            type="button"
-                            onClick={onClearInviteProjects}
-                            disabled={inviting || inviteProjectIds.length === 0}
+                            <option value="all">All current projects</option>
+                            <option value="selected">Selected projects</option>
+                          </select>
+                        </label>
+                        <label>
+                          Default project role
+                          <select
+                            className="input"
+                            value={inviteDefaultProjectRole}
+                            onChange={(event) => setInviteDefaultProjectRole(event.target.value as ProjectScopedRole)}
+                            disabled={inviting}
                           >
-                            Clear
-                          </button>
-                        </div>
+                            <option value="reader">Reader</option>
+                            <option value="editor">Editor</option>
+                          </select>
+                        </label>
                       </div>
 
-                      <label className="projects-invite-search">
-                        Search projects
-                        <input
-                          className="input"
-                          type="search"
-                          value={inviteProjectQuery}
-                          onChange={(event) => setInviteProjectQuery(event.target.value)}
-                          placeholder="Filter by key or name"
-                          disabled={inviting}
-                        />
-                      </label>
+                      {inviteAccessMode === "selected" ? (
+                        <fieldset className="projects-invite-projects">
+                          <legend>Select projects</legend>
+                          {sortedProjects.length === 0 ? (
+                            <p className="alert alert-info">No projects available.</p>
+                          ) : (
+                            <>
+                              <div className="projects-invite-selector-toolbar">
+                                <p className="projects-invite-selection-summary">{countProjectRoleMap(inviteProjectAccess)} selected</p>
+                                <div className="projects-invite-selection-actions">
+                                  <button
+                                    className="button button-ghost"
+                                    type="button"
+                                    onClick={onSelectAllVisibleInviteProjects}
+                                    disabled={inviting || filteredInviteProjects.length === 0}
+                                  >
+                                    Select all visible
+                                  </button>
+                                  <button
+                                    className="button button-ghost"
+                                    type="button"
+                                    onClick={onClearInviteProjects}
+                                    disabled={inviting || countProjectRoleMap(inviteProjectAccess) === 0}
+                                  >
+                                    Clear
+                                  </button>
+                                </div>
+                              </div>
 
-                      {filteredInviteProjects.length === 0 ? (
-                        <p className="alert alert-info">No projects match the current search.</p>
-                      ) : (
-                        <div className="projects-invite-checkboxes">
-                          {filteredInviteProjects.map((project) => {
-                            const isSelected = inviteProjectIds.includes(project.id);
-
-                            return (
-                              <label
-                                className={`projects-invite-checkbox${isSelected ? " projects-invite-checkbox-selected" : ""}`}
-                                key={`invite-${project.id}`}
-                              >
+                              <label className="projects-invite-search">
+                                Search projects
                                 <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() => onToggleInviteProject(project.id)}
+                                  className="input"
+                                  type="search"
+                                  value={inviteProjectQuery}
+                                  onChange={(event) => setInviteProjectQuery(event.target.value)}
+                                  placeholder="Filter by key or name"
                                   disabled={inviting}
                                 />
-                                <div className="projects-invite-checkbox-content">
-                                  <div className="projects-invite-checkbox-main">
-                                    <strong>{project.key}</strong>
-                                    <span>{project.name}</span>
-                                  </div>
-                                  {project.isPinned ? <span className="badge projects-pinned-badge">Pinned</span> : null}
-                                </div>
                               </label>
-                            );
-                          })}
-                        </div>
+
+                              {filteredInviteProjects.length === 0 ? (
+                                <p className="alert alert-info">No projects match the current search.</p>
+                              ) : (
+                                <div className="projects-invite-checkboxes">
+                                  {filteredInviteProjects.map((project) => {
+                                    const selectedRole = inviteProjectAccess[project.id];
+                                    const isSelected = Boolean(selectedRole);
+
+                                    return (
+                                      <label
+                                        className={`projects-invite-checkbox${isSelected ? " projects-invite-checkbox-selected" : ""}`}
+                                        key={`invite-${project.id}`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={() => onToggleInviteProject(project.id)}
+                                          disabled={inviting}
+                                        />
+                                        <div className="projects-invite-checkbox-content">
+                                          <div className="projects-invite-checkbox-main">
+                                            <strong>{project.key}</strong>
+                                            <span>{project.name}</span>
+                                          </div>
+                                          <div className="projects-role-pillars">
+                                            {isSelected ? (
+                                              <select
+                                                className="input projects-role-select"
+                                                value={selectedRole}
+                                                onChange={(event) => onSetInviteProjectRole(project.id, event.target.value as ProjectScopedRole)}
+                                                onClick={(event) => event.stopPropagation()}
+                                                disabled={inviting}
+                                              >
+                                                <option value="reader">Reader</option>
+                                                <option value="editor">Editor</option>
+                                              </select>
+                                            ) : null}
+                                            {project.isPinned ? <span className="badge projects-pinned-badge">Pinned</span> : null}
+                                          </div>
+                                        </div>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </fieldset>
+                      ) : (
+                        <p className="projects-toolbar-helper">
+                          The invited user will receive the selected project role on every current project when they accept the invite.
+                        </p>
                       )}
                     </>
                   )}
-                </fieldset>
-              ) : (
-                <p className="projects-toolbar-helper">
-                  The invited user will receive access to every current project when they accept the invite.
-                </p>
-              )}
 
-              <button className="button" type="submit" disabled={inviting}>
-                {inviting ? "Sending..." : "Send invitation"}
-              </button>
-            </form>
-          </div>
-        ) : null}
-
-        {isAdmin && isManageUsersOpen ? (
-          <div className="projects-create-collapsible projects-users-panel">
-            <div className="projects-users-panel-header">
-              <div>
-                <h3 className="section-heading">Manage users</h3>
-                <p className="projects-toolbar-helper">Admins can edit roles, adjust project access, and revoke accounts.</p>
+                  <button className="button" type="submit" disabled={inviting}>
+                    {inviting ? "Sending..." : "Send invitation"}
+                  </button>
+                </form>
               </div>
-              <label className="projects-users-search">
-                Search users
-                <input
-                  className="input"
-                  type="search"
-                  value={adminUsersQuery}
-                  onChange={(event) => setAdminUsersQuery(event.target.value)}
-                  placeholder="Filter by name or email"
-                  disabled={adminUsersLoading || savingUserId !== null || deletingUserId !== null}
-                />
-              </label>
-            </div>
+            ) : null}
 
-            {adminUsersLoading ? <p className="alert alert-info">Loading users...</p> : null}
+            {loading ? <p className="alert alert-info">Loading projects...</p> : null}
 
-            {!adminUsersLoading ? (
-              filteredAdminUsers.length > 0 ? (
-                <div className="projects-users-list">
+            {!loading && !listError ? (
+              sortedProjects.length > 0 ? (
+                <ul className="list projects-directory-list">
+                  {sortedProjects.map((project) => (
+                    <li className="list-item" key={project.id}>
+                      <div className="projects-list-header">
+                        <strong>
+                          {project.key} - {project.name}
+                        </strong>
+                        {project.isPinned ? <span className="badge projects-pinned-badge">Pinned</span> : null}
+                      </div>
+                      <p>{project.description ?? "No description"}</p>
+                      <div className="projects-list-actions">
+                        <Link className="button button-secondary" href={`/projects/${project.id}`}>
+                          Open project
+                        </Link>
+                        {isAdmin ? (
+                          <button
+                            className="button button-danger"
+                            type="button"
+                            disabled={deletingProjectId === project.id}
+                            onClick={() => {
+                              void onDeleteProject(project);
+                            }}
+                          >
+                            {deletingProjectId === project.id ? "Deleting..." : "Delete"}
+                          </button>
+                        ) : null}
+                        <button
+                          className="button button-ghost"
+                          type="button"
+                          disabled={pinBusyProjectId === project.id}
+                          onClick={() => {
+                            void onTogglePin(project);
+                          }}
+                        >
+                          {pinBusyProjectId === project.id ? "Saving..." : project.isPinned ? "Unpin" : "Pin"}
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="alert alert-info">No projects found.</p>
+              )
+            ) : null}
+          </>
+        ) : (
+          <div className="projects-users-workspace">
+            <aside className="projects-users-sidebar">
+              <div className="projects-users-panel-header">
+                <div>
+                  <h3 className="section-heading">User list</h3>
+                  <p className="projects-toolbar-helper">Select a user to edit account role and per-project access.</p>
+                </div>
+                <label className="projects-users-search">
+                  Search users
+                  <input
+                    className="input"
+                    type="search"
+                    value={adminUsersQuery}
+                    onChange={(event) => setAdminUsersQuery(event.target.value)}
+                    placeholder="Filter by name or email"
+                    disabled={adminUsersLoading || savingUserId !== null || deletingUserId !== null}
+                  />
+                </label>
+              </div>
+
+              {adminUsersLoading ? <p className="alert alert-info">Loading users...</p> : null}
+              {!adminUsersLoading && filteredAdminUsers.length === 0 ? (
+                <p className="alert alert-info">
+                  {adminUsers.length === 0 ? "No active users found." : "No users match the current search."}
+                </p>
+              ) : null}
+
+              {!adminUsersLoading && filteredAdminUsers.length > 0 ? (
+                <div className="projects-users-list projects-users-list-pane">
                   {filteredAdminUsers.map((managedUser) => {
-                    const isCurrentUser = managedUser.id === currentUserId;
-                    const isDeleting = deletingUserId === managedUser.id;
+                    const isSelected = managedUser.id === selectedManagedUserId;
 
                     return (
-                      <article className="projects-users-item" key={managedUser.id}>
-                        <div className="projects-users-row">
-                          <div className="projects-users-row-main">
-                            <div>
-                              <strong>{managedUser.name}</strong>
-                              <p className="projects-users-email">{managedUser.email}</p>
-                            </div>
-                            <div className="projects-users-summary">
-                              <span className="badge">{managedUser.globalRole}</span>
-                              <span className="projects-users-access-summary">
-                                {managedUser.projectAccessMode === "all_projects"
-                                  ? "All projects"
-                                  : managedUser.projects.length > 0
-                                    ? `${managedUser.projects.length} assigned project${managedUser.projects.length === 1 ? "" : "s"}`
-                                    : "No project access"}
-                              </span>
-                            </div>
+                      <button
+                        key={managedUser.id}
+                        type="button"
+                        className={`projects-users-list-button${isSelected ? " projects-users-list-button-selected" : ""}`}
+                        onClick={() => onSelectManagedUser(managedUser)}
+                      >
+                        <div className="projects-users-list-button-header">
+                          <div>
+                            <strong>{managedUser.name}</strong>
+                            <p className="projects-users-email">{managedUser.email}</p>
                           </div>
-                          <div className="projects-list-actions">
-                            <button
-                              className="button button-secondary"
-                              type="button"
-                              onClick={() => onStartEditingUser(managedUser)}
-                              disabled={savingUserId !== null || deletingUserId !== null}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              className="button button-danger"
-                              type="button"
-                              onClick={() => {
-                                void onDeleteManagedUser(managedUser);
-                              }}
-                              disabled={isCurrentUser || isDeleting || savingUserId !== null}
-                              title={isCurrentUser ? "Admins cannot delete their own account." : undefined}
-                            >
-                              {isDeleting ? "Deleting..." : "Delete"}
-                            </button>
-                          </div>
+                          <span className="badge">{managedUser.globalRole}</span>
                         </div>
-
+                        <p className="projects-users-access-summary">
+                          {managedUser.projectAccessMode === "all_projects"
+                            ? "All projects"
+                            : managedUser.projects.length > 0
+                              ? `${managedUser.projects.length} assigned project${managedUser.projects.length === 1 ? "" : "s"}`
+                              : "No project access"}
+                        </p>
                         <div className="projects-users-projects">
                           {managedUser.projectAccessMode === "all_projects" ? (
-                            <span className="projects-users-project-hint">Admins have access to every project.</span>
+                            <span className="projects-users-project-hint">Admins have global access.</span>
                           ) : managedUser.projects.length > 0 ? (
                             managedUser.projects.map((project) => (
                               <span className="badge" key={`${managedUser.id}-${project.id}`}>
-                                {project.key} - {project.name}
+                                {project.key} {project.role === "editor" ? "Editor" : "Reader"}
                               </span>
                             ))
                           ) : (
                             <span className="projects-users-project-hint">No project membership assigned.</span>
                           )}
                         </div>
-                      </article>
+                      </button>
                     );
                   })}
                 </div>
-              ) : (
-                <p className="alert alert-info">
-                  {adminUsers.length === 0 ? "No active users found." : "No users match the current search."}
-                </p>
-              )
-            ) : null}
+              ) : null}
+            </aside>
 
-            {editingUser ? (
-              <div className="projects-users-editor">
-                <div className="projects-users-editor-header">
-                  <div>
-                    <h4 className="section-heading">Edit {editingUser.name}</h4>
-                    <p className="projects-toolbar-helper">{editingUser.email}</p>
-                  </div>
-                  <button
-                    className="button button-ghost"
-                    type="button"
-                    onClick={() => setEditingUser(null)}
-                    disabled={savingUserId === editingUser.id}
-                  >
-                    Close
-                  </button>
-                </div>
-
-                <form className="form-grid" onSubmit={onSaveManagedUser}>
-                  <label>
-                    Global role
-                    <select
-                      className="input"
-                      value={editingUserRole}
-                      onChange={(event) => setEditingUserRole(event.target.value as LoginResponse["user"]["globalRole"])}
-                      disabled={savingUserId === editingUser.id}
-                    >
-                      <option value="reader">Reader</option>
-                      <option value="editor">Editor</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  </label>
-
-                  {editingUserRole === "admin" ? (
-                    <p className="alert alert-info">Admins have access to all projects.</p>
-                  ) : (
-                    <fieldset className="projects-invite-projects">
-                      <legend>Assigned projects</legend>
-                      {sortedProjects.length === 0 ? (
-                        <p className="alert alert-info">No projects available.</p>
-                      ) : (
-                        <div className="projects-invite-checkboxes">
-                          {sortedProjects.map((project) => {
-                            const isSelected = editingUserProjectIds.includes(project.id);
-
-                            return (
-                              <label
-                                className={`projects-invite-checkbox${isSelected ? " projects-invite-checkbox-selected" : ""}`}
-                                key={`managed-user-${editingUser.id}-${project.id}`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() => onToggleEditingUserProject(project.id)}
-                                  disabled={savingUserId === editingUser.id}
-                                />
-                                <div className="projects-invite-checkbox-content">
-                                  <div className="projects-invite-checkbox-main">
-                                    <strong>{project.key}</strong>
-                                    <span>{project.name}</span>
-                                  </div>
-                                  {project.isPinned ? <span className="badge projects-pinned-badge">Pinned</span> : null}
-                                </div>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </fieldset>
-                  )}
-
-                  <div className="projects-list-actions">
-                    <button className="button" type="submit" disabled={savingUserId === editingUser.id}>
-                      {savingUserId === editingUser.id ? "Saving..." : "Save changes"}
-                    </button>
+            <section className="projects-users-detail panel">
+              {selectedManagedUser ? (
+                <>
+                  <div className="projects-users-editor-header">
+                    <div>
+                      <h3 className="section-heading">{selectedManagedUser.name}</h3>
+                      <p className="projects-toolbar-helper">{selectedManagedUser.email}</p>
+                    </div>
                     <button
-                      className="button button-ghost"
+                      className="button button-danger"
                       type="button"
-                      onClick={() => setEditingUser(null)}
-                      disabled={savingUserId === editingUser.id}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {loading ? <p className="alert alert-info">Loading projects...</p> : null}
-
-        {!loading && !listError ? (
-          sortedProjects.length > 0 ? (
-            <ul className="list projects-directory-list">
-              {sortedProjects.map((project) => (
-                <li className="list-item" key={project.id}>
-                  <div className="projects-list-header">
-                    <strong>
-                      {project.key} - {project.name}
-                    </strong>
-                    {project.isPinned ? <span className="badge projects-pinned-badge">Pinned</span> : null}
-                  </div>
-                  <p>{project.description ?? "No description"}</p>
-                  <div className="projects-list-actions">
-                    <Link className="button button-secondary" href={`/projects/${project.id}`}>
-                      Open project
-                    </Link>
-                    {isAdmin ? (
-                      <button
-                        className="button button-danger"
-                        type="button"
-                        disabled={deletingProjectId === project.id}
-                        onClick={() => {
-                          void onDeleteProject(project);
-                        }}
-                      >
-                        {deletingProjectId === project.id ? "Deleting..." : "Delete"}
-                      </button>
-                    ) : null}
-                    <button
-                      className="button button-ghost"
-                      type="button"
-                      disabled={pinBusyProjectId === project.id}
                       onClick={() => {
-                        void onTogglePin(project);
+                        void onDeleteManagedUser(selectedManagedUser);
                       }}
+                      disabled={selectedManagedUser.id === currentUserId || deletingUserId === selectedManagedUser.id || savingUserId !== null}
+                      title={selectedManagedUser.id === currentUserId ? "Admins cannot delete their own account." : undefined}
                     >
-                      {pinBusyProjectId === project.id ? "Saving..." : project.isPinned ? "Unpin" : "Pin"}
+                      {deletingUserId === selectedManagedUser.id ? "Deleting..." : "Delete user"}
                     </button>
                   </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="alert alert-info">No projects found.</p>
-          )
-        ) : null}
+
+                  <form className="form-grid" onSubmit={onSaveManagedUser}>
+                    <label>
+                      Account role
+                      <select
+                        className="input"
+                        value={editingUserRole}
+                        onChange={(event) => setEditingUserRole(event.target.value as LoginResponse["user"]["globalRole"])}
+                        disabled={savingUserId === selectedManagedUser.id}
+                      >
+                        <option value="reader">Reader</option>
+                        <option value="editor">Editor</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </label>
+
+                    {editingUserRole === "admin" ? (
+                      <p className="alert alert-info">Admins have access to all projects.</p>
+                    ) : (
+                      <fieldset className="projects-invite-projects">
+                        <legend>Project permissions</legend>
+                        <div className="projects-invite-selector-toolbar">
+                          <p className="projects-invite-selection-summary">{countProjectRoleMap(editingUserProjectAccess)} assigned</p>
+                          <div className="projects-invite-selection-actions">
+                            <button
+                              className="button button-ghost"
+                              type="button"
+                              onClick={() => setEditingUserProjectAccess({})}
+                              disabled={savingUserId === selectedManagedUser.id || countProjectRoleMap(editingUserProjectAccess) === 0}
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        </div>
+
+                        {sortedProjects.length === 0 ? (
+                          <p className="alert alert-info">No projects available.</p>
+                        ) : (
+                          <div className="projects-invite-checkboxes projects-users-project-access-list">
+                            {sortedProjects.map((project) => {
+                              const assignedRole = editingUserProjectAccess[project.id];
+                              const isAssigned = Boolean(assignedRole);
+
+                              return (
+                                <label
+                                  className={`projects-invite-checkbox${isAssigned ? " projects-invite-checkbox-selected" : ""}`}
+                                  key={`managed-user-${selectedManagedUser.id}-${project.id}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isAssigned}
+                                    onChange={() => onToggleEditingUserProject(project.id)}
+                                    disabled={savingUserId === selectedManagedUser.id}
+                                  />
+                                  <div className="projects-invite-checkbox-content">
+                                    <div className="projects-invite-checkbox-main">
+                                      <strong>{project.key}</strong>
+                                      <span>{project.name}</span>
+                                    </div>
+                                    <div className="projects-role-pillars">
+                                      {isAssigned ? (
+                                        <select
+                                          className="input projects-role-select"
+                                          value={assignedRole}
+                                          onChange={(event) => onSetEditingUserProjectRole(project.id, event.target.value as ProjectScopedRole)}
+                                          onClick={(event) => event.stopPropagation()}
+                                          disabled={savingUserId === selectedManagedUser.id}
+                                        >
+                                          <option value="reader">Reader</option>
+                                          <option value="editor">Editor</option>
+                                        </select>
+                                      ) : null}
+                                      {project.isPinned ? <span className="badge projects-pinned-badge">Pinned</span> : null}
+                                    </div>
+                                  </div>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </fieldset>
+                    )}
+
+                    <div className="projects-list-actions">
+                      <button className="button" type="submit" disabled={savingUserId === selectedManagedUser.id}>
+                        {savingUserId === selectedManagedUser.id ? "Saving..." : "Save changes"}
+                      </button>
+                      <button className="button button-ghost" type="button" onClick={onResetManagedUserForm} disabled={savingUserId === selectedManagedUser.id}>
+                        Reset
+                      </button>
+                    </div>
+                  </form>
+                </>
+              ) : (
+                <p className="alert alert-info">Select a user from the left list to edit permissions.</p>
+              )}
+            </section>
+          </div>
+        )}
       </section>
     </AppShell>
   );

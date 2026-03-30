@@ -589,3 +589,22 @@
 - Added admin-only `/admin/users` list/update/delete endpoints with role/project editing, soft-delete revocation, last-admin/self-delete safeguards, audit logging, and session cleanup.
 - Hardened both HTTP and collaboration websocket auth to resolve the current active user from the database instead of trusting stale JWT role data, so role changes and account deletion take effect immediately.
 - Added an admin-only `Manage users` panel in `/projects` with search, per-user summaries, project assignment editing for non-admins, and destructive delete flow tied to immediate access revocation.
+
+## Projects Permissions vNext - Project Roles + Manage Users Workspace (2026-03-30)
+- [x] Add project-level roles in Prisma (`ProjectMember.role`, invite role fields) with migration from current global-role memberships.
+- [x] Refactor backend project access checks and downstream modules to enforce read/write by project role instead of non-admin global role.
+- [x] Extend admin user management and invite flows to edit/store per-project roles.
+- [x] Add project access context endpoint and switch frontend project pages to use project access instead of localStorage global role.
+- [x] Rework `/projects` so `Manage users` becomes a dedicated workspace with master-detail editing and hides the project directory.
+- [x] Validate with `pnpm --filter @doctoral/api test`, `pnpm --filter @doctoral/api build`, and `pnpm --filter @doctoral/web build`.
+
+### Review
+- Added Prisma project-role support with migration for existing memberships and invite records.
+- Switched backend authorization to project-scoped read/write access for non-admin users and exposed `GET /projects/:projectId/access`.
+- Updated admin user management and invite flows to assign per-project `editor`/`reader` roles.
+- Reworked `/projects` so `Manage users` is a dedicated workspace with master-detail editing and project directory hidden while active.
+- Updated Wiki, Documents, Tasks, Meetings, and document detail UI to use backend project access instead of local `globalRole`.
+- Validation passed:
+  - `pnpm --filter @doctoral/api test -- --no-cache`
+  - `pnpm --filter @doctoral/api build`
+  - `pnpm --filter @doctoral/web build`

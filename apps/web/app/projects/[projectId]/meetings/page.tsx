@@ -7,7 +7,7 @@ import remarkGfm from "remark-gfm";
 
 import { AppShell } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
-import { LoginResponse } from "../../../../lib/client-api";
+import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import {
   createProjectMeeting,
   deleteMeeting,
@@ -36,18 +36,6 @@ type TextTransformResult = {
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const DEFAULT_MARKDOWN_LIST_ITEM = "- ";
 const INDENT_SIZE = 2;
-
-function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
-  if (!rawUser) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(rawUser) as LoginResponse["user"];
-  } catch {
-    return null;
-  }
-}
 
 function dayKeyFromDate(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -282,7 +270,7 @@ export default function ProjectMeetingsPage({
   const toDoRef = useRef<HTMLTextAreaElement>(null);
 
   const [token, setToken] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<LoginResponse["user"]["globalRole"] | null>(null);
+  const [projectAccess, setProjectAccess] = useState<ProjectAccess | null>(null);
   const [meetings, setMeetings] = useState<MeetingListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -303,7 +291,7 @@ export default function ProjectMeetingsPage({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const isReader = userRole === "reader";
+  const canWrite = projectAccess?.canWrite ?? false;
 
   const markdownSectionRefs: Record<MarkdownSectionKey, RefObject<HTMLTextAreaElement>> = {
     done: doneRef,
@@ -346,6 +334,19 @@ export default function ProjectMeetingsPage({
     [params.projectId]
   );
 
+  const loadAccess = useCallback(
+    async (authToken: string): Promise<void> => {
+      try {
+        const access = await getProjectAccess(params.projectId, authToken);
+        setProjectAccess(access);
+      } catch (accessError) {
+        setProjectAccess(null);
+        setError((accessError as Error).message);
+      }
+    },
+    [params.projectId]
+  );
+
   useEffect(() => {
     const storedToken = localStorage.getItem("doctoral_token");
     if (!storedToken) {
@@ -354,9 +355,9 @@ export default function ProjectMeetingsPage({
     }
 
     setToken(storedToken);
-    setUserRole(parseStoredUser(localStorage.getItem("doctoral_user"))?.globalRole ?? null);
+    void loadAccess(storedToken);
     void loadMeetings(storedToken);
-  }, [loadMeetings, router]);
+  }, [loadAccess, loadMeetings, router]);
 
   useEffect(() => {
     const currentSearchParams = new URLSearchParams(searchParamsValue);
@@ -528,7 +529,7 @@ export default function ProjectMeetingsPage({
         className="button button-secondary markdown-tool"
         type="button"
         onClick={() => applyMarkdownAction(section, "bullets")}
-        disabled={isReader || submitting}
+        disabled={!canWrite || submitting}
       >
         Bullets
       </button>
@@ -536,7 +537,7 @@ export default function ProjectMeetingsPage({
         className="button button-secondary markdown-tool"
         type="button"
         onClick={() => applyMarkdownAction(section, "numbered")}
-        disabled={isReader || submitting}
+        disabled={!canWrite || submitting}
       >
         Numbered
       </button>
@@ -544,7 +545,7 @@ export default function ProjectMeetingsPage({
         className="button button-secondary markdown-tool"
         type="button"
         onClick={() => applyMarkdownAction(section, "checklist")}
-        disabled={isReader || submitting}
+        disabled={!canWrite || submitting}
       >
         Checklist
       </button>
@@ -552,7 +553,7 @@ export default function ProjectMeetingsPage({
         className="button button-secondary markdown-tool"
         type="button"
         onClick={() => applyMarkdownAction(section, "indent")}
-        disabled={isReader || submitting}
+        disabled={!canWrite || submitting}
       >
         Indent
       </button>
@@ -560,7 +561,7 @@ export default function ProjectMeetingsPage({
         className="button button-secondary markdown-tool"
         type="button"
         onClick={() => applyMarkdownAction(section, "outdent")}
-        disabled={isReader || submitting}
+        disabled={!canWrite || submitting}
       >
         Outdent
       </button>
@@ -575,8 +576,8 @@ export default function ProjectMeetingsPage({
   };
 
   const onNewMinuteClick = (): void => {
-    if (isReader) {
-      setError("Reader role cannot create minutes.");
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
       return;
     }
 
@@ -605,8 +606,8 @@ export default function ProjectMeetingsPage({
         return;
       }
 
-      if (isReader) {
-        setError("Reader role cannot modify minutes.");
+      if (!canWrite) {
+        setError("You do not have write access to this project.");
         return;
       }
 
@@ -659,7 +660,7 @@ export default function ProjectMeetingsPage({
       doneMarkdown,
       editingMeetingId,
       formMode,
-      isReader,
+      canWrite,
       loadMeetings,
       location,
       params.projectId,
@@ -676,8 +677,8 @@ export default function ProjectMeetingsPage({
       return;
     }
 
-    if (isReader) {
-      setError("Reader role cannot delete minutes.");
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
       return;
     }
 
@@ -724,7 +725,7 @@ export default function ProjectMeetingsPage({
               Calendar
             </button>
           </div>
-          {!isReader ? (
+          {canWrite ? (
             <button className="button button-secondary" type="button" onClick={onNewMinuteClick}>
               {showForm && formMode === "create" ? "Close" : "New minute"}
             </button>
@@ -734,7 +735,7 @@ export default function ProjectMeetingsPage({
         {error ? <p className="alert alert-error">{error}</p> : null}
       </section>
 
-      {showForm && !isReader ? (
+      {showForm && canWrite ? (
         <div className="meetings-editor-modal-backdrop" onClick={closeForm}>
           <section
             className="panel meetings-editor-modal"
@@ -761,7 +762,7 @@ export default function ProjectMeetingsPage({
                     value={dateInput}
                     onChange={(event) => onDateInputChange(event.target.value)}
                     required
-                    disabled={isReader || submitting}
+                    disabled={!canWrite || submitting}
                   />
                 </label>
                 <label>
@@ -771,7 +772,7 @@ export default function ProjectMeetingsPage({
                     value={location}
                     onChange={(event) => setLocation(event.target.value)}
                     maxLength={300}
-                    disabled={isReader || submitting}
+                    disabled={!canWrite || submitting}
                   />
                 </label>
               </div>
@@ -786,7 +787,7 @@ export default function ProjectMeetingsPage({
                   }}
                   maxLength={300}
                   required
-                  disabled={isReader || submitting}
+                  disabled={!canWrite || submitting}
                 />
               </label>
               <label>
@@ -799,7 +800,7 @@ export default function ProjectMeetingsPage({
                   onChange={(event) => setDoneMarkdown(event.target.value)}
                   onKeyDown={(event) => onMarkdownKeyDown("done", event)}
                   maxLength={20_000}
-                  disabled={isReader || submitting}
+                  disabled={!canWrite || submitting}
                 />
               </label>
               <label>
@@ -812,7 +813,7 @@ export default function ProjectMeetingsPage({
                   onChange={(event) => setToDiscussMarkdown(event.target.value)}
                   onKeyDown={(event) => onMarkdownKeyDown("toDiscuss", event)}
                   maxLength={20_000}
-                  disabled={isReader || submitting}
+                  disabled={!canWrite || submitting}
                 />
               </label>
               <label>
@@ -825,11 +826,11 @@ export default function ProjectMeetingsPage({
                   onChange={(event) => setToDoMarkdown(event.target.value)}
                   onKeyDown={(event) => onMarkdownKeyDown("toDo", event)}
                   maxLength={50_000}
-                  disabled={isReader || submitting}
+                  disabled={!canWrite || submitting}
                 />
               </label>
               <div className="meetings-editor-modal-footer">
-                <button className="button" type="submit" disabled={isReader || submitting}>
+                <button className="button" type="submit" disabled={!canWrite || submitting}>
                   {submitting ? "Saving..." : formMode === "edit" ? "Save changes" : "Create minute"}
                 </button>
                 <button className="button button-secondary" type="button" disabled={submitting} onClick={closeForm}>
@@ -845,7 +846,7 @@ export default function ProjectMeetingsPage({
 
       {!loading && viewMode === "list" ? (
         <section className="meetings-list">
-          {meetingsByDate.size === 0 ? <p className="alert alert-info">{isReader ? "No minutes available yet." : "No minutes yet. Create the first one."}</p> : null}
+          {meetingsByDate.size === 0 ? <p className="alert alert-info">{canWrite ? "No minutes yet. Create the first one." : "No minutes available yet."}</p> : null}
           {Array.from(meetingsByDate.entries()).map(([dateKey, items]) => (
             <article key={dateKey} className="panel minutes-list-group">
               <h3 className="section-heading">{displayDay(dateKey)}</h3>
@@ -862,7 +863,7 @@ export default function ProjectMeetingsPage({
                       {renderMarkdownSection("To discuss", meeting.toDiscussMarkdown)}
                       {renderMarkdownSection("To do", meeting.toDoMarkdown)}
                     </div>
-                    {!isReader ? (
+                    {canWrite ? (
                       <div className="minutes-list-item-actions">
                         <button className="button button-secondary" type="button" onClick={() => openEditForm(meeting)}>
                           Edit
@@ -951,7 +952,7 @@ export default function ProjectMeetingsPage({
                     {renderMarkdownSection("Done", meeting.doneMarkdown)}
                     {renderMarkdownSection("To discuss", meeting.toDiscussMarkdown)}
                     {renderMarkdownSection("To do", meeting.toDoMarkdown)}
-                    {!isReader ? (
+                    {canWrite ? (
                       <div className="minutes-list-item-actions">
                         <button className="button button-secondary" type="button" onClick={() => openEditForm(meeting)}>
                           Edit

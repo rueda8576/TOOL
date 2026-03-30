@@ -1,4 +1,5 @@
 import { ForbiddenException, NotFoundException } from "@nestjs/common";
+import { ProjectRole } from "@prisma/client";
 
 import { ProjectsService } from "./projects.service";
 
@@ -34,6 +35,7 @@ describe("ProjectsService", () => {
     prisma.$transaction.mockImplementation(async (callback: (tx: any) => Promise<unknown>) => callback(prisma));
 
     const accessService: any = {
+      getProjectAccess: jest.fn(),
       ensureProjectReadable: jest.fn(),
       ensureProjectWritable: jest.fn()
     };
@@ -142,7 +144,13 @@ describe("ProjectsService", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           key: "PHD1",
-          createdById: "admin-1"
+          createdById: "admin-1",
+          members: {
+            create: {
+              userId: "admin-1",
+              role: ProjectRole.EDITOR
+            }
+          }
         })
       })
     );
@@ -215,6 +223,29 @@ describe("ProjectsService", () => {
       pinned: true,
       pinnedAt: "2026-03-03T11:00:00.000Z"
     });
+  });
+
+  it("returns project access context from the shared access service", async () => {
+    const { service, accessService } = makeService();
+    accessService.getProjectAccess.mockResolvedValue({
+      isAdmin: false,
+      projectRole: "editor",
+      canWrite: true
+    });
+
+    await expect(
+      service.getProjectAccess("p1", {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "reader"
+      })
+    ).resolves.toEqual({
+      isAdmin: false,
+      projectRole: "editor",
+      canWrite: true
+    });
+
+    expect(accessService.getProjectAccess).toHaveBeenCalledWith("u1", "reader", "p1");
   });
 
   it("unpinned project is idempotent and logs audit", async () => {

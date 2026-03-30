@@ -1,5 +1,5 @@
 import { ForbiddenException, NotFoundException } from "@nestjs/common";
-import { GlobalRole } from "@prisma/client";
+import { GlobalRole, ProjectRole } from "@prisma/client";
 
 import * as collaborationRegistry from "../documents/collaboration-server-registry";
 import { AdminUsersService } from "./admin-users.service";
@@ -47,7 +47,7 @@ describe("AdminUsersService", () => {
     jest.restoreAllMocks();
   });
 
-  it("lists active users with admin access mode mapping", async () => {
+  it("lists active users with per-project role mapping", async () => {
     const { service, prisma } = makeService();
     prisma.user.findMany.mockResolvedValue([
       {
@@ -68,6 +68,7 @@ describe("AdminUsersService", () => {
         globalRole: GlobalRole.EDITOR,
         projectMemberships: [
           {
+            role: ProjectRole.EDITOR,
             project: {
               id: "project-1",
               key: "PHD1",
@@ -107,34 +108,31 @@ describe("AdminUsersService", () => {
           {
             id: "project-1",
             key: "PHD1",
-            name: "Main project"
+            name: "Main project",
+            role: "editor"
           }
         ]
       }
     ]);
   });
 
-  it("replaces project memberships for non-admin users and revokes realtime connections", async () => {
+  it("replaces project memberships for non-admin users with project roles and revokes realtime connections", async () => {
     const { service, prisma, auditService } = makeService();
     const disconnectUser = jest.fn();
     jest.spyOn(collaborationRegistry, "getDocumentsCollaborationServer").mockReturnValue({
       disconnectUser
     } as any);
 
-    prisma.user.findFirst
-      .mockResolvedValueOnce({
-        id: "user-2",
-        name: "Editor",
-        email: "editor@example.com",
-        isActive: true,
-        createdAt: new Date("2026-03-30T10:00:00.000Z"),
-        globalRole: GlobalRole.EDITOR,
-        projectMemberships: []
-      });
-    prisma.project.findMany.mockResolvedValue([
-      { id: "project-1" },
-      { id: "project-2" }
-    ]);
+    prisma.user.findFirst.mockResolvedValueOnce({
+      id: "user-2",
+      name: "Editor",
+      email: "editor@example.com",
+      isActive: true,
+      createdAt: new Date("2026-03-30T10:00:00.000Z"),
+      globalRole: GlobalRole.EDITOR,
+      projectMemberships: []
+    });
+    prisma.project.findMany.mockResolvedValue([{ id: "project-1" }, { id: "project-2" }]);
     prisma.user.update.mockResolvedValue({ id: "user-2" });
     prisma.user.findUnique.mockResolvedValue({
       id: "user-2",
@@ -145,6 +143,7 @@ describe("AdminUsersService", () => {
       globalRole: GlobalRole.READER,
       projectMemberships: [
         {
+          role: ProjectRole.EDITOR,
           project: {
             id: "project-1",
             key: "PHD1",
@@ -152,6 +151,7 @@ describe("AdminUsersService", () => {
           }
         },
         {
+          role: ProjectRole.READER,
           project: {
             id: "project-2",
             key: "PHD2",
@@ -165,7 +165,11 @@ describe("AdminUsersService", () => {
       "user-2",
       {
         globalRole: "reader",
-        projectIds: ["project-1", "project-2", "project-1"]
+        projectAccess: [
+          { projectId: "project-1", role: "editor" },
+          { projectId: "project-2", role: "reader" },
+          { projectId: "project-1", role: "editor" }
+        ]
       },
       {
         userId: "admin-1",
@@ -177,8 +181,8 @@ describe("AdminUsersService", () => {
     expect(prisma.projectMember.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-2" } });
     expect(prisma.projectMember.createMany).toHaveBeenCalledWith({
       data: [
-        { projectId: "project-1", userId: "user-2" },
-        { projectId: "project-2", userId: "user-2" }
+        { projectId: "project-1", userId: "user-2", role: ProjectRole.EDITOR },
+        { projectId: "project-2", userId: "user-2", role: ProjectRole.READER }
       ],
       skipDuplicates: true
     });
@@ -188,7 +192,10 @@ describe("AdminUsersService", () => {
         action: "user.update",
         metadata: {
           globalRole: "reader",
-          projectIds: ["project-1", "project-2"]
+          projectAccess: [
+            { projectId: "project-1", role: "editor" },
+            { projectId: "project-2", role: "reader" }
+          ]
         }
       })
     );
@@ -205,12 +212,14 @@ describe("AdminUsersService", () => {
         {
           id: "project-1",
           key: "PHD1",
-          name: "Main project"
+          name: "Main project",
+          role: "editor"
         },
         {
           id: "project-2",
           key: "PHD2",
-          name: "Second project"
+          name: "Second project",
+          role: "reader"
         }
       ]
     });
@@ -234,7 +243,7 @@ describe("AdminUsersService", () => {
         "admin-1",
         {
           globalRole: "editor",
-          projectIds: []
+          projectAccess: []
         },
         {
           userId: "admin-2",
@@ -304,7 +313,7 @@ describe("AdminUsersService", () => {
         "missing-user",
         {
           globalRole: "reader",
-          projectIds: []
+          projectAccess: []
         },
         {
           userId: "admin-1",

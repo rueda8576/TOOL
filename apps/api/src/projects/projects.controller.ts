@@ -35,6 +35,18 @@ export class ProjectsController {
     return this.projectsService.listProjects(user);
   }
 
+  @Get(":projectId/access")
+  getProjectAccess(
+    @Param("projectId") projectId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<{
+    isAdmin: boolean;
+    projectRole: "admin" | "editor" | "reader";
+    canWrite: boolean;
+  }> {
+    return this.projectsService.getProjectAccess(projectId, user);
+  }
+
   @Post(":projectId/pin")
   pinProject(
     @Param("projectId") projectId: string,

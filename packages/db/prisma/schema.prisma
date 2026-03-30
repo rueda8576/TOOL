@@ -25,6 +25,11 @@ enum InviteAccessMode {
   SELECTED_PROJECTS
 }
 
+enum ProjectRole {
+  EDITOR
+  READER
+}
+
 enum DocumentType {
   PAPER
   MANUAL
@@ -144,6 +149,7 @@ model Invite {
   tokenHash     String           @unique
   globalRole    GlobalRole       @default(READER)
   accessMode    InviteAccessMode @default(SELECTED_PROJECTS)
+  defaultProjectRole ProjectRole?
   senderId      String
   acceptedById  String?
   projectId     String?
@@ -165,6 +171,7 @@ model InviteProject {
   id        String   @id @default(cuid())
   inviteId  String
   projectId String
+  role      ProjectRole @default(READER)
   createdAt DateTime @default(now())
 
   invite  Invite  @relation(fields: [inviteId], references: [id], onDelete: Cascade)
@@ -215,6 +222,7 @@ model ProjectMember {
   id        String   @id @default(cuid())
   projectId String
   userId    String
+  role      ProjectRole @default(READER)
   createdAt DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)

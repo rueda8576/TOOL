@@ -38,6 +38,7 @@ import {
   WikiSearchResult,
   WikiTreeNode
 } from "../lib/wiki";
+import { getProjectAccess, ProjectAccess } from "../lib/project-access";
 
 type SaveState = "idle" | "saving" | "saved" | "error" | "conflict";
 
@@ -506,7 +507,7 @@ export function WikiHub({
 
   const [token, setToken] = useState<string | null>(null);
   const [sessionUser, setSessionUser] = useState<LoginResponse["user"] | null>(null);
-  const [userRole, setUserRole] = useState<LoginResponse["user"]["globalRole"] | null>(null);
+  const [projectAccess, setProjectAccess] = useState<ProjectAccess | null>(null);
   const [treeNodes, setTreeNodes] = useState<WikiTreeNode[]>([]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [treeQuery, setTreeQuery] = useState("");
@@ -549,7 +550,7 @@ export function WikiHub({
   const initialPathNormalized = useMemo(() => normalizePath(initialPath ?? null), [initialPath]);
   const normalizedSearchQuery = useMemo(() => treeQuery.trim(), [treeQuery]);
   const searchModeActive = normalizedSearchQuery.length >= 2;
-  const isReader = userRole === "reader";
+  const canWrite = projectAccess?.canWrite ?? false;
   const { collaborationServerUrl, collaborationConfigError } = useMemo(() => {
     try {
       return {
@@ -714,6 +715,19 @@ export function WikiHub({
     [hydrateDraftFromDetail, projectId]
   );
 
+  const loadAccess = useCallback(
+    async (authToken: string): Promise<void> => {
+      try {
+        const access = await getProjectAccess(projectId, authToken);
+        setProjectAccess(access);
+      } catch (accessError) {
+        setProjectAccess(null);
+        setError((accessError as Error).message);
+      }
+    },
+    [projectId]
+  );
+
   const refreshSearchResults = useCallback(
     async (authToken: string): Promise<void> => {
       if (!searchModeActive) {
@@ -779,7 +793,7 @@ export function WikiHub({
     setToken(storedToken);
     const storedUser = parseStoredUser(localStorage.getItem("doctoral_user"));
     setSessionUser(storedUser);
-    setUserRole(storedUser?.globalRole ?? null);
+    void loadAccess(storedToken);
 
     void (async () => {
       const nodes = await loadTree(storedToken);
@@ -790,7 +804,7 @@ export function WikiHub({
         null;
       setSelectedPath(candidatePath);
     })();
-  }, [initialPathNormalized, loadTree, router]);
+  }, [initialPathNormalized, loadAccess, loadTree, router]);
 
   useEffect(() => {
     if (!token || !selectedPath) {
@@ -850,17 +864,17 @@ export function WikiHub({
   }, [normalizedSearchQuery, projectId, searchModeActive, token]);
 
   useEffect(() => {
-    if (!isEditing || isReader) {
+    if (!isEditing || !canWrite) {
       setRealtimeStatusNote(null);
       return;
     }
     if (collaborationConfigError) {
       disableRealtimeWithFallback(collaborationConfigError);
     }
-  }, [collaborationConfigError, disableRealtimeWithFallback, isEditing, isReader]);
+  }, [canWrite, collaborationConfigError, disableRealtimeWithFallback, isEditing]);
 
   useEffect(() => {
-    if (!isEditing || !pageDetail || !token || isReader) {
+    if (!isEditing || !pageDetail || !token || !canWrite) {
       destroyWikiPresenceCollaboration();
       return;
     }
@@ -929,7 +943,7 @@ export function WikiHub({
     disableRealtimeWithFallback,
     destroyWikiPresenceCollaboration,
     isEditing,
-    isReader,
+    canWrite,
     pageDetail,
     selectedPath,
     token
@@ -948,7 +962,7 @@ export function WikiHub({
   }, [collaboratorIdentity, isEditing, selectedPath]);
 
   useEffect(() => {
-    if (!isEditing || !pageDetail || !token || isReader) {
+    if (!isEditing || !pageDetail || !token || !canWrite) {
       destroyWikiPageCollaboration();
       return;
     }
@@ -1035,7 +1049,7 @@ export function WikiHub({
     disableRealtimeWithFallback,
     destroyWikiPageCollaboration,
     isEditing,
-    isReader,
+    canWrite,
     pageDetail,
     selectedPath,
     token
@@ -1054,7 +1068,7 @@ export function WikiHub({
   }, [collaboratorIdentity, isEditing, selectedPath]);
 
   useEffect(() => {
-    if (!isEditing || !isRealtimeActive || isReader || saveState === "saving" || saveState === "conflict") {
+    if (!isEditing || !isRealtimeActive || !canWrite || saveState === "saving" || saveState === "conflict") {
       if (wikiRealtimeAutosaveMarkerRef.current !== null) {
         window.clearTimeout(wikiRealtimeAutosaveMarkerRef.current);
         wikiRealtimeAutosaveMarkerRef.current = null;
@@ -1087,7 +1101,7 @@ export function WikiHub({
         wikiRealtimeAutosaveMarkerRef.current = null;
       }
     };
-  }, [draftContent, draftTitle, isEditing, isReader, isRealtimeActive, saveState]);
+  }, [canWrite, draftContent, draftTitle, isEditing, isRealtimeActive, saveState]);
 
   useEffect(
     () => () => {
@@ -1099,7 +1113,7 @@ export function WikiHub({
 
   const saveDraftNow = useCallback(
     async (baseVersionOverride?: number): Promise<number | null> => {
-      if (!token || !pageDetail || isReader) {
+      if (!token || !pageDetail || !canWrite) {
         return null;
       }
 
@@ -1148,11 +1162,11 @@ export function WikiHub({
         return null;
       }
     },
-    [draftContent, draftTitle, isReader, isRealtimeActive, pageDetail, token]
+    [canWrite, draftContent, draftTitle, isRealtimeActive, pageDetail, token]
   );
 
   useEffect(() => {
-    if (!isEditing || isReader || !token || !pageDetail || isRealtimeActive || !isDirty) {
+    if (!isEditing || !canWrite || !token || !pageDetail || isRealtimeActive || !isDirty) {
       return;
     }
     if (saveState === "saving" || saveState === "conflict") {
@@ -1166,7 +1180,7 @@ export function WikiHub({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [isDirty, isEditing, isReader, isRealtimeActive, pageDetail, saveDraftNow, saveState, token]);
+  }, [canWrite, isDirty, isEditing, isRealtimeActive, pageDetail, saveDraftNow, saveState, token]);
 
   const onDraftBlur = (): void => {
     if (isRealtimeActive || !isDirty || saveState === "saving") {
@@ -1176,7 +1190,7 @@ export function WikiHub({
   };
 
   const onPublish = async (): Promise<void> => {
-    if (!token || !pageDetail || isReader) {
+    if (!token || !pageDetail || !canWrite) {
       return;
     }
     setPublishing(true);
@@ -1242,8 +1256,8 @@ export function WikiHub({
       setError("Missing session token. Please sign in again.");
       return;
     }
-    if (isReader) {
-      setError("Reader role cannot create wiki pages.");
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
       return;
     }
 
@@ -1292,7 +1306,7 @@ export function WikiHub({
   };
 
   const onDeletePage = async (): Promise<void> => {
-    if (!token || !pageDetail || isReader) {
+    if (!token || !pageDetail || !canWrite) {
       return;
     }
 
@@ -1671,7 +1685,7 @@ export function WikiHub({
         <aside className="wiki-sidebar panel">
           <div className="wiki-sidebar-toolbar">
             <h3 className="section-heading">Pages</h3>
-            {!isReader ? (
+            {canWrite ? (
               <button
                 type="button"
                 className="button button-secondary"
@@ -1793,7 +1807,7 @@ export function WikiHub({
             </section>
           ) : null}
 
-          {!loadingTree && !searchModeActive && treeNodes.length === 0 ? <p className="alert alert-info">{isReader ? "No published wiki pages available yet." : "No wiki pages yet."}</p> : null}
+          {!loadingTree && !searchModeActive && treeNodes.length === 0 ? <p className="alert alert-info">{canWrite ? "No wiki pages yet." : "No published wiki pages available yet."}</p> : null}
           {!loadingTree && !searchModeActive && treeNodes.length > 0 ? (
             <ul className="wiki-tree-list">{treeNodes.map((node) => renderTreeNode(node))}</ul>
           ) : null}
@@ -1807,7 +1821,7 @@ export function WikiHub({
             </div>
             {pageDetail ? (
               <div className="inline-actions">
-                {!isReader ? (
+                {canWrite ? (
                   <button
                     type="button"
                     className="button button-secondary"
@@ -1817,7 +1831,7 @@ export function WikiHub({
                     {isEditing ? "Close editor" : "Edit"}
                   </button>
                 ) : null}
-                {!isReader ? (
+                {canWrite ? (
                   <button type="button" className="button button-danger" onClick={() => void onDeletePage()} disabled={deletingPage}>
                     {deletingPage ? "Deleting..." : "Delete"}
                   </button>
@@ -1839,10 +1853,10 @@ export function WikiHub({
           {success ? <p className="alert alert-success">{success}</p> : null}
           {error ? <p className="alert alert-error">{error}</p> : null}
           {!loadingPage && !pageDetail && allPagePaths.length === 0 ? (
-            <p className="alert alert-info">{isReader ? "No published wiki pages available yet." : "Create your first wiki page from the left panel."}</p>
+            <p className="alert alert-info">{canWrite ? "Create your first wiki page from the left panel." : "No published wiki pages available yet."}</p>
           ) : null}
           {!loadingPage && !pageDetail && allPagePaths.length > 0 ? (
-            <p className="alert alert-info">{isReader ? "Select a page from the left tree to start reading." : "Select a page from the left tree to start reading or editing."}</p>
+            <p className="alert alert-info">{canWrite ? "Select a page from the left tree to start reading or editing." : "Select a page from the left tree to start reading."}</p>
           ) : null}
           {loadingPage ? <p className="alert alert-info">Loading wiki page...</p> : null}
 
@@ -1918,7 +1932,7 @@ export function WikiHub({
             </div>
           ) : null}
 
-          {pageDetail && isEditing && !isReader ? (
+          {pageDetail && isEditing && canWrite ? (
             <div className="wiki-edit-view">
               <div className="wiki-edit-toolbar">
                 <div className="inline-actions">

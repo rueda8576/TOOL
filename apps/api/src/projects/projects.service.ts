@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { Prisma, ProjectRole } from "@prisma/client";
 
 import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
@@ -45,7 +45,8 @@ export class ProjectsService {
         createdById: user.userId,
         members: {
           create: {
-            userId: user.userId
+            userId: user.userId,
+            role: ProjectRole.EDITOR
           }
         }
       },
@@ -170,6 +171,14 @@ export class ProjectsService {
     }));
   }
 
+  async getProjectAccess(projectId: string, user: AuthenticatedUser): Promise<{
+    isAdmin: boolean;
+    projectRole: "admin" | "editor" | "reader";
+    canWrite: boolean;
+  }> {
+    return this.accessService.getProjectAccess(user.userId, user.globalRole, projectId);
+  }
+
   async pinProject(projectId: string, user: AuthenticatedUser): Promise<{ projectId: string; pinned: true; pinnedAt: string }> {
     await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
 
@@ -281,7 +290,8 @@ export class ProjectsService {
       },
       create: {
         projectId,
-        userId: member.id
+        userId: member.id,
+        role: ProjectRole.READER
       },
       update: {},
       select: {
