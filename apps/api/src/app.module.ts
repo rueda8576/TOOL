@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 
+import { AdminModule } from "./admin/admin.module";
 import { AppController } from "./app.controller";
 import { AuditModule } from "./audit/audit.module";
 import { AuthModule } from "./auth/auth.module";
@@ -23,6 +24,7 @@ import { HealthController } from "./health.controller";
     StorageModule,
     CommonModule,
     AuthModule,
+    AdminModule,
     ProjectsModule,
     WikiModule,
     DocumentsModule,

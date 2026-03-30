@@ -437,6 +437,94 @@ textarea {
   margin-top: 0.15rem;
 }
 
+.projects-users-panel {
+  margin-top: 0.15rem;
+}
+
+.projects-users-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.projects-users-search {
+  min-width: min(100%, 320px);
+  display: grid;
+  gap: 0.34rem;
+}
+
+.projects-users-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.projects-users-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+  padding: 0.82rem 0.88rem;
+  display: grid;
+  gap: 0.62rem;
+}
+
+.projects-users-row {
+  display: grid;
+  gap: 0.58rem;
+}
+
+.projects-users-row-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.projects-users-email {
+  margin: 0.2rem 0 0;
+  color: var(--text-muted);
+}
+
+.projects-users-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.projects-users-access-summary {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.projects-users-projects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.projects-users-project-hint {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.projects-users-editor {
+  border-top: 1px solid var(--line);
+  padding-top: 0.8rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.projects-users-editor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
 .projects-invite-projects {
   margin: 0;
   padding: 0.6rem 0.64rem 0.66rem;
@@ -2041,6 +2129,8 @@ body.documents-workspace-dragging * {
     flex-wrap: wrap;
   }
 
+  .projects-users-panel-header,
+  .projects-users-row-main,
   .projects-invite-selector-toolbar,
   .projects-invite-checkbox-content {
     align-items: flex-start;

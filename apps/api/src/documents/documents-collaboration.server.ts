@@ -1,5 +1,4 @@
 import { ForbiddenException, Logger, NotFoundException, UnauthorizedException } from "@nestjs/common";
-import { JwtService } from "@nestjs/jwt";
 import { CompileStatus } from "@prisma/client";
 import * as awarenessProtocol from "y-protocols/awareness";
 import { Awareness } from "y-protocols/awareness";
@@ -14,9 +13,9 @@ import { dirname, resolve, sep } from "path";
 import { URL } from "url";
 import { WebSocket, WebSocketServer, RawData } from "ws";
 
-import { hashValue } from "../common/crypto";
 import { ProjectAccessService } from "../common/project-access.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
+import { SessionAuthService } from "../common/session-auth.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { getEnv } from "../config/env";
 
@@ -196,7 +195,7 @@ export class DocumentsCollaborationServer {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly jwtService: JwtService,
+    private readonly sessionAuthService: SessionAuthService,
     private readonly accessService: ProjectAccessService
   ) {}
 
@@ -249,36 +248,10 @@ export class DocumentsCollaborationServer {
   }
 
   private async authenticate(token: string): Promise<AuthenticatedCollabUser> {
-    try {
-      const payload = this.jwtService.verify<{ sub: string; email: string; role: "admin" | "editor" | "reader" }>(token, {
-        secret: getEnv().JWT_SECRET
-      });
-
-      const session = await this.prisma.session.findFirst({
-        where: {
-          userId: payload.sub,
-          tokenHash: hashValue(token),
-          expiresAt: {
-            gt: new Date()
-          }
-        },
-        select: {
-          id: true
-        }
-      });
-
-      if (!session) {
-        throw new UnauthorizedException("Session expired");
-      }
-
-      return {
-        userId: payload.sub,
-        email: payload.email,
-        globalRole: payload.role
-      };
-    } catch {
-      throw new UnauthorizedException("Invalid collaboration token");
-    }
+    return this.sessionAuthService.authenticateToken(token, {
+      invalidToken: "Invalid collaboration token",
+      expiredSession: "Session expired"
+    });
   }
 
   private workspaceAbsolutePath(workspaceRelativePath: string): string {
@@ -313,6 +286,23 @@ export class DocumentsCollaborationServer {
     if (activeConnections.length === 0) {
       room.teardown();
       this.rooms.delete(room.key);
+    }
+  }
+
+  disconnectUser(userId: string, reason: string): void {
+    for (const room of this.rooms.values()) {
+      for (const [connection, connectionUserId] of room.connectionUsers.entries()) {
+        if (connectionUserId !== userId) {
+          continue;
+        }
+
+        if (connection.readyState === WebSocket.OPEN || connection.readyState === WebSocket.CONNECTING) {
+          connection.close(1008, reason.slice(0, 120));
+          continue;
+        }
+
+        this.removeConnectionFromRoom(room, connection);
+      }
     }
   }
 
@@ -1168,8 +1158,7 @@ export class DocumentsCollaborationServer {
     }
   }
 
-  private onClose(context: RoomConnectionContext, connection: WebSocket): void {
-    const room = context.room;
+  private removeConnectionFromRoom(room: CollaborationRoom, connection: WebSocket): void {
     if (!room.connections.has(connection)) {
       return;
     }
@@ -1194,6 +1183,10 @@ export class DocumentsCollaborationServer {
       room.teardown();
       this.rooms.delete(room.key);
     }
+  }
+
+  private onClose(context: RoomConnectionContext, connection: WebSocket): void {
+    this.removeConnectionFromRoom(context.room, connection);
   }
 
   private sendInitialSync(room: CollaborationRoom, connection: WebSocket): void {

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../components/app-shell";
 import { authFetch, LoginResponse } from "../../lib/client-api";
+import { AdminManagedUser, deleteAdminUser, listAdminUsers, updateAdminUser } from "../../lib/admin-users";
 import { ProjectSummary } from "../../lib/api";
 
 type ProjectOrderBy = "newest" | "key" | "name";
@@ -74,6 +75,7 @@ function compareProjectsWithinGroup(left: ProjectSummary, right: ProjectSummary,
 export default function ProjectsPage(): JSX.Element {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<LoginResponse["user"]["globalRole"] | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,6 +102,17 @@ export default function ProjectsPage(): JSX.Element {
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [isManageUsersOpen, setIsManageUsersOpen] = useState(false);
+  const [adminUsers, setAdminUsers] = useState<AdminManagedUser[]>([]);
+  const [adminUsersLoading, setAdminUsersLoading] = useState(false);
+  const [adminUsersError, setAdminUsersError] = useState<string | null>(null);
+  const [adminUsersSuccess, setAdminUsersSuccess] = useState<string | null>(null);
+  const [adminUsersQuery, setAdminUsersQuery] = useState("");
+  const [editingUser, setEditingUser] = useState<AdminManagedUser | null>(null);
+  const [editingUserRole, setEditingUserRole] = useState<LoginResponse["user"]["globalRole"]>("reader");
+  const [editingUserProjectIds, setEditingUserProjectIds] = useState<string[]>([]);
+  const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
   const loadProjects = useCallback(
     async (authToken: string): Promise<void> => {
@@ -119,6 +132,20 @@ export default function ProjectsPage(): JSX.Element {
     []
   );
 
+  const loadAdminUsers = useCallback(async (authToken: string): Promise<void> => {
+    setAdminUsersLoading(true);
+
+    try {
+      const users = await listAdminUsers(authToken);
+      setAdminUsers(users);
+      setAdminUsersError(null);
+    } catch (error) {
+      setAdminUsersError((error as Error).message);
+    } finally {
+      setAdminUsersLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const storedToken = localStorage.getItem("doctoral_token");
     if (!storedToken) {
@@ -127,7 +154,9 @@ export default function ProjectsPage(): JSX.Element {
     }
 
     setToken(storedToken);
-    setUserRole(parseStoredUser(localStorage.getItem("doctoral_user"))?.globalRole ?? null);
+    const storedUser = parseStoredUser(localStorage.getItem("doctoral_user"));
+    setCurrentUserId(storedUser?.id ?? null);
+    setUserRole(storedUser?.globalRole ?? null);
     void loadProjects(storedToken);
   }, [loadProjects, router]);
 
@@ -162,6 +191,17 @@ export default function ProjectsPage(): JSX.Element {
       project.key.toLowerCase().includes(query) || project.name.toLowerCase().includes(query)
     );
   }, [inviteProjectQuery, sortedProjects]);
+
+  const filteredAdminUsers = useMemo(() => {
+    const query = adminUsersQuery.trim().toLowerCase();
+    if (!query) {
+      return adminUsers;
+    }
+
+    return adminUsers.filter((managedUser) =>
+      managedUser.name.toLowerCase().includes(query) || managedUser.email.toLowerCase().includes(query)
+    );
+  }, [adminUsers, adminUsersQuery]);
 
   const onCreateProject = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
@@ -362,6 +402,109 @@ export default function ProjectsPage(): JSX.Element {
     }
   };
 
+  const onToggleManageUsers = (): void => {
+    if (!token || !isAdmin) {
+      return;
+    }
+
+    setAdminUsersError(null);
+    setAdminUsersSuccess(null);
+    setIsManageUsersOpen((current) => {
+      const next = !current;
+      if (next) {
+        void loadAdminUsers(token);
+      } else {
+        setEditingUser(null);
+        setAdminUsersQuery("");
+      }
+      return next;
+    });
+  };
+
+  const onStartEditingUser = (managedUser: AdminManagedUser): void => {
+    setAdminUsersError(null);
+    setAdminUsersSuccess(null);
+    setEditingUser(managedUser);
+    setEditingUserRole(managedUser.globalRole);
+    setEditingUserProjectIds(managedUser.projects.map((project) => project.id));
+  };
+
+  const onToggleEditingUserProject = (projectId: string): void => {
+    setEditingUserProjectIds((current) => {
+      if (current.includes(projectId)) {
+        return current.filter((id) => id !== projectId);
+      }
+      return [...current, projectId];
+    });
+  };
+
+  const onSaveManagedUser = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+
+    if (!token || !editingUser) {
+      return;
+    }
+
+    setSavingUserId(editingUser.id);
+    setAdminUsersError(null);
+    setAdminUsersSuccess(null);
+
+    try {
+      const updatedUser = await updateAdminUser(editingUser.id, token, {
+        globalRole: editingUserRole,
+        projectIds: editingUserRole === "admin" ? undefined : editingUserProjectIds
+      });
+
+      setAdminUsers((current) => current.map((managedUser) => (managedUser.id === updatedUser.id ? updatedUser : managedUser)));
+      setEditingUser(updatedUser);
+      setEditingUserProjectIds(updatedUser.projects.map((project) => project.id));
+      setAdminUsersSuccess(`${updatedUser.name} updated successfully.`);
+
+      if (updatedUser.id === currentUserId && updatedUser.globalRole !== userRole) {
+        localStorage.removeItem("doctoral_token");
+        localStorage.removeItem("doctoral_user");
+        router.replace("/login");
+        return;
+      }
+
+      if (updatedUser.globalRole === "admin") {
+        setEditingUserProjectIds([]);
+      }
+    } catch (error) {
+      setAdminUsersError((error as Error).message);
+    } finally {
+      setSavingUserId(null);
+    }
+  };
+
+  const onDeleteManagedUser = async (managedUser: AdminManagedUser): Promise<void> => {
+    if (!token || deletingUserId) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete user ${managedUser.name} (${managedUser.email})? They will lose access immediately.`);
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingUserId(managedUser.id);
+    setAdminUsersError(null);
+    setAdminUsersSuccess(null);
+
+    try {
+      await deleteAdminUser(managedUser.id, token);
+      setAdminUsers((current) => current.filter((user) => user.id !== managedUser.id));
+      setAdminUsersSuccess(`${managedUser.name} deleted successfully.`);
+      if (editingUser?.id === managedUser.id) {
+        setEditingUser(null);
+      }
+    } catch (error) {
+      setAdminUsersError((error as Error).message);
+    } finally {
+      setDeletingUserId(null);
+    }
+  };
+
   return (
     <AppShell title="Projects" subtitle="Browse, pin, and open your research workspaces.">
       <section className="panel projects-directory-panel">
@@ -394,6 +537,15 @@ export default function ProjectsPage(): JSX.Element {
             ) : null}
             {isAdmin ? (
               <button
+                className="button button-secondary projects-invite-toggle-button"
+                type="button"
+                onClick={onToggleManageUsers}
+              >
+                {isManageUsersOpen ? "Close users" : "Manage users"}
+              </button>
+            ) : null}
+            {isAdmin ? (
+              <button
                 className="button"
                 type="button"
                 onClick={() => {
@@ -417,6 +569,8 @@ export default function ProjectsPage(): JSX.Element {
         {pinError ? <p className="alert alert-error">{pinError}</p> : null}
         {inviteSuccess ? <p className="alert alert-success">{inviteSuccess}</p> : null}
         {inviteError ? <p className="alert alert-error">{inviteError}</p> : null}
+        {adminUsersSuccess ? <p className="alert alert-success">{adminUsersSuccess}</p> : null}
+        {adminUsersError ? <p className="alert alert-error">{adminUsersError}</p> : null}
         {listError ? (
           <p className="alert alert-error">
             {listError}. Please <Link href="/login">sign in again</Link>.
@@ -596,6 +750,190 @@ export default function ProjectsPage(): JSX.Element {
                 {inviting ? "Sending..." : "Send invitation"}
               </button>
             </form>
+          </div>
+        ) : null}
+
+        {isAdmin && isManageUsersOpen ? (
+          <div className="projects-create-collapsible projects-users-panel">
+            <div className="projects-users-panel-header">
+              <div>
+                <h3 className="section-heading">Manage users</h3>
+                <p className="projects-toolbar-helper">Admins can edit roles, adjust project access, and revoke accounts.</p>
+              </div>
+              <label className="projects-users-search">
+                Search users
+                <input
+                  className="input"
+                  type="search"
+                  value={adminUsersQuery}
+                  onChange={(event) => setAdminUsersQuery(event.target.value)}
+                  placeholder="Filter by name or email"
+                  disabled={adminUsersLoading || savingUserId !== null || deletingUserId !== null}
+                />
+              </label>
+            </div>
+
+            {adminUsersLoading ? <p className="alert alert-info">Loading users...</p> : null}
+
+            {!adminUsersLoading ? (
+              filteredAdminUsers.length > 0 ? (
+                <div className="projects-users-list">
+                  {filteredAdminUsers.map((managedUser) => {
+                    const isCurrentUser = managedUser.id === currentUserId;
+                    const isDeleting = deletingUserId === managedUser.id;
+
+                    return (
+                      <article className="projects-users-item" key={managedUser.id}>
+                        <div className="projects-users-row">
+                          <div className="projects-users-row-main">
+                            <div>
+                              <strong>{managedUser.name}</strong>
+                              <p className="projects-users-email">{managedUser.email}</p>
+                            </div>
+                            <div className="projects-users-summary">
+                              <span className="badge">{managedUser.globalRole}</span>
+                              <span className="projects-users-access-summary">
+                                {managedUser.projectAccessMode === "all_projects"
+                                  ? "All projects"
+                                  : managedUser.projects.length > 0
+                                    ? `${managedUser.projects.length} assigned project${managedUser.projects.length === 1 ? "" : "s"}`
+                                    : "No project access"}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="projects-list-actions">
+                            <button
+                              className="button button-secondary"
+                              type="button"
+                              onClick={() => onStartEditingUser(managedUser)}
+                              disabled={savingUserId !== null || deletingUserId !== null}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="button button-danger"
+                              type="button"
+                              onClick={() => {
+                                void onDeleteManagedUser(managedUser);
+                              }}
+                              disabled={isCurrentUser || isDeleting || savingUserId !== null}
+                              title={isCurrentUser ? "Admins cannot delete their own account." : undefined}
+                            >
+                              {isDeleting ? "Deleting..." : "Delete"}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="projects-users-projects">
+                          {managedUser.projectAccessMode === "all_projects" ? (
+                            <span className="projects-users-project-hint">Admins have access to every project.</span>
+                          ) : managedUser.projects.length > 0 ? (
+                            managedUser.projects.map((project) => (
+                              <span className="badge" key={`${managedUser.id}-${project.id}`}>
+                                {project.key} - {project.name}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="projects-users-project-hint">No project membership assigned.</span>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="alert alert-info">
+                  {adminUsers.length === 0 ? "No active users found." : "No users match the current search."}
+                </p>
+              )
+            ) : null}
+
+            {editingUser ? (
+              <div className="projects-users-editor">
+                <div className="projects-users-editor-header">
+                  <div>
+                    <h4 className="section-heading">Edit {editingUser.name}</h4>
+                    <p className="projects-toolbar-helper">{editingUser.email}</p>
+                  </div>
+                  <button
+                    className="button button-ghost"
+                    type="button"
+                    onClick={() => setEditingUser(null)}
+                    disabled={savingUserId === editingUser.id}
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <form className="form-grid" onSubmit={onSaveManagedUser}>
+                  <label>
+                    Global role
+                    <select
+                      className="input"
+                      value={editingUserRole}
+                      onChange={(event) => setEditingUserRole(event.target.value as LoginResponse["user"]["globalRole"])}
+                      disabled={savingUserId === editingUser.id}
+                    >
+                      <option value="reader">Reader</option>
+                      <option value="editor">Editor</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </label>
+
+                  {editingUserRole === "admin" ? (
+                    <p className="alert alert-info">Admins have access to all projects.</p>
+                  ) : (
+                    <fieldset className="projects-invite-projects">
+                      <legend>Assigned projects</legend>
+                      {sortedProjects.length === 0 ? (
+                        <p className="alert alert-info">No projects available.</p>
+                      ) : (
+                        <div className="projects-invite-checkboxes">
+                          {sortedProjects.map((project) => {
+                            const isSelected = editingUserProjectIds.includes(project.id);
+
+                            return (
+                              <label
+                                className={`projects-invite-checkbox${isSelected ? " projects-invite-checkbox-selected" : ""}`}
+                                key={`managed-user-${editingUser.id}-${project.id}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => onToggleEditingUserProject(project.id)}
+                                  disabled={savingUserId === editingUser.id}
+                                />
+                                <div className="projects-invite-checkbox-content">
+                                  <div className="projects-invite-checkbox-main">
+                                    <strong>{project.key}</strong>
+                                    <span>{project.name}</span>
+                                  </div>
+                                  {project.isPinned ? <span className="badge projects-pinned-badge">Pinned</span> : null}
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </fieldset>
+                  )}
+
+                  <div className="projects-list-actions">
+                    <button className="button" type="submit" disabled={savingUserId === editingUser.id}>
+                      {savingUserId === editingUser.id ? "Saving..." : "Save changes"}
+                    </button>
+                    <button
+                      className="button button-ghost"
+                      type="button"
+                      onClick={() => setEditingUser(null)}
+                      disabled={savingUserId === editingUser.id}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : null}
           </div>
         ) : null}
 

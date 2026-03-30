@@ -577,3 +577,15 @@
 - Reader mode now removes repetitive permission banners and hides create actions in Projects, Wiki, Documents, Tasks, and Meetings while preserving backend/handler guards.
 - Empty states now use neutral reader-safe copy (`No ... available yet`) instead of creation prompts, including document detail when a document has no versions.
 - Editor/admin flows keep their existing create-oriented copy and actions.
+
+## Admin User Management in Projects (2026-03-30)
+- [x] Inspect auth/session, collaboration, and projects UI integration points.
+- [x] Add admin-only backend user management API with role/project editing, soft delete, safeguards, audit, and session cleanup.
+- [x] Harden JWT and websocket authentication to use current active user state from DB.
+- [x] Add admin-only Manage users UI in /projects with list, search, edit, delete, and project assignment flows.
+- [x] Validate with api tests/build and web build.
+
+### Review - Admin User Management in Projects (2026-03-30)
+- Added admin-only `/admin/users` list/update/delete endpoints with role/project editing, soft-delete revocation, last-admin/self-delete safeguards, audit logging, and session cleanup.
+- Hardened both HTTP and collaboration websocket auth to resolve the current active user from the database instead of trusting stale JWT role data, so role changes and account deletion take effect immediately.
+- Added an admin-only `Manage users` panel in `/projects` with search, per-user summaries, project assignment editing for non-admins, and destructive delete flow tied to immediate access revocation.

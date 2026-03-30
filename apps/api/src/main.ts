@@ -2,10 +2,10 @@ import "reflect-metadata";
 import "./config/load-env";
 import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import { JwtService } from "@nestjs/jwt";
 
 import { AppModule } from "./app.module";
 import { ProjectAccessService } from "./common/project-access.service";
+import { SessionAuthService } from "./common/session-auth.service";
 import { getEnv } from "./config/env";
 import { DocumentsCollaborationServer } from "./documents/documents-collaboration.server";
 import { setDocumentsCollaborationServer } from "./documents/collaboration-server-registry";
@@ -25,7 +25,7 @@ async function bootstrap(): Promise<void> {
 
   const collabServer = new DocumentsCollaborationServer(
     app.get(PrismaService),
-    app.get(JwtService),
+    app.get(SessionAuthService),
     app.get(ProjectAccessService)
   );
   setDocumentsCollaborationServer(collabServer);
