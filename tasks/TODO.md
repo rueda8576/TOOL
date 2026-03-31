@@ -258,7 +258,22 @@
 - [x] Replace local unsaved-exit confirmation logic in Wiki with the shared hook.
 - [x] Replace local unsaved-exit confirmation logic in Documents detail with the shared hook.
 - [x] Keep `AppShell` `onExitProjectRequest` contract unchanged and feed it from the shared hook.
-- [x] Validate with `pnpm --filter @doctoral/web build` and `pnpm --filter @doctoral/api build`.
+
+## Code v1 - GitLab Integration (2026-03-31)
+- [x] Add Prisma models and migration for GitLab user connections and one repository per project.
+- [x] Implement backend GitLab OAuth account flows and live repository APIs.
+- [x] Add frontend `Account` page and project `Code` tab with connect/create/read/write states.
+- [x] Validate with Prisma generate, API tests/build, and web build.
+
+### Review - Code v1 - GitLab Integration (2026-03-31)
+- Added Prisma-backed GitLab account connections and one-repository-per-project linkage, including encrypted token storage and a migration for `GitLabConnection` / `ProjectRepository`.
+- Added per-user GitLab OAuth connect/disconnect/callback flows plus live project repository APIs for search, link/create/disconnect, branches, commits, tree browsing, file viewing, branch creation, and merge request creation.
+- Added a global `/account` page for GitLab identity management, a project `Code` tab in the shell, and a first Code workspace with repository setup, overview, branch/MR actions, file tree, and file viewer states gated by Atlasium project permissions.
+- Validation passed:
+  - `pnpm --filter @doctoral/db db:generate`
+  - `pnpm --filter @doctoral/api test`
+  - `pnpm --filter @doctoral/api build`
+  - `pnpm --filter @doctoral/web build`
 
 ## Deploy Hotfix - SSH Timeout + Docker Retention Diagnostics (2026-03-28)
 - [x] Increase `appleboy/ssh-action` `command_timeout` to `45m` on the main auto/manual deploy steps.

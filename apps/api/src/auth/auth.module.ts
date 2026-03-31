@@ -2,11 +2,13 @@ import { Module } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 
 import { getEnv } from "../config/env";
+import { GitlabModule } from "../gitlab/gitlab.module";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 
 @Module({
   imports: [
+    GitlabModule,
     JwtModule.register({
       global: true,
       secret: getEnv().JWT_SECRET,

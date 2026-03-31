@@ -6,6 +6,7 @@ import { AuditModule } from "./audit/audit.module";
 import { AuthModule } from "./auth/auth.module";
 import { CommonModule } from "./common/common.module";
 import { DocumentsModule } from "./documents/documents.module";
+import { GitlabModule } from "./gitlab/gitlab.module";
 import { MeetingsModule } from "./meetings/meetings.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { PrismaModule } from "./prisma/prisma.module";
@@ -28,6 +29,7 @@ import { HealthController } from "./health.controller";
     ProjectsModule,
     WikiModule,
     DocumentsModule,
+    GitlabModule,
     TasksModule,
     MeetingsModule,
     NotificationsModule

@@ -10,6 +10,7 @@ describe("AuthService", () => {
     jwtService: any;
     queueService: any;
     auditService: any;
+    gitlabService: any;
   } => {
     const prisma: any = {
       invite: {
@@ -39,7 +40,8 @@ describe("AuthService", () => {
     };
 
     const jwtService: any = {
-      sign: jest.fn().mockReturnValue("jwt-token")
+      sign: jest.fn().mockReturnValue("jwt-token"),
+      verify: jest.fn()
     };
 
     const queueService: any = {
@@ -50,12 +52,21 @@ describe("AuthService", () => {
       log: jest.fn()
     };
 
+    const gitlabService: any = {
+      getConnectionStatus: jest.fn(),
+      getOauthStatePurpose: jest.fn().mockReturnValue("gitlab_oauth"),
+      buildAuthorizationUrl: jest.fn(),
+      disconnectUserConnection: jest.fn(),
+      exchangeAuthorizationCode: jest.fn()
+    };
+
     return {
-      service: new AuthService(prisma, jwtService, queueService, auditService),
+      service: new AuthService(prisma, jwtService, queueService, auditService, gitlabService),
       prisma,
       jwtService,
       queueService,
-      auditService
+      auditService,
+      gitlabService
     };
   };
 
@@ -341,5 +352,100 @@ describe("AuthService", () => {
     );
     expect(result.projectId).toBe("legacy-project");
     expect(result.projectIds).toEqual(["legacy-project"]);
+  });
+
+  it("returns current GitLab connection status for the authenticated user", async () => {
+    const { service, gitlabService } = makeService();
+    gitlabService.getConnectionStatus.mockResolvedValue({
+      connected: true,
+      reconnectRequired: false,
+      username: "luis"
+    });
+
+    const result = await service.getGitlabConnectionStatus({
+      userId: "user-1",
+      email: "user@example.com",
+      globalRole: "editor"
+    });
+
+    expect(gitlabService.getConnectionStatus).toHaveBeenCalledWith("user-1");
+    expect(result).toEqual({
+      connected: true,
+      reconnectRequired: false,
+      username: "luis"
+    });
+  });
+
+  it("starts GitLab OAuth by signing state and building the authorization url", async () => {
+    const { service, jwtService, gitlabService } = makeService();
+    jwtService.sign.mockReturnValueOnce("gitlab-state");
+    gitlabService.buildAuthorizationUrl.mockReturnValue("https://gitlab.example/oauth/authorize?state=gitlab-state");
+
+    const result = await service.beginGitlabConnect({
+      userId: "user-1",
+      email: "user@example.com",
+      globalRole: "admin"
+    });
+
+    expect(jwtService.sign).toHaveBeenCalledWith(
+      {
+        sub: "user-1",
+        purpose: "gitlab_oauth"
+      },
+      {
+        expiresIn: "10m"
+      }
+    );
+    expect(gitlabService.buildAuthorizationUrl).toHaveBeenCalledWith("gitlab-state");
+    expect(result).toEqual({
+      authorizationUrl: "https://gitlab.example/oauth/authorize?state=gitlab-state"
+    });
+  });
+
+  it("disconnects GitLab connection and writes an audit log when a connection existed", async () => {
+    const { service, gitlabService, auditService } = makeService();
+    gitlabService.disconnectUserConnection.mockResolvedValue(true);
+
+    const result = await service.disconnectGitlabConnection({
+      userId: "user-1",
+      email: "user@example.com",
+      globalRole: "editor"
+    });
+
+    expect(gitlabService.disconnectUserConnection).toHaveBeenCalledWith("user-1");
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "user-1",
+      entityType: "gitlab_connection",
+      entityId: "user-1",
+      action: "auth.gitlab.disconnect"
+    });
+    expect(result).toEqual({ disconnected: true });
+  });
+
+  it("completes GitLab OAuth callback and redirects back to account on success", async () => {
+    const { service, jwtService, prisma, gitlabService, auditService } = makeService();
+    jwtService.verify.mockReturnValue({
+      sub: "user-1",
+      purpose: "gitlab_oauth"
+    });
+    prisma.user.findFirst.mockResolvedValue({ id: "user-1" });
+    gitlabService.exchangeAuthorizationCode.mockResolvedValue({
+      connected: true,
+      reconnectRequired: false
+    });
+
+    const redirectUrl = await service.completeGitlabConnectCallback("oauth-code", "signed-state");
+
+    expect(jwtService.verify).toHaveBeenCalledWith("signed-state", {
+      secret: expect.any(String)
+    });
+    expect(gitlabService.exchangeAuthorizationCode).toHaveBeenCalledWith("user-1", "oauth-code");
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "user-1",
+      entityType: "gitlab_connection",
+      entityId: "user-1",
+      action: "auth.gitlab.connect"
+    });
+    expect(redirectUrl).toBe("http://localhost:3000/account?gitlab=connected");
   });
 });

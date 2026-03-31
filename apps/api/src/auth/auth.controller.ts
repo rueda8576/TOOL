@@ -1,4 +1,5 @@
-import { Body, Controller, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Post, Query, Res, UseGuards } from "@nestjs/common";
+import { Response } from "express";
 
 import { CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
@@ -44,5 +45,41 @@ export class AuthController {
   @Post("password/reset")
   passwordReset(@Body() dto: PasswordResetDto): Promise<{ accepted: true }> {
     return this.authService.requestPasswordReset(dto);
+  }
+
+  @Get("gitlab/connection")
+  @UseGuards(JwtAuthGuard)
+  getGitlabConnection(@CurrentUser() user: AuthenticatedUser): Promise<{
+    connected: boolean;
+    reconnectRequired: boolean;
+    username?: string;
+    name?: string;
+    email?: string | null;
+    avatarUrl?: string | null;
+    webUrl?: string | null;
+  }> {
+    return this.authService.getGitlabConnectionStatus(user);
+  }
+
+  @Post("gitlab/connect")
+  @UseGuards(JwtAuthGuard)
+  beginGitlabConnection(@CurrentUser() user: AuthenticatedUser): Promise<{ authorizationUrl: string }> {
+    return this.authService.beginGitlabConnect(user);
+  }
+
+  @Delete("gitlab/connection")
+  @UseGuards(JwtAuthGuard)
+  disconnectGitlabConnection(@CurrentUser() user: AuthenticatedUser): Promise<{ disconnected: true }> {
+    return this.authService.disconnectGitlabConnection(user);
+  }
+
+  @Get("gitlab/callback")
+  async completeGitlabConnection(
+    @Query("code") code: string | undefined,
+    @Query("state") state: string | undefined,
+    @Res() response: Response
+  ): Promise<void> {
+    const redirectUrl = await this.authService.completeGitlabConnectCallback(code, state);
+    response.redirect(redirectUrl);
   }
 }
