@@ -129,7 +129,15 @@ Before you merge/push that feature to `main`, finish these steps on the VPS:
 3. Start GitLab from `docker-compose.gitlab.yml`.
 4. Apply the updated Nginx config and issue/reissue the certificate for `git.atlasium.info`.
 5. Create the GitLab managed group, system PAT, and GitLab OAuth application.
-6. Run:
+6. If the VPS was rebooted and the Atlasium stack did not come back, recover it using the currently deployed tag:
+
+```bash
+cd /opt/atlasium
+sh ./infra/scripts/recover-atlasium-after-reboot.sh --env-file .env
+curl -fsS http://127.0.0.1:4000/health
+```
+
+7. Run:
 
 ```bash
 cd /opt/atlasium
@@ -162,10 +170,14 @@ cd /opt/atlasium
 docker compose -f docker-compose.gitlab.yml up -d
 docker compose -f docker-compose.gitlab.yml ps
 docker compose -f docker-compose.gitlab.yml logs --tail=200 gitlab
-curl -fsS http://127.0.0.1:${ATLASIUM_GITLAB_HTTP_PORT:-8081}/-/health
+curl -I https://git.atlasium.info/users/sign_in
 ```
 
 First bootstrap can take several minutes.
+
+Note:
+- `docker-compose.prod.yml` and `docker-compose.gitlab.yml` now use explicit compose project names (`atlasium` and `atlasium-gitlab`) so `docker compose ... ps` and logs no longer mix both stacks.
+- The first restart/deploy after introducing explicit compose names is a one-time migration of the Atlasium stack identity; if old containers from the previous default compose project still exist, remove them only after confirming the new `atlasium` stack is healthy.
 
 ## 4) Seed admin (first time only)
 
@@ -212,6 +224,7 @@ certbot renew --dry-run
 
 ```bash
 cd /opt/atlasium
+curl -fsS http://127.0.0.1:4000/health
 sh ./infra/scripts/validate-managed-gitlab-rollout.sh pre-main-push --env-file .env
 ```
 

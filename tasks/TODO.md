@@ -303,6 +303,19 @@
 - Updated `infra/GO_LIVE_ATLASIUM.md` to require branch-first staging of GitLab infra files, explicit pre-main validation on the VPS, and post-deploy OIDC/SSO smoke checks only after the new Atlasium code is live.
 - Revalidated `docker-compose.gitlab.yml` with real local Docker/Compose plus dummy env values, and verified shell syntax for the new rollout script and existing production shell scripts.
 
+## Reboot Recovery + Compose Resilience for Atlasium/GitLab (2026-03-31)
+- [x] Add restart policies to all long-running Atlasium services in `docker-compose.prod.yml` while keeping `migrate` one-shot only.
+- [x] Add explicit compose project names to separate the Atlasium and GitLab stacks operationally.
+- [x] Add a versioned reboot recovery script that restores the currently deployed Atlasium image tag from deploy state and confirms local API health.
+- [x] Update managed GitLab rollout checks to fall back from `/-/health` to GitLab sign-in probing when Omnibus returns false-negative 404s.
+- [x] Update runbook/operator guidance for reboot recovery and pre-main Atlasium health confirmation.
+
+### Review - Reboot Recovery + Compose Resilience for Atlasium/GitLab (2026-03-31)
+- `docker-compose.prod.yml` now uses `name: atlasium` plus `restart: unless-stopped` on `postgres`, `redis`, `mailpit`, `api`, `web`, and `worker`, while `docker-compose.gitlab.yml` now uses `name: atlasium-gitlab` so compose commands stop mixing both stacks.
+- Added `infra/scripts/recover-atlasium-after-reboot.sh` to recover the currently deployed production stack from `/opt/atlasium/.deploy-image-state.env`, bring services back in dependency order, and fail closed with logs if the local API healthcheck does not return.
+- Updated `infra/scripts/validate-managed-gitlab-rollout.sh` so GitLab readiness no longer hard-fails purely on `/-/health` returning 404 in the current Omnibus setup; it now falls back to probing `/users/sign_in` for GitLab-specific headers.
+- Updated `infra/GO_LIVE_ATLASIUM.md` to require Atlasium stack recovery/health confirmation before the first managed-GitLab `main` push and to document the one-time compose project-name migration effect.
+
 ## Deploy Hotfix - SSH Timeout + Docker Retention Diagnostics (2026-03-28)
 - [x] Increase `appleboy/ssh-action` `command_timeout` to `45m` on the main auto/manual deploy steps.
 - [x] Keep healthcheck SSH steps on the shorter default timeout.

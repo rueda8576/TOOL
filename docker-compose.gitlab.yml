@@ -1,3 +1,5 @@
+name: atlasium-gitlab
+
 services:
   gitlab:
     image: ${GITLAB_OMNIBUS_IMAGE:-gitlab/gitlab-ce:latest}

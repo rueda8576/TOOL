@@ -92,6 +92,47 @@ check_http_contains() {
   fi
 }
 
+extract_host_from_url() {
+  printf '%s' "$1" | sed -E 's#^[A-Za-z][A-Za-z0-9+.-]*://([^/:]+).*$#\1#'
+}
+
+gitlab_sign_in_probe() {
+  label="$1"
+  url="$2"
+  host_header="${3:-}"
+
+  if [ -n "${host_header}" ]; then
+    response_headers="$(curl -fsSI -H "Host: ${host_header}" "${url}/users/sign_in" 2>/dev/null || true)"
+  else
+    response_headers="$(curl -fsSI "${url}/users/sign_in" 2>/dev/null || true)"
+  fi
+
+  if printf '%s\n' "${response_headers}" | tr -d '\r' | grep -qi '^x-gitlab-meta:'; then
+    return 0
+  fi
+
+  fail "GitLab availability probe failed for ${label}: /-/health did not pass and /users/sign_in did not return GitLab headers"
+}
+
+check_gitlab_available() {
+  label="$1"
+  url="$2"
+  host_header="${3:-}"
+
+  if [ -n "${host_header}" ]; then
+    if curl -fsS -H "Host: ${host_header}" "${url}/-/health" >/dev/null 2>&1; then
+      return 0
+    fi
+  else
+    if curl -fsS "${url}/-/health" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  log "GitLab /-/health probe failed for ${label}; falling back to sign-in page probe..."
+  gitlab_sign_in_probe "${label}" "${url}" "${host_header}"
+}
+
 require_command docker
 require_command curl
 
@@ -125,6 +166,7 @@ APP_BASE_URL="$(trim_trailing_slashes "$(value_from_env APP_BASE_URL)")"
 GITLAB_EXTERNAL_URL="$(trim_trailing_slashes "$(value_from_env GITLAB_EXTERNAL_URL)")"
 GITLAB_ROOT_DIR="$(value_from_env ATLASIUM_GITLAB_ROOT)"
 GITLAB_HTTP_PORT="$(value_from_env ATLASIUM_GITLAB_HTTP_PORT)"
+GITLAB_HOST="$(extract_host_from_url "${GITLAB_EXTERNAL_URL}")"
 
 if [ -z "${GITLAB_ROOT_DIR}" ]; then
   fail "ATLASIUM_GITLAB_ROOT resolved to an empty value"
@@ -143,10 +185,10 @@ if ! docker compose --env-file "${ENV_FILE}" -f docker-compose.gitlab.yml ps --s
 fi
 
 log "Checking local GitLab health..."
-check_http_ok "http://127.0.0.1:${GITLAB_HTTP_PORT}/-/health"
+check_gitlab_available "local" "http://127.0.0.1:${GITLAB_HTTP_PORT}" "${GITLAB_HOST}"
 
 log "Checking public GitLab endpoint..."
-check_http_ok "${GITLAB_EXTERNAL_URL}/-/health"
+check_gitlab_available "public" "${GITLAB_EXTERNAL_URL}"
 
 if [ "${MODE}" = "post-deploy" ]; then
   log "Checking Atlasium API health..."

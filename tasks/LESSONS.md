@@ -135,3 +135,8 @@
 
 ## Docker disk diagnostics
 - When diagnosing Docker disk pressure on a VPS, do not rely on `df --total` because overlay mounts inflate the apparent total usage; inspect `docker info` for `Docker Root Dir` and use `docker system df -v` to identify reclaimable images and build cache before proposing storage expansion.
+
+## Multi-compose VPS operations
+- When introducing a second Docker Compose stack on the same VPS, always set an explicit top-level compose `name:` for each stack; otherwise `docker compose ps/logs/up` can mix unrelated services via the default project name.
+- Long-running production services in compose files must declare `restart: unless-stopped` so a VPS reboot does not silently leave the primary application down while auxiliary stacks recover.
+- If deploy state records the active immutable image tag, provide a versioned recovery path/script that reads that state instead of restarting production implicitly on `:main`.
