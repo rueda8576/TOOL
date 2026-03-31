@@ -664,3 +664,17 @@
   - `pnpm --filter @doctoral/api test -- --no-cache`
   - `pnpm --filter @doctoral/api build`
   - `pnpm --filter @doctoral/web build`
+
+## Code vNext - Inherited GitLab Membership Sync Fix (2026-03-31)
+- [x] Diagnose `Provision repository` failure path from production logs and isolate the inherited `Owner` membership conflict from the managed GitLab group.
+- [x] Update backend GitLab project membership sync to read both direct and effective members and treat inherited/effective access as satisfying the desired role before creating a direct project membership.
+- [x] Map GitLab sync failures through Nest exceptions instead of leaking raw `GitlabApiError` as `500 Internal server error`.
+- [x] Improve frontend authenticated fetch error parsing so structured Nest `message` payloads show actionable text instead of raw JSON blobs.
+- [x] Add backend unit coverage for inherited membership no-op, direct member creation, direct member upgrade, and mapped sync failure behavior.
+- [x] Validate with `pnpm --filter @doctoral/api test -- --runInBand`, `pnpm --filter @doctoral/api build`, and `pnpm --filter @doctoral/web build`.
+
+### Review - Code vNext - Inherited GitLab Membership Sync Fix (2026-03-31)
+- `syncProjectRepositoryAccess()` now compares direct project members with effective project members from `/members/all`, so inherited group access such as `root` -> `Owner` no longer causes `Provision repository` to fail when Atlasium wants only `Maintainer`.
+- GitLab sync failures are now mapped through the existing infrastructure exception path, avoiding raw `500 Internal server error` leaks from `GitlabApiError`.
+- Frontend authenticated fetch now unwraps structured Nest JSON errors into readable text, so future operational failures show actionable messages instead of JSON blobs.
+- Added dedicated `GitlabService` unit coverage for inherited membership no-op, direct member create/update flows, and mapped sync errors.

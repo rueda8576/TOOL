@@ -558,61 +558,88 @@ export class GitlabService {
     }
 
     await this.withSystemAccessToken(async (accessToken) => {
-      const desiredMembers = await this.buildDesiredMembers(projectId, accessToken, repository.project.deletedAt !== null);
-      const currentMembers = await this.executeGitlabRequest<GitlabProjectMember[]>(
-        accessToken,
-        `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members?per_page=100`
-      );
-      const currentById = new Map(currentMembers.map((member) => [String(member.id), member]));
-      const systemUserId = getEnv().GITLAB_SYSTEM_USER_ID?.trim() || null;
-
-      for (const [gitlabUserId, accessLevel] of desiredMembers.entries()) {
-        const existingMember = currentById.get(gitlabUserId);
-        if (!existingMember) {
-          await this.executeGitlabRequest<void>(
+      try {
+        const desiredMembers = await this.buildDesiredMembers(projectId, accessToken, repository.project.deletedAt !== null);
+        const [currentMembers, effectiveMembers] = await Promise.all([
+          this.executeGitlabRequest<GitlabProjectMember[]>(
             accessToken,
-            `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members`,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                user_id: Number(gitlabUserId),
-                access_level: accessLevel
-              })
+            `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members?per_page=100`
+          ),
+          this.executeGitlabRequest<GitlabProjectMember[]>(
+            accessToken,
+            `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members/all?per_page=100`
+          )
+        ]);
+        const currentById = new Map(currentMembers.map((member) => [String(member.id), member]));
+        const effectiveById = new Map(effectiveMembers.map((member) => [String(member.id), member]));
+        const systemUserId = getEnv().GITLAB_SYSTEM_USER_ID?.trim() || null;
+
+        for (const [gitlabUserId, accessLevel] of desiredMembers.entries()) {
+          const existingMember = currentById.get(gitlabUserId);
+          const effectiveMember = effectiveById.get(gitlabUserId);
+
+          if (!existingMember) {
+            if (effectiveMember && effectiveMember.access_level >= accessLevel) {
+              continue;
             }
-          );
-          continue;
+
+            await this.executeGitlabRequest<void>(
+              accessToken,
+              `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members`,
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  user_id: Number(gitlabUserId),
+                  access_level: accessLevel
+                })
+              }
+            );
+            continue;
+          }
+
+          // When GitLab already grants enough access through the parent group, leave
+          // the project membership unchanged instead of forcing a conflicting update.
+          if (
+            effectiveMember &&
+            effectiveMember.access_level > existingMember.access_level &&
+            effectiveMember.access_level >= accessLevel
+          ) {
+            continue;
+          }
+
+          if (existingMember.access_level !== accessLevel) {
+            await this.executeGitlabRequest<void>(
+              accessToken,
+              `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members/${encodeURIComponent(gitlabUserId)}`,
+              {
+                method: "PUT",
+                body: JSON.stringify({
+                  access_level: accessLevel
+                })
+              }
+            );
+          }
         }
 
-        if (existingMember.access_level !== accessLevel) {
+        for (const currentMember of currentMembers) {
+          const gitlabUserId = String(currentMember.id);
+          if (systemUserId && gitlabUserId === systemUserId) {
+            continue;
+          }
+          if (desiredMembers.has(gitlabUserId)) {
+            continue;
+          }
+
           await this.executeGitlabRequest<void>(
             accessToken,
             `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members/${encodeURIComponent(gitlabUserId)}`,
             {
-              method: "PUT",
-              body: JSON.stringify({
-                access_level: accessLevel
-              })
+              method: "DELETE"
             }
           );
         }
-      }
-
-      for (const currentMember of currentMembers) {
-        const gitlabUserId = String(currentMember.id);
-        if (systemUserId && gitlabUserId === systemUserId) {
-          continue;
-        }
-        if (desiredMembers.has(gitlabUserId)) {
-          continue;
-        }
-
-        await this.executeGitlabRequest<void>(
-          accessToken,
-          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members/${encodeURIComponent(gitlabUserId)}`,
-          {
-            method: "DELETE"
-          }
-        );
+      } catch (error) {
+        throw this.mapInfrastructureError(error);
       }
     });
   }
