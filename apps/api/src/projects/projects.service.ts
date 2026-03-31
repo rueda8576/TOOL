@@ -4,6 +4,7 @@ import { Prisma, ProjectRole } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { ProjectAccessService } from "../common/project-access.service";
+import { GitlabService } from "../gitlab/gitlab.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AddProjectMemberDto } from "./dto/add-project-member.dto";
 import { CreateProjectDto } from "./dto/create-project.dto";
@@ -13,7 +14,8 @@ export class ProjectsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessService: ProjectAccessService,
-    private readonly auditService: AuditService
+    private readonly auditService: AuditService,
+    private readonly gitlabService: GitlabService
   ) {}
 
   async createProject(dto: CreateProjectDto, user: AuthenticatedUser): Promise<{
@@ -37,26 +39,66 @@ export class ProjectsService {
       throw new BadRequestException("Project key already exists");
     }
 
-    const project = await this.prisma.project.create({
-      data: {
-        key,
-        name: dto.name,
-        description: dto.description,
-        createdById: user.userId,
-        members: {
-          create: {
-            userId: user.userId,
-            role: ProjectRole.EDITOR
+    const provisionedRepository = await this.gitlabService.provisionManagedRemoteRepository(key, dto.name);
+    let project: {
+      id: string;
+      key: string;
+      name: string;
+      description: string | null;
+    };
+
+    try {
+      project = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const createdProject = await tx.project.create({
+          data: {
+            key,
+            name: dto.name,
+            description: dto.description,
+            createdById: user.userId,
+            members: {
+              create: {
+                userId: user.userId,
+                role: ProjectRole.EDITOR
+              }
+            }
+          },
+          select: {
+            id: true,
+            key: true,
+            name: true,
+            description: true
           }
+        });
+
+        await tx.projectRepository.create({
+          data: {
+            projectId: createdProject.id,
+            gitlabProjectId: provisionedRepository.gitlabProjectId,
+            pathWithNamespace: provisionedRepository.pathWithNamespace,
+            webUrl: provisionedRepository.webUrl,
+            defaultBranch: provisionedRepository.defaultBranch,
+            connectedByUserId: user.userId
+          }
+        });
+
+        return createdProject;
+      });
+    } catch (error) {
+      await this.gitlabService.rollbackManagedRemoteProvision(provisionedRepository.gitlabProjectId);
+      throw error;
+    }
+
+    try {
+      await this.gitlabService.syncProjectRepositoryAccess(project.id);
+    } catch (error) {
+      await this.prisma.project.delete({
+        where: {
+          id: project.id
         }
-      },
-      select: {
-        id: true,
-        key: true,
-        name: true,
-        description: true
-      }
-    });
+      });
+      await this.gitlabService.rollbackManagedRemoteProvision(provisionedRepository.gitlabProjectId);
+      throw error;
+    }
 
     await this.auditService.log({
       userId: user.userId,
@@ -64,6 +106,17 @@ export class ProjectsService {
       entityType: "project",
       entityId: project.id,
       action: "project.create"
+    });
+    await this.auditService.log({
+      userId: user.userId,
+      projectId: project.id,
+      entityType: "project_repository",
+      entityId: provisionedRepository.gitlabProjectId,
+      action: "project.repository.provision",
+      metadata: {
+        gitlabProjectId: provisionedRepository.gitlabProjectId,
+        pathWithNamespace: provisionedRepository.pathWithNamespace
+      }
     });
 
     return project;
@@ -102,6 +155,22 @@ export class ProjectsService {
         }
       });
     });
+
+    try {
+      await this.gitlabService.archiveManagedRepository(projectId);
+      await this.gitlabService.syncProjectRepositoryAccess(projectId);
+    } catch (error) {
+      await this.prisma.project.update({
+        where: {
+          id: projectId
+        },
+        data: {
+          deletedAt: null
+        }
+      });
+      await this.gitlabService.unarchiveManagedRepository(projectId);
+      throw error;
+    }
 
     await this.auditService.log({
       userId: user.userId,
@@ -307,6 +376,8 @@ export class ProjectsService {
       entityId: `${projectId}:${member.id}`,
       action: "project.member.add"
     });
+
+    await this.gitlabService.syncProjectRepositoryAccess(projectId);
 
     return projectMember;
   }

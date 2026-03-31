@@ -13,7 +13,16 @@ import { PrismaService } from "./prisma/prisma.service";
 
 async function bootstrap(): Promise<void> {
   const env = getEnv();
-  const app = await NestFactory.create(AppModule, { cors: true });
+  const app = await NestFactory.create(AppModule, {
+    cors: {
+      origin: [
+        env.APP_BASE_URL.replace(/\/+$/, ""),
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+      ],
+      credentials: true
+    }
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({

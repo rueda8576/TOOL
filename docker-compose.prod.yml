@@ -1,6 +1,9 @@
+name: atlasium
+
 services:
   postgres:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_DB: doctoral_platform
       POSTGRES_USER: postgres
@@ -15,12 +18,15 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
 
   mailpit:
     image: axllent/mailpit:latest
+    restart: unless-stopped
 
   api:
     image: ghcr.io/rueda8576/atlasium-api:${IMAGE_TAG:-main}
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -53,6 +59,7 @@ services:
 
   web:
     image: ghcr.io/rueda8576/atlasium-web:${IMAGE_TAG:-main}
+    restart: unless-stopped
     env_file:
       - .env
     depends_on:
@@ -62,6 +69,7 @@ services:
 
   worker:
     image: ghcr.io/rueda8576/atlasium-worker:${IMAGE_TAG:-main}
+    restart: unless-stopped
     env_file:
       - .env
     environment:

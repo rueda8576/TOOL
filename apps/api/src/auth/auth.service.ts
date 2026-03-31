@@ -4,9 +4,11 @@ import * as bcrypt from "bcryptjs";
 import { JwtService } from "@nestjs/jwt";
 
 import { AuditService } from "../audit/audit.service";
+import { AuthenticatedUser } from "../common/authenticated-user";
 import { generateSecureToken, hashValue } from "../common/crypto";
 import { apiRoleToPrismaRole, pickHigherRole, prismaRoleToApiRole } from "../common/role-map";
 import { getEnv } from "../config/env";
+import { GitlabService } from "../gitlab/gitlab.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { QueueService } from "../queues/queue.service";
 import { AcceptInviteDto } from "./dto/accept-invite.dto";
@@ -21,6 +23,11 @@ const escapeHtml = (value: string): string =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+
+type GitlabOauthStatePayload = {
+  sub?: string;
+  purpose?: string;
+};
 
 @Injectable()
 export class AuthService {
@@ -40,7 +47,8 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly queueService: QueueService,
-    private readonly auditService: AuditService
+    private readonly auditService: AuditService,
+    private readonly gitlabService: GitlabService
   ) {}
 
   async login(dto: LoginDto): Promise<{
@@ -220,6 +228,7 @@ export class AuthService {
     });
 
     const invitedRole = prismaRoleToApiRole(invite.globalRole);
+    let resultingRole = invitedRole;
 
     if (!user) {
       user = await this.prisma.user.create({
@@ -230,6 +239,7 @@ export class AuthService {
           globalRole: invite.globalRole
         }
       });
+      resultingRole = invitedRole;
 
       await this.prisma.notificationPreference.create({
         data: {
@@ -245,6 +255,7 @@ export class AuthService {
           globalRole: apiRoleToPrismaRole(mergedRole)
         }
       });
+      resultingRole = mergedRole;
     }
 
     const targetProjectAssignments = await this.resolveInviteProjectAssignments(invite);
@@ -310,6 +321,11 @@ export class AuthService {
       }
     });
 
+    const repositoryProjectIds = resultingRole === "admin"
+      ? await this.listRepositoryProjectIds()
+      : targetProjectIds;
+    await Promise.all(repositoryProjectIds.map((projectId) => this.gitlabService.syncProjectRepositoryAccess(projectId)));
+
     return { token, userId: user.id, projectId: invite.projectId, projectIds: targetProjectIds };
   }
 
@@ -347,6 +363,95 @@ export class AuthService {
     });
 
     return { accepted: true };
+  }
+
+  async getGitlabConnectionStatus(user: AuthenticatedUser): Promise<{
+    connected: boolean;
+    reconnectRequired: boolean;
+    username?: string;
+    name?: string;
+    email?: string | null;
+    avatarUrl?: string | null;
+    webUrl?: string | null;
+  }> {
+    return this.gitlabService.getConnectionStatus(user.userId);
+  }
+
+  async beginGitlabConnect(user: AuthenticatedUser): Promise<{ authorizationUrl: string }> {
+    const state = this.jwtService.sign(
+      {
+        sub: user.userId,
+        purpose: this.gitlabService.getOauthStatePurpose()
+      },
+      {
+        expiresIn: "10m"
+      }
+    );
+
+    return {
+      authorizationUrl: this.gitlabService.buildAuthorizationUrl(state)
+    };
+  }
+
+  async disconnectGitlabConnection(user: AuthenticatedUser): Promise<{ disconnected: true }> {
+    const disconnected = await this.gitlabService.disconnectUserConnection(user.userId);
+
+    if (disconnected) {
+      await this.auditService.log({
+        userId: user.userId,
+        entityType: "gitlab_connection",
+        entityId: user.userId,
+        action: "auth.gitlab.disconnect"
+      });
+    }
+
+    return { disconnected: true };
+  }
+
+  async completeGitlabConnectCallback(code: string | undefined, state: string | undefined): Promise<string> {
+    const redirectBaseUrl = `${this.appBaseUrl}/account`;
+
+    try {
+      if (!code || !state) {
+        throw new BadRequestException("Missing GitLab OAuth callback parameters");
+      }
+
+      const payload = this.jwtService.verify<GitlabOauthStatePayload>(state, {
+        secret: getEnv().JWT_SECRET
+      });
+
+      if (!payload.sub || payload.purpose !== this.gitlabService.getOauthStatePurpose()) {
+        throw new UnauthorizedException("Invalid GitLab OAuth state");
+      }
+
+      const activeUser = await this.prisma.user.findFirst({
+        where: {
+          id: payload.sub,
+          deletedAt: null,
+          isActive: true
+        },
+        select: {
+          id: true
+        }
+      });
+
+      if (!activeUser) {
+        throw new UnauthorizedException("User session is no longer active");
+      }
+
+      await this.gitlabService.exchangeAuthorizationCode(activeUser.id, code);
+
+      await this.auditService.log({
+        userId: activeUser.id,
+        entityType: "gitlab_connection",
+        entityId: activeUser.id,
+        action: "auth.gitlab.connect"
+      });
+
+      return `${redirectBaseUrl}?gitlab=connected`;
+    } catch (error) {
+      return `${redirectBaseUrl}?gitlab=error&message=${encodeURIComponent(this.getGitlabCallbackErrorMessage(error))}`;
+    }
   }
 
   private async resolveInviteAccess(dto: InviteDto): Promise<{
@@ -529,5 +634,23 @@ export class AuthService {
 
   private projectRoleToApi(role: ProjectRole): "editor" | "reader" {
     return role === ProjectRole.EDITOR ? "editor" : "reader";
+  }
+
+  private getGitlabCallbackErrorMessage(error: unknown): string {
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return error.message;
+    }
+
+    return "GitLab connection failed";
+  }
+
+  private async listRepositoryProjectIds(): Promise<string[]> {
+    const repositories = await this.prisma.projectRepository.findMany({
+      select: {
+        projectId: true
+      }
+    });
+
+    return repositories.map((repository) => repository.projectId);
   }
 }

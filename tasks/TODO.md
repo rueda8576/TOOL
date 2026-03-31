@@ -258,7 +258,63 @@
 - [x] Replace local unsaved-exit confirmation logic in Wiki with the shared hook.
 - [x] Replace local unsaved-exit confirmation logic in Documents detail with the shared hook.
 - [x] Keep `AppShell` `onExitProjectRequest` contract unchanged and feed it from the shared hook.
-- [x] Validate with `pnpm --filter @doctoral/web build` and `pnpm --filter @doctoral/api build`.
+
+## Code v1 - GitLab Integration (2026-03-31)
+- [x] Add Prisma models and migration for GitLab user connections and one repository per project.
+- [x] Implement backend GitLab OAuth account flows and live repository APIs.
+- [x] Add frontend `Account` page and project `Code` tab with connect/create/read/write states.
+- [x] Validate with Prisma generate, API tests/build, and web build.
+
+### Review - Code v1 - GitLab Integration (2026-03-31)
+- Added Prisma-backed GitLab account connections and one-repository-per-project linkage, including encrypted token storage and a migration for `GitLabConnection` / `ProjectRepository`.
+- Added per-user GitLab OAuth connect/disconnect/callback flows plus live project repository APIs for search, link/create/disconnect, branches, commits, tree browsing, file viewing, branch creation, and merge request creation.
+- Added a global `/account` page for GitLab identity management, a project `Code` tab in the shell, and a first Code workspace with repository setup, overview, branch/MR actions, file tree, and file viewer states gated by Atlasium project permissions.
+- Validation passed:
+  - `pnpm --filter @doctoral/db db:generate`
+  - `pnpm --filter @doctoral/api test`
+  - `pnpm --filter @doctoral/api build`
+  - `pnpm --filter @doctoral/web build`
+
+## Atlasium vNext - Managed GitLab Server + OIDC + Auto-Provisioned Repositories (2026-03-31)
+- [x] Add managed-GitLab config/env and Prisma state for OIDC authorization codes.
+- [x] Implement Atlasium OIDC provider endpoints plus session cookie support for GitLab SSO.
+- [x] Refactor GitLab integration to managed mode with system-token repo provisioning and permission sync.
+- [x] Auto-provision/archive repositories on project create/delete and sync membership changes from admin/invite flows.
+- [x] Replace manual Code setup UI with managed repository states and update Account copy for Atlasium-hosted GitLab.
+- [x] Add GitLab Omnibus infrastructure files/docs (`docker-compose.gitlab.yml`, nginx, runbook) and validate builds/tests.
+
+### Review
+- Atlasium now exposes OIDC discovery/authorize/token/userinfo/jwks endpoints and sets an HTTP-only session cookie on login so GitLab SSO can delegate auth to Atlasium.
+- Project creation now provisions a managed GitLab repository before the Atlasium project is considered successful, and project deletion archives that repo with rollback on archive failure.
+- Admin user updates, invite acceptance, member adds, and user deletion now trigger GitLab membership sync so Atlasium remains the source of truth for repo access.
+- The `Code` UI no longer offers manual repo search/link/disconnect; it works with a single managed repo per project and uses `Account` only for per-user GitLab API access.
+- Added `docker-compose.gitlab.yml`, host Nginx routing for `git.atlasium.info`, and runbook steps for Omnibus bootstrap, Atlasium OIDC, GitLab OAuth, backups, and restore.
+- Validated locally with `pnpm --filter @doctoral/db db:generate`, `pnpm --filter @doctoral/api build`, `pnpm --filter @doctoral/api test -- --runInBand`, `pnpm --filter @doctoral/web build`, and `git diff --check`.
+- `docker compose -f docker-compose.gitlab.yml config` could not be executed here because `docker` is not installed in this WSL distro; YAML structure was validated locally instead.
+
+## Managed GitLab Rollout Guardrails (2026-03-31)
+- [x] Add a versioned rollout preflight script for managed GitLab bootstrap and post-deploy validation.
+- [x] Update the go-live runbook to require branch-first staging before `main` and to split pre-main vs post-deploy checks.
+- [x] Revalidate `docker-compose.gitlab.yml` through real `docker compose config` and shell syntax checks.
+- [x] Document review notes and the exact operator sequence before `push` to `main`.
+
+### Review - Managed GitLab Rollout Guardrails (2026-03-31)
+- Added `infra/scripts/validate-managed-gitlab-rollout.sh` with two modes: `pre-main-push` for VPS/bootstrap readiness and `post-deploy` for Atlasium + GitLab integration checks after the automatic `main` deploy.
+- Updated `infra/GO_LIVE_ATLASIUM.md` to require branch-first staging of GitLab infra files, explicit pre-main validation on the VPS, and post-deploy OIDC/SSO smoke checks only after the new Atlasium code is live.
+- Revalidated `docker-compose.gitlab.yml` with real local Docker/Compose plus dummy env values, and verified shell syntax for the new rollout script and existing production shell scripts.
+
+## Reboot Recovery + Compose Resilience for Atlasium/GitLab (2026-03-31)
+- [x] Add restart policies to all long-running Atlasium services in `docker-compose.prod.yml` while keeping `migrate` one-shot only.
+- [x] Add explicit compose project names to separate the Atlasium and GitLab stacks operationally.
+- [x] Add a versioned reboot recovery script that restores the currently deployed Atlasium image tag from deploy state and confirms local API health.
+- [x] Update managed GitLab rollout checks to fall back from `/-/health` to GitLab sign-in probing when Omnibus returns false-negative 404s.
+- [x] Update runbook/operator guidance for reboot recovery and pre-main Atlasium health confirmation.
+
+### Review - Reboot Recovery + Compose Resilience for Atlasium/GitLab (2026-03-31)
+- `docker-compose.prod.yml` now uses `name: atlasium` plus `restart: unless-stopped` on `postgres`, `redis`, `mailpit`, `api`, `web`, and `worker`, while `docker-compose.gitlab.yml` now uses `name: atlasium-gitlab` so compose commands stop mixing both stacks.
+- Added `infra/scripts/recover-atlasium-after-reboot.sh` to recover the currently deployed production stack from `/opt/atlasium/.deploy-image-state.env`, bring services back in dependency order, and fail closed with logs if the local API healthcheck does not return.
+- Updated `infra/scripts/validate-managed-gitlab-rollout.sh` so GitLab readiness no longer hard-fails purely on `/-/health` returning 404 in the current Omnibus setup; it now falls back to probing `/users/sign_in` for GitLab-specific headers.
+- Updated `infra/GO_LIVE_ATLASIUM.md` to require Atlasium stack recovery/health confirmation before the first managed-GitLab `main` push and to document the one-time compose project-name migration effect.
 
 ## Deploy Hotfix - SSH Timeout + Docker Retention Diagnostics (2026-03-28)
 - [x] Increase `appleboy/ssh-action` `command_timeout` to `45m` on the main auto/manual deploy steps.

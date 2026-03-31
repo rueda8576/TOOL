@@ -107,11 +107,13 @@ model User {
   updatedAt              DateTime               @updatedAt
   deletedAt              DateTime?
   sessions               Session[]
+  gitlabConnection       GitLabConnection?
   invitesSent            Invite[]               @relation("InviteSender")
   invitesAccepted        Invite[]               @relation("InviteAccepter")
   projectMemberships     ProjectMember[]
   pinnedProjects         UserPinnedProject[]
   createdProjects        Project[]              @relation("ProjectCreator")
+  connectedProjectRepositories ProjectRepository[] @relation("ProjectRepositoryConnector")
   createdDocuments       Document[]             @relation("DocumentCreator")
   createdDocumentBranches DocumentBranch[]      @relation("DocumentBranchCreator")
   createdDocumentVersions DocumentVersion[]     @relation("DocumentVersionCreator")
@@ -129,6 +131,7 @@ model User {
   notificationEvents     NotificationEvent[]    @relation("NotificationRecipient")
   uploadedFiles          FileObject[]           @relation("FileUploader")
   auditLogs              AuditLog[]
+  oidcAuthorizationCodes OidcAuthorizationCode[]
 }
 
 model Session {
@@ -141,6 +144,25 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+model OidcAuthorizationCode {
+  id                 String   @id @default(cuid())
+  codeHash           String   @unique
+  clientId           String
+  userId             String
+  redirectUri        String
+  scope              String
+  nonce              String?
+  codeChallenge      String?
+  codeChallengeMethod String?
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  createdAt          DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
 }
 
 model Invite {
@@ -194,6 +216,7 @@ model Project {
   createdBy User            @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Restrict)
   members   ProjectMember[]
   pinnedByUsers UserPinnedProject[]
+  repository ProjectRepository?
   documents Document[]
   wikiPages WikiPage[]
   wikiAssets WikiAsset[]
@@ -202,6 +225,45 @@ model Project {
   invites   Invite[]
   inviteProjects InviteProject[]
   auditLogs AuditLog[]
+}
+
+model GitLabConnection {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  gitlabUserId         String   @unique
+  username             String
+  name                 String
+  email                String?
+  avatarUrl            String?
+  webUrl               String?
+  scope                String?
+  accessTokenEncrypted String
+  refreshTokenEncrypted String?
+  tokenExpiresAt       DateTime?
+  reconnectRequired    Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([username])
+}
+
+model ProjectRepository {
+  id                String   @id @default(cuid())
+  projectId         String   @unique
+  gitlabProjectId   String   @unique
+  pathWithNamespace String
+  webUrl            String
+  defaultBranch     String
+  connectedByUserId String
+  connectedAt       DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  connectedBy User    @relation("ProjectRepositoryConnector", fields: [connectedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([pathWithNamespace])
 }
 
 model UserPinnedProject {

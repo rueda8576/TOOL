@@ -84,6 +84,11 @@ export function AppShell({
           active: pathname === `/projects/${projectId}/documents` || pathname.startsWith(`/projects/${projectId}/documents/`)
         },
         {
+          href: `/projects/${projectId}/code`,
+          label: "Code",
+          active: pathname === `/projects/${projectId}/code` || pathname.startsWith(`/projects/${projectId}/code/`)
+        },
+        {
           href: `/projects/${projectId}/tasks`,
           label: "Tasks",
           active: pathname === `/projects/${projectId}/tasks` || pathname.startsWith(`/projects/${projectId}/tasks/`)
@@ -92,9 +97,17 @@ export function AppShell({
           href: `/projects/${projectId}/meetings`,
           label: "Meetings",
           active: pathname === `/projects/${projectId}/meetings` || pathname.startsWith(`/projects/${projectId}/meetings/`)
+        },
+        {
+          href: "/account",
+          label: "Account",
+          active: pathname === "/account"
         }
       ]
-    : [{ href: "/projects", label: "Projects", active: pathname === "/projects" }];
+    : [
+        { href: "/projects", label: "Projects", active: pathname === "/projects" },
+        { href: "/account", label: "Account", active: pathname === "/account" }
+      ];
 
   const onExitProject = useCallback(async (): Promise<void> => {
     if (!projectId || exitBusy) {

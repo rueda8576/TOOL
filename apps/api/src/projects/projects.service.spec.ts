@@ -9,6 +9,7 @@ describe("ProjectsService", () => {
     prisma: any;
     accessService: any;
     auditService: any;
+    gitlabService: any;
   } => {
     const prisma: any = {
       project: {
@@ -21,6 +22,9 @@ describe("ProjectsService", () => {
       projectMember: {
         findMany: jest.fn(),
         upsert: jest.fn()
+      },
+      projectRepository: {
+        create: jest.fn()
       },
       user: {
         findUnique: jest.fn()
@@ -44,11 +48,20 @@ describe("ProjectsService", () => {
       log: jest.fn()
     };
 
+    const gitlabService: any = {
+      provisionManagedRemoteRepository: jest.fn(),
+      rollbackManagedRemoteProvision: jest.fn(),
+      syncProjectRepositoryAccess: jest.fn(),
+      archiveManagedRepository: jest.fn(),
+      unarchiveManagedRepository: jest.fn()
+    };
+
     return {
-      service: new ProjectsService(prisma, accessService, auditService),
+      service: new ProjectsService(prisma, accessService, auditService, gitlabService),
       prisma,
       accessService,
-      auditService
+      auditService,
+      gitlabService
     };
   };
 
@@ -117,9 +130,15 @@ describe("ProjectsService", () => {
   });
 
   it("allows admins to create projects and logs audit", async () => {
-    const { service, prisma, auditService } = makeService();
+    const { service, prisma, auditService, gitlabService } = makeService();
 
     prisma.project.findUnique.mockResolvedValue(null);
+    gitlabService.provisionManagedRemoteRepository.mockResolvedValue({
+      gitlabProjectId: "gl-1",
+      pathWithNamespace: "atlasium/PHD1",
+      webUrl: "https://git.atlasium.info/atlasium/PHD1",
+      defaultBranch: "main"
+    });
     prisma.project.create.mockResolvedValue({
       id: "p1",
       key: "PHD1",
@@ -154,6 +173,13 @@ describe("ProjectsService", () => {
         })
       })
     );
+    expect(prisma.projectRepository.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: "p1",
+        gitlabProjectId: "gl-1",
+        connectedByUserId: "admin-1"
+      })
+    });
     expect(auditService.log).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "project.create",
@@ -278,7 +304,7 @@ describe("ProjectsService", () => {
   });
 
   it("soft deletes project for admin and logs audit", async () => {
-    const { service, prisma, auditService } = makeService();
+    const { service, prisma, auditService, gitlabService } = makeService();
     const deletedAt = new Date("2026-03-29T09:15:00.000Z");
 
     prisma.project.findFirst.mockResolvedValue({ id: "p1" });
@@ -323,8 +349,10 @@ describe("ProjectsService", () => {
     );
     expect(result).toEqual({
       id: "p1",
-      deletedAt: "2026-03-29T09:15:00.000Z"
+        deletedAt: "2026-03-29T09:15:00.000Z"
     });
+    expect(gitlabService.archiveManagedRepository).toHaveBeenCalledWith("p1");
+    expect(gitlabService.syncProjectRepositoryAccess).toHaveBeenCalledWith("p1");
   });
 
   it.each(["editor", "reader"] as const)("rejects project deletion for %s role", async (role) => {
