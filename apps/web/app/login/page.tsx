@@ -20,6 +20,7 @@ export default function LoginPage(): JSX.Element {
     try {
       const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json"
         },
@@ -33,6 +34,21 @@ export default function LoginPage(): JSX.Element {
       const data = (await response.json()) as LoginResponse;
       localStorage.setItem("doctoral_token", data.token);
       localStorage.setItem("doctoral_user", JSON.stringify(data.user));
+      const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+      if (returnTo) {
+        try {
+          const appOrigin = window.location.origin;
+          const target = returnTo.startsWith("/")
+            ? new URL(returnTo, appOrigin)
+            : new URL(returnTo);
+          if (target.origin === appOrigin) {
+            router.push(`${target.pathname}${target.search}${target.hash}`);
+            return;
+          }
+        } catch {
+          // Ignore invalid or cross-origin returnTo values.
+        }
+      }
       router.push("/projects");
     } catch (submitError) {
       setError((submitError as Error).message || "Unable to login");

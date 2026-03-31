@@ -5,6 +5,7 @@ import { getEnv } from "../config/env";
 import { GitlabModule } from "../gitlab/gitlab.module";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
+import { OidcService } from "./oidc.service";
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { AuthService } from "./auth.service";
     })
   ],
   controllers: [AuthController],
-  providers: [AuthService],
+  providers: [AuthService, OidcService],
   exports: [AuthService, JwtModule]
 })
 export class AuthModule {}

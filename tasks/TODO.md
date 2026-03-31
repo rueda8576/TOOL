@@ -275,6 +275,34 @@
   - `pnpm --filter @doctoral/api build`
   - `pnpm --filter @doctoral/web build`
 
+## Atlasium vNext - Managed GitLab Server + OIDC + Auto-Provisioned Repositories (2026-03-31)
+- [x] Add managed-GitLab config/env and Prisma state for OIDC authorization codes.
+- [x] Implement Atlasium OIDC provider endpoints plus session cookie support for GitLab SSO.
+- [x] Refactor GitLab integration to managed mode with system-token repo provisioning and permission sync.
+- [x] Auto-provision/archive repositories on project create/delete and sync membership changes from admin/invite flows.
+- [x] Replace manual Code setup UI with managed repository states and update Account copy for Atlasium-hosted GitLab.
+- [x] Add GitLab Omnibus infrastructure files/docs (`docker-compose.gitlab.yml`, nginx, runbook) and validate builds/tests.
+
+### Review
+- Atlasium now exposes OIDC discovery/authorize/token/userinfo/jwks endpoints and sets an HTTP-only session cookie on login so GitLab SSO can delegate auth to Atlasium.
+- Project creation now provisions a managed GitLab repository before the Atlasium project is considered successful, and project deletion archives that repo with rollback on archive failure.
+- Admin user updates, invite acceptance, member adds, and user deletion now trigger GitLab membership sync so Atlasium remains the source of truth for repo access.
+- The `Code` UI no longer offers manual repo search/link/disconnect; it works with a single managed repo per project and uses `Account` only for per-user GitLab API access.
+- Added `docker-compose.gitlab.yml`, host Nginx routing for `git.atlasium.info`, and runbook steps for Omnibus bootstrap, Atlasium OIDC, GitLab OAuth, backups, and restore.
+- Validated locally with `pnpm --filter @doctoral/db db:generate`, `pnpm --filter @doctoral/api build`, `pnpm --filter @doctoral/api test -- --runInBand`, `pnpm --filter @doctoral/web build`, and `git diff --check`.
+- `docker compose -f docker-compose.gitlab.yml config` could not be executed here because `docker` is not installed in this WSL distro; YAML structure was validated locally instead.
+
+## Managed GitLab Rollout Guardrails (2026-03-31)
+- [x] Add a versioned rollout preflight script for managed GitLab bootstrap and post-deploy validation.
+- [x] Update the go-live runbook to require branch-first staging before `main` and to split pre-main vs post-deploy checks.
+- [x] Revalidate `docker-compose.gitlab.yml` through real `docker compose config` and shell syntax checks.
+- [x] Document review notes and the exact operator sequence before `push` to `main`.
+
+### Review - Managed GitLab Rollout Guardrails (2026-03-31)
+- Added `infra/scripts/validate-managed-gitlab-rollout.sh` with two modes: `pre-main-push` for VPS/bootstrap readiness and `post-deploy` for Atlasium + GitLab integration checks after the automatic `main` deploy.
+- Updated `infra/GO_LIVE_ATLASIUM.md` to require branch-first staging of GitLab infra files, explicit pre-main validation on the VPS, and post-deploy OIDC/SSO smoke checks only after the new Atlasium code is live.
+- Revalidated `docker-compose.gitlab.yml` with real local Docker/Compose plus dummy env values, and verified shell syntax for the new rollout script and existing production shell scripts.
+
 ## Deploy Hotfix - SSH Timeout + Docker Retention Diagnostics (2026-03-28)
 - [x] Increase `appleboy/ssh-action` `command_timeout` to `45m` on the main auto/manual deploy steps.
 - [x] Keep healthcheck SSH steps on the shorter default timeout.

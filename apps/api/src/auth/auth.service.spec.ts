@@ -57,7 +57,8 @@ describe("AuthService", () => {
       getOauthStatePurpose: jest.fn().mockReturnValue("gitlab_oauth"),
       buildAuthorizationUrl: jest.fn(),
       disconnectUserConnection: jest.fn(),
-      exchangeAuthorizationCode: jest.fn()
+      exchangeAuthorizationCode: jest.fn(),
+      syncProjectRepositoryAccess: jest.fn()
     };
 
     return {

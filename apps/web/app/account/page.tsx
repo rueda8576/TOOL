@@ -107,11 +107,11 @@ export default function AccountPage(): JSX.Element {
   };
 
   return (
-    <AppShell title="Account" subtitle="Manage your connected services and external identity.">
+    <AppShell title="Account" subtitle="Manage your connected services and Atlasium-linked developer identity.">
       <section className="panel stack-md">
         <div className="stack-sm">
           <h2 className="section-heading">GitLab</h2>
-          <p>Connect your GitLab account here before using the project Code workspace.</p>
+          <p>Grant Atlasium API access to your Atlasium-managed GitLab account before using the project Code workspace.</p>
         </div>
 
         {loading ? <p className="alert alert-info">Loading account settings...</p> : null}
@@ -146,9 +146,9 @@ export default function AccountPage(): JSX.Element {
         {!loading && !connection?.connected ? (
           <div className="account-connection-card">
             <div className="stack-xs">
-              <p className="eyebrow">No GitLab account connected</p>
+              <p className="eyebrow">No GitLab API access connected</p>
               <h3 className="section-heading">Connect GitLab</h3>
-              <p>Atlasium will use your own GitLab identity for repository access, branch creation, and merge requests.</p>
+              <p>Atlasium will use your GitLab identity for managed repository browsing, branch creation, and merge requests.</p>
             </div>
             <div className="button-row">
               <button className="button" type="button" onClick={() => void onConnect()} disabled={connecting}>

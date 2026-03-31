@@ -228,6 +228,7 @@ export class AuthService {
     });
 
     const invitedRole = prismaRoleToApiRole(invite.globalRole);
+    let resultingRole = invitedRole;
 
     if (!user) {
       user = await this.prisma.user.create({
@@ -238,6 +239,7 @@ export class AuthService {
           globalRole: invite.globalRole
         }
       });
+      resultingRole = invitedRole;
 
       await this.prisma.notificationPreference.create({
         data: {
@@ -253,6 +255,7 @@ export class AuthService {
           globalRole: apiRoleToPrismaRole(mergedRole)
         }
       });
+      resultingRole = mergedRole;
     }
 
     const targetProjectAssignments = await this.resolveInviteProjectAssignments(invite);
@@ -317,6 +320,11 @@ export class AuthService {
         }))
       }
     });
+
+    const repositoryProjectIds = resultingRole === "admin"
+      ? await this.listRepositoryProjectIds()
+      : targetProjectIds;
+    await Promise.all(repositoryProjectIds.map((projectId) => this.gitlabService.syncProjectRepositoryAccess(projectId)));
 
     return { token, userId: user.id, projectId: invite.projectId, projectIds: targetProjectIds };
   }
@@ -634,5 +642,15 @@ export class AuthService {
     }
 
     return "GitLab connection failed";
+  }
+
+  private async listRepositoryProjectIds(): Promise<string[]> {
+    const repositories = await this.prisma.projectRepository.findMany({
+      select: {
+        projectId: true
+      }
+    });
+
+    return repositories.map((repository) => repository.projectId);
   }
 }

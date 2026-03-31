@@ -5,7 +5,7 @@ import * as collaborationRegistry from "../documents/collaboration-server-regist
 import { AdminUsersService } from "./admin-users.service";
 
 describe("AdminUsersService", () => {
-  const makeService = (): { service: AdminUsersService; prisma: any; auditService: any } => {
+  const makeService = (): { service: AdminUsersService; prisma: any; auditService: any; gitlabService: any } => {
     const prisma: any = {
       user: {
         findMany: jest.fn(),
@@ -27,6 +27,12 @@ describe("AdminUsersService", () => {
       userPinnedProject: {
         deleteMany: jest.fn()
       },
+      gitLabConnection: {
+        deleteMany: jest.fn()
+      },
+      projectRepository: {
+        findMany: jest.fn()
+      },
       $transaction: jest.fn()
     };
 
@@ -36,10 +42,15 @@ describe("AdminUsersService", () => {
       log: jest.fn()
     };
 
+    const gitlabService = {
+      syncProjectRepositoryAccess: jest.fn()
+    };
+
     return {
-      service: new AdminUsersService(prisma, auditService as any),
+      service: new AdminUsersService(prisma, auditService as any, gitlabService as any),
       prisma,
-      auditService
+      auditService,
+      gitlabService
     };
   };
 
@@ -117,7 +128,7 @@ describe("AdminUsersService", () => {
   });
 
   it("replaces project memberships for non-admin users with project roles and revokes realtime connections", async () => {
-    const { service, prisma, auditService } = makeService();
+    const { service, prisma, auditService, gitlabService } = makeService();
     const disconnectUser = jest.fn();
     jest.spyOn(collaborationRegistry, "getDocumentsCollaborationServer").mockReturnValue({
       disconnectUser
@@ -200,6 +211,8 @@ describe("AdminUsersService", () => {
       })
     );
     expect(disconnectUser).toHaveBeenCalledWith("user-2", "Permissions updated by an administrator");
+    expect(gitlabService.syncProjectRepositoryAccess).toHaveBeenCalledWith("project-1");
+    expect(gitlabService.syncProjectRepositoryAccess).toHaveBeenCalledWith("project-2");
     expect(result).toEqual({
       id: "user-2",
       name: "Editor",
@@ -267,7 +280,7 @@ describe("AdminUsersService", () => {
   });
 
   it("soft deletes a user, removes access artifacts, and disconnects realtime", async () => {
-    const { service, prisma, auditService } = makeService();
+    const { service, prisma, auditService, gitlabService } = makeService();
     const disconnectUser = jest.fn();
     jest.spyOn(collaborationRegistry, "getDocumentsCollaborationServer").mockReturnValue({
       disconnectUser
@@ -275,10 +288,12 @@ describe("AdminUsersService", () => {
 
     prisma.user.findFirst.mockResolvedValueOnce({
       id: "user-3",
-      globalRole: GlobalRole.READER
+      globalRole: GlobalRole.READER,
+      projectMemberships: [{ projectId: "project-1" }]
     });
     prisma.user.update.mockResolvedValue({
       id: "user-3",
+      globalRole: GlobalRole.READER,
       deletedAt: new Date("2026-03-30T12:00:00.000Z")
     });
 
@@ -291,6 +306,7 @@ describe("AdminUsersService", () => {
     expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-3" } });
     expect(prisma.projectMember.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-3" } });
     expect(prisma.userPinnedProject.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-3" } });
+    expect(prisma.gitLabConnection.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-3" } });
     expect(auditService.log).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "user.delete",
@@ -298,6 +314,7 @@ describe("AdminUsersService", () => {
       })
     );
     expect(disconnectUser).toHaveBeenCalledWith("user-3", "Account removed by an administrator");
+    expect(gitlabService.syncProjectRepositoryAccess).toHaveBeenCalledWith("project-1");
     expect(result).toEqual({
       id: "user-3",
       deletedAt: "2026-03-30T12:00:00.000Z"

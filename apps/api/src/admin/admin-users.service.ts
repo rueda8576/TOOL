@@ -5,6 +5,7 @@ import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { apiRoleToPrismaRole, prismaRoleToApiRole } from "../common/role-map";
 import { getDocumentsCollaborationServer } from "../documents/collaboration-server-registry";
+import { GitlabService } from "../gitlab/gitlab.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { UpdateAdminUserDto, UpdateAdminUserProjectAccessDto } from "./dto/update-admin-user.dto";
 
@@ -58,7 +59,8 @@ export type AdminUserSummary = {
 export class AdminUsersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly auditService: AuditService
+    private readonly auditService: AuditService,
+    private readonly gitlabService: GitlabService
   ) {}
 
   async listUsers(user: AuthenticatedUser): Promise<AdminUserSummary[]> {
@@ -82,7 +84,7 @@ export class AdminUsersService {
     const nextRole = apiRoleToPrismaRole(dto.globalRole);
     const normalizedProjectAccess = this.normalizeProjectAccess(dto.projectAccess);
 
-    const updatedUser = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const { updatedUser, previousProjectIds, previousRole } = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const targetUser = await tx.user.findFirst({
         where: {
           id: userId,
@@ -95,6 +97,8 @@ export class AdminUsersService {
       if (!targetUser) {
         throw new NotFoundException("User not found");
       }
+
+      const previousProjectIds = targetUser.projectMemberships.map((membership) => membership.project.id);
 
       if (targetUser.globalRole === GlobalRole.ADMIN && nextRole !== GlobalRole.ADMIN) {
         await this.ensureAdminWillRemain(tx, targetUser.id);
@@ -153,7 +157,11 @@ export class AdminUsersService {
         throw new NotFoundException("User not found");
       }
 
-      return refreshedUser;
+      return {
+        updatedUser: refreshedUser,
+        previousProjectIds,
+        previousRole: targetUser.globalRole
+      };
     });
 
     await this.auditService.log({
@@ -174,6 +182,12 @@ export class AdminUsersService {
     });
 
     this.disconnectUser(userId, "Permissions updated by an administrator");
+    await this.syncAffectedRepositories(
+      previousRole,
+      updatedUser.globalRole,
+      previousProjectIds,
+      normalizedProjectAccess.map((entry) => entry.projectId)
+    );
 
     return this.mapUserSummary(updatedUser);
   }
@@ -185,7 +199,7 @@ export class AdminUsersService {
       throw new ForbiddenException("Admins cannot delete their own account");
     }
 
-    const deletedUser = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const { deletedUser, previousProjectIds } = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const targetUser = await tx.user.findFirst({
         where: {
           id: userId,
@@ -194,7 +208,12 @@ export class AdminUsersService {
         },
         select: {
           id: true,
-          globalRole: true
+          globalRole: true,
+          projectMemberships: {
+            select: {
+              projectId: true
+            }
+          }
         }
       });
 
@@ -221,8 +240,13 @@ export class AdminUsersService {
           userId: targetUser.id
         }
       });
+      await tx.gitLabConnection.deleteMany({
+        where: {
+          userId: targetUser.id
+        }
+      });
 
-      return tx.user.update({
+      const deletedUser = await tx.user.update({
         where: {
           id: targetUser.id
         },
@@ -232,9 +256,15 @@ export class AdminUsersService {
         },
         select: {
           id: true,
-          deletedAt: true
+          deletedAt: true,
+          globalRole: true
         }
       });
+
+      return {
+        deletedUser,
+        previousProjectIds: targetUser.projectMemberships.map((membership) => membership.projectId)
+      };
     });
 
     await this.auditService.log({
@@ -245,6 +275,12 @@ export class AdminUsersService {
     });
 
     this.disconnectUser(userId, "Account removed by an administrator");
+    await this.syncAffectedRepositories(
+      deletedUser.globalRole,
+      deletedUser.globalRole,
+      previousProjectIds,
+      []
+    );
 
     if (!deletedUser.deletedAt) {
       throw new Error("User soft delete did not persist deletedAt");
@@ -337,6 +373,32 @@ export class AdminUsersService {
   private disconnectUser(userId: string, reason: string): void {
     const collaborationServer = getDocumentsCollaborationServer();
     collaborationServer?.disconnectUser(userId, reason);
+  }
+
+  private async syncAffectedRepositories(
+    previousRole: GlobalRole,
+    nextRole: GlobalRole,
+    previousProjectIds: string[],
+    nextProjectIds: string[]
+  ): Promise<void> {
+    const affectedProjectIds = new Set([...previousProjectIds, ...nextProjectIds]);
+
+    if (previousRole === GlobalRole.ADMIN || nextRole === GlobalRole.ADMIN) {
+      const allProjectIds = await this.listRepositoryProjectIds();
+      allProjectIds.forEach((projectId) => affectedProjectIds.add(projectId));
+    }
+
+    await Promise.all(Array.from(affectedProjectIds).map((projectId) => this.gitlabService.syncProjectRepositoryAccess(projectId)));
+  }
+
+  private async listRepositoryProjectIds(): Promise<string[]> {
+    const repositories = await this.prisma.projectRepository.findMany({
+      select: {
+        projectId: true
+      }
+    });
+
+    return repositories.map((repository) => repository.projectId);
   }
 
   private mapUserSummary(user: UserSummaryRecord): AdminUserSummary {

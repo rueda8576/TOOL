@@ -131,6 +131,7 @@ model User {
   notificationEvents     NotificationEvent[]    @relation("NotificationRecipient")
   uploadedFiles          FileObject[]           @relation("FileUploader")
   auditLogs              AuditLog[]
+  oidcAuthorizationCodes OidcAuthorizationCode[]
 }
 
 model Session {
@@ -143,6 +144,25 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+model OidcAuthorizationCode {
+  id                 String   @id @default(cuid())
+  codeHash           String   @unique
+  clientId           String
+  userId             String
+  redirectUri        String
+  scope              String
+  nonce              String?
+  codeChallenge      String?
+  codeChallengeMethod String?
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  createdAt          DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
 }
 
 model Invite {

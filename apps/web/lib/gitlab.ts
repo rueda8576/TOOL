@@ -10,17 +10,6 @@ export type GitlabConnectionStatus = {
   webUrl?: string | null;
 };
 
-export type GitlabSearchProject = {
-  gitlabProjectId: string;
-  name: string;
-  description: string | null;
-  pathWithNamespace: string;
-  webUrl: string;
-  defaultBranch: string | null;
-  visibility: string;
-  lastActivityAt: string;
-};
-
 export type ProjectRepositoryStatus =
   | { connected: false }
   | {
@@ -35,6 +24,7 @@ export type ProjectRepositoryStatus =
       lastActivityAt: string;
       connectedAt: string;
       connectedByUserId: string;
+      managed: true;
     };
 
 export type RepositoryBranch = {
@@ -106,52 +96,20 @@ export async function disconnectGitlabConnection(token: string): Promise<{ disco
   });
 }
 
-export async function searchGitlabProjects(token: string, query: string): Promise<GitlabSearchProject[]> {
-  const search = new URLSearchParams();
-  if (query.trim()) {
-    search.set("q", query.trim());
-  }
-  const suffix = search.toString().length > 0 ? `?${search.toString()}` : "";
-  return authFetch<GitlabSearchProject[]>(`/gitlab/projects/search${suffix}`, { token });
-}
-
 export async function getProjectRepositoryStatus(projectId: string, token: string): Promise<ProjectRepositoryStatus> {
   return authFetch<ProjectRepositoryStatus>(`/projects/${projectId}/repository`, { token });
-}
-
-export async function linkProjectRepository(
-  projectId: string,
-  token: string,
-  payload: { gitlabProjectId: string }
-): Promise<ProjectRepositoryStatus> {
-  return authFetch<ProjectRepositoryStatus>(`/projects/${projectId}/repository/link`, {
-    token,
-    init: {
-      method: "POST",
-      body: JSON.stringify(payload)
-    }
-  });
 }
 
 export async function createProjectRepository(
   projectId: string,
   token: string,
-  payload: { name?: string; path?: string }
+  payload: { name?: string; path?: string } = {}
 ): Promise<ProjectRepositoryStatus> {
   return authFetch<ProjectRepositoryStatus>(`/projects/${projectId}/repository/create`, {
     token,
     init: {
       method: "POST",
       body: JSON.stringify(payload)
-    }
-  });
-}
-
-export async function disconnectProjectRepository(projectId: string, token: string): Promise<{ disconnected: true }> {
-  return authFetch<{ disconnected: true }>(`/projects/${projectId}/repository`, {
-    token,
-    init: {
-      method: "DELETE"
     }
   });
 }

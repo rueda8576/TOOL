@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
@@ -10,22 +10,18 @@ import {
   createProjectRepository,
   createRepositoryBranch,
   createRepositoryMergeRequest,
-  disconnectProjectRepository,
   getGitlabConnectionStatus,
   getProjectRepositoryStatus,
   getRepositoryFile,
   getRepositoryTree,
   GitlabConnectionStatus,
-  GitlabSearchProject,
-  linkProjectRepository,
   listRepositoryBranches,
   listRepositoryCommits,
   ProjectRepositoryStatus,
   RepositoryBranch,
   RepositoryCommit,
   RepositoryFile,
-  RepositoryTree,
-  searchGitlabProjects
+  RepositoryTree
 } from "../../../../lib/gitlab";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 
@@ -52,10 +48,6 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [selectedFile, setSelectedFile] = useState<RepositoryFile | null>(null);
   const [browserRef, setBrowserRef] = useState<string>("");
   const [browserPath, setBrowserPath] = useState<string>("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<GitlabSearchProject[]>([]);
-  const [createRepoName, setCreateRepoName] = useState("");
-  const [createRepoPath, setCreateRepoPath] = useState("");
   const [newBranchName, setNewBranchName] = useState("");
   const [newBranchSourceRef, setNewBranchSourceRef] = useState("");
   const [mergeRequestSourceBranch, setMergeRequestSourceBranch] = useState("");
@@ -63,10 +55,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [mergeRequestTitle, setMergeRequestTitle] = useState("");
   const [mergeRequestDescription, setMergeRequestDescription] = useState("");
   const [loading, setLoading] = useState(true);
-  const [searching, setSearching] = useState(false);
-  const [linkingProjectId, setLinkingProjectId] = useState<string | null>(null);
   const [creatingRepository, setCreatingRepository] = useState(false);
-  const [disconnectingRepository, setDisconnectingRepository] = useState(false);
   const [creatingBranch, setCreatingBranch] = useState(false);
   const [creatingMergeRequest, setCreatingMergeRequest] = useState(false);
   const [contentLoading, setContentLoading] = useState(false);
@@ -173,49 +162,6 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     void loadRepositoryContent(token, repository as Extract<ProjectRepositoryStatus, { connected: true }>);
   }, [browserPath, browserRef, gitlabConnected, loadRepositoryContent, repository, repositoryConnected, token]);
 
-  const onSearchProjects = async (): Promise<void> => {
-    if (!token) {
-      setError("Missing session token. Please sign in again.");
-      return;
-    }
-
-    setSearching(true);
-    setError(null);
-    try {
-      const results = await searchGitlabProjects(token, searchQuery);
-      setSearchResults(results);
-    } catch (searchError) {
-      setError((searchError as Error).message || "Unable to search GitLab projects.");
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const onLinkRepository = async (gitlabProjectId: string): Promise<void> => {
-    if (!token) {
-      setError("Missing session token. Please sign in again.");
-      return;
-    }
-
-    setLinkingProjectId(gitlabProjectId);
-    setError(null);
-    setSuccess(null);
-    try {
-      const nextRepository = await linkProjectRepository(params.projectId, token, { gitlabProjectId });
-      setRepository(nextRepository);
-      setBrowserPath("");
-      setBrowserRef(nextRepository.connected ? nextRepository.defaultBranch : "");
-      if (nextRepository.connected) {
-        await loadRepositoryContent(token, nextRepository);
-      }
-      setSuccess("GitLab repository connected.");
-    } catch (linkError) {
-      setError((linkError as Error).message || "Unable to connect the repository.");
-    } finally {
-      setLinkingProjectId(null);
-    }
-  };
-
   const onCreateRepository = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     if (!token) {
@@ -227,53 +173,18 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     setError(null);
     setSuccess(null);
     try {
-      const nextRepository = await createProjectRepository(params.projectId, token, {
-        name: createRepoName.trim() || undefined,
-        path: createRepoPath.trim() || undefined
-      });
+      const nextRepository = await createProjectRepository(params.projectId, token);
       setRepository(nextRepository);
-      setCreateRepoName("");
-      setCreateRepoPath("");
       setBrowserPath("");
       setBrowserRef(nextRepository.connected ? nextRepository.defaultBranch : "");
       if (nextRepository.connected) {
         await loadRepositoryContent(token, nextRepository);
       }
-      setSuccess("GitLab repository created and connected.");
+      setSuccess("Managed repository provisioned.");
     } catch (createError) {
-      setError((createError as Error).message || "Unable to create the repository.");
+      setError((createError as Error).message || "Unable to provision the repository.");
     } finally {
       setCreatingRepository(false);
-    }
-  };
-
-  const onDisconnectRepository = async (): Promise<void> => {
-    if (!token) {
-      setError("Missing session token. Please sign in again.");
-      return;
-    }
-
-    if (!window.confirm("Disconnect the GitLab repository from this project?")) {
-      return;
-    }
-
-    setDisconnectingRepository(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      await disconnectProjectRepository(params.projectId, token);
-      setRepository({ connected: false });
-      setBranches([]);
-      setCommits([]);
-      setTree(null);
-      setSelectedFile(null);
-      setBrowserPath("");
-      setBrowserRef("");
-      setSuccess("GitLab repository disconnected.");
-    } catch (disconnectError) {
-      setError((disconnectError as Error).message || "Unable to disconnect the repository.");
-    } finally {
-      setDisconnectingRepository(false);
     }
   };
 
@@ -366,10 +277,10 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
 
   const connectStateMessage = useMemo(() => {
     if (!connection?.connected) {
-      return "Connect your GitLab account from Account before using Code.";
+      return "Connect your Atlasium-managed GitLab account from Account before browsing code, creating branches, or opening merge requests.";
     }
     if (connection.reconnectRequired) {
-      return "Your GitLab session must be reconnected before Atlasium can access repositories.";
+      return "Your GitLab API session must be reconnected before Atlasium can access the managed repository.";
     }
     return null;
   }, [connection]);
@@ -397,91 +308,26 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
         {!loading && !repositoryConnected ? (
           <section className="panel stack-lg">
             <div className="stack-sm">
-              <h2 className="section-heading">No GitLab repository connected</h2>
+              <h2 className="section-heading">Managed repository not provisioned yet</h2>
               <p>
                 {isAdmin
-                  ? "Connect an existing GitLab project or create a new empty repository for this Atlasium project."
-                  : "An administrator has not connected a GitLab repository for this project yet."}
+                  ? "Atlasium provisions one managed GitLab repository per project. Provision it here if the automatic setup did not complete."
+                  : "An administrator has not provisioned the managed GitLab repository for this project yet."}
               </p>
             </div>
 
-            {isAdmin && !gitlabConnected ? (
-              <div className="panel panel-subtle stack-sm">
-                <p>You need a connected GitLab account before Atlasium can search or create repositories for this project.</p>
-                <div className="button-row">
-                  <Link className="button" href="/account">
-                    Open Account
-                  </Link>
+            {isAdmin ? (
+              <section className="panel panel-subtle stack-md">
+                <div className="stack-xs">
+                  <h3 className="section-heading">Provision managed repository</h3>
+                  <p>This will create the GitLab repository inside the Atlasium-managed group and register it with this project.</p>
                 </div>
-              </div>
-            ) : null}
-
-            {isAdmin && gitlabConnected ? (
-              <div className="code-setup-grid">
-                <section className="panel panel-subtle stack-md">
-                  <div className="stack-xs">
-                    <h3 className="section-heading">Connect existing repository</h3>
-                    <p>Search the GitLab projects visible to your connected account.</p>
-                  </div>
-                  <div className="toolbar-row">
-                    <input
-                      className="input"
-                      type="search"
-                      value={searchQuery}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)}
-                      placeholder="Search GitLab projects"
-                    />
-                    <button className="button button-secondary" type="button" onClick={() => void onSearchProjects()} disabled={searching}>
-                      {searching ? "Searching..." : "Search"}
-                    </button>
-                  </div>
-                  <div className="code-results-list">
-                    {searchResults.length === 0 ? <p className="text-muted">No search results loaded yet.</p> : null}
-                    {searchResults.map((project) => (
-                      <article key={project.gitlabProjectId} className="code-result-card">
-                        <div className="stack-xs">
-                          <p className="eyebrow">{project.pathWithNamespace}</p>
-                          <h4 className="section-heading">{project.name}</h4>
-                          {project.description ? <p>{project.description}</p> : <p className="text-muted">No description</p>}
-                        </div>
-                        <div className="button-row">
-                          <a className="button button-secondary" href={project.webUrl} target="_blank" rel="noreferrer">
-                            Open in GitLab
-                          </a>
-                          <button
-                            className="button"
-                            type="button"
-                            onClick={() => void onLinkRepository(project.gitlabProjectId)}
-                            disabled={linkingProjectId === project.gitlabProjectId}
-                          >
-                            {linkingProjectId === project.gitlabProjectId ? "Connecting..." : "Connect"}
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-
-                <section className="panel panel-subtle stack-md">
-                  <div className="stack-xs">
-                    <h3 className="section-heading">Create repository</h3>
-                    <p>Create a new empty GitLab repository in the configured namespace.</p>
-                  </div>
-                  <form className="form-grid" onSubmit={(event) => void onCreateRepository(event)}>
-                    <label>
-                      Repository name
-                      <input className="input" value={createRepoName} onChange={(event) => setCreateRepoName(event.target.value)} />
-                    </label>
-                    <label>
-                      Repository path
-                      <input className="input" value={createRepoPath} onChange={(event) => setCreateRepoPath(event.target.value)} />
-                    </label>
-                    <button className="button" type="submit" disabled={creatingRepository}>
-                      {creatingRepository ? "Creating..." : "Create repository"}
-                    </button>
-                  </form>
-                </section>
-              </div>
+                <form className="form-grid" onSubmit={(event) => void onCreateRepository(event)}>
+                  <button className="button" type="submit" disabled={creatingRepository}>
+                    {creatingRepository ? "Provisioning..." : "Provision repository"}
+                  </button>
+                </form>
+              </section>
             ) : null}
           </section>
         ) : null}
@@ -496,15 +342,11 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
               </div>
               <div className="button-row">
                 <span className="badge">{repository.visibility}</span>
+                {repository.managed ? <span className="badge">Managed</span> : null}
                 <span className="badge">Default: {repository.defaultBranch}</span>
                 <a className="button button-secondary" href={repository.webUrl} target="_blank" rel="noreferrer">
                   Open in GitLab
                 </a>
-                {isAdmin ? (
-                  <button className="button button-danger" type="button" onClick={() => void onDisconnectRepository()} disabled={disconnectingRepository}>
-                    {disconnectingRepository ? "Disconnecting..." : "Disconnect repo"}
-                  </button>
-                ) : null}
               </div>
             </section>
 
