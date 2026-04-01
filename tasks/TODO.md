@@ -1,5 +1,20 @@
 # Implementation TODO (v1 bootstrap)
 
+## Code vNext - Clone/Download + Merge Requests (2026-04-01)
+- [x] Extend GitLab repository status/API types with `httpCloneUrl`.
+- [x] Add backend repository endpoints for merge request listing and ZIP archive download.
+- [x] Add backend tests for merge request listing, archive download, and repository status clone URL mapping.
+- [x] Add frontend GitLab helpers for merge request listing and archive download.
+- [x] Rework `/projects/:projectId/code` to show `Clone & Download` actions and merge request list with filters.
+- [x] Update Code page styles for clone/download and merge request sections.
+- [x] Validate with `pnpm --filter @doctoral/api test -- --runInBand --forceExit`, `pnpm --filter @doctoral/api build`, `pnpm --filter @doctoral/web build`.
+
+### Review - Code vNext - Clone/Download + Merge Requests
+- Added authenticated backend proxy routes for repository archive ZIP downloads and merge request listing so Atlasium does not depend on a separate GitLab browser session.
+- Extended repository status with `httpCloneUrl` and surfaced it in a new `Clone & Download` block in the Code overview.
+- Added merge request state filtering (`opened`, `merged`, `closed`, `all`) and lightweight MR cards in the Code tab while preserving existing branch/MR creation flows.
+- Verified with API tests, API build, and web production build.
+
 ## Sprint 0 - Foundation
 - [x] Initialize git repository and monorepo structure.
 - [x] Add root workspace config (`pnpm`, TS base, env example).

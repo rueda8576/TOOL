@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query, Res, UseGuards } from "@nestjs/common";
+import { Response } from "express";
 
 import { CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
@@ -8,9 +9,11 @@ import { AuthenticatedUser } from "../common/authenticated-user";
 import { CreateProjectRepositoryDto } from "./dto/create-project-repository.dto";
 import { CreateRepositoryBranchDto } from "./dto/create-repository-branch.dto";
 import { CreateRepositoryMergeRequestDto } from "./dto/create-repository-merge-request.dto";
+import { GetRepositoryArchiveQueryDto } from "./dto/get-repository-archive-query.dto";
 import { GetRepositoryFileQueryDto } from "./dto/get-repository-file-query.dto";
 import { LinkProjectRepositoryDto } from "./dto/link-project-repository.dto";
 import { ListRepositoryCommitsQueryDto } from "./dto/list-repository-commits-query.dto";
+import { ListRepositoryMergeRequestsQueryDto } from "./dto/list-repository-merge-requests-query.dto";
 import { ListRepositoryTreeQueryDto } from "./dto/list-repository-tree-query.dto";
 import { SearchGitlabProjectsQueryDto } from "./dto/search-gitlab-projects-query.dto";
 import { GitlabService } from "./gitlab.service";
@@ -90,6 +93,28 @@ export class GitlabController {
     @CurrentUser() user: AuthenticatedUser
   ) {
     return this.gitlabService.getRepositoryFile(projectId, query.filePath, query.ref, user);
+  }
+
+  @Get("projects/:projectId/repository/merge-requests")
+  listMergeRequests(
+    @Param("projectId") projectId: string,
+    @Query() query: ListRepositoryMergeRequestsQueryDto,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    return this.gitlabService.listMergeRequests(projectId, query.state, user);
+  }
+
+  @Get("projects/:projectId/repository/archive")
+  async getRepositoryArchive(
+    @Param("projectId") projectId: string,
+    @Query() query: GetRepositoryArchiveQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response
+  ): Promise<void> {
+    const archive = await this.gitlabService.getRepositoryArchive(projectId, query.ref, user);
+    res.setHeader("Content-Type", archive.contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${archive.fileName}"`);
+    res.send(archive.buffer);
   }
 
   @Post("projects/:projectId/repository/branches")

@@ -6,13 +6,34 @@ type FetchResponse = {
   ok: boolean;
   status: number;
   text: () => Promise<string>;
+  arrayBuffer: () => Promise<ArrayBuffer>;
+  headers: {
+    get: (name: string) => string | null;
+  };
 };
 
-function jsonResponse(status: number, body?: unknown): FetchResponse {
+function jsonResponse(status: number, body?: unknown, headers?: Record<string, string>): FetchResponse {
+  const textBody = body === undefined ? "" : JSON.stringify(body);
   return {
     ok: status >= 200 && status < 300,
     status,
-    text: async () => (body === undefined ? "" : JSON.stringify(body))
+    text: async () => textBody,
+    arrayBuffer: async () => new TextEncoder().encode(textBody).buffer,
+    headers: {
+      get: (name: string) => headers?.[name.toLowerCase()] ?? headers?.[name] ?? null
+    }
+  };
+}
+
+function binaryResponse(status: number, body: Uint8Array, headers?: Record<string, string>): FetchResponse {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    text: async () => new TextDecoder().decode(body),
+    arrayBuffer: async () => Uint8Array.from(body).buffer,
+    headers: {
+      get: (name: string) => headers?.[name.toLowerCase()] ?? headers?.[name] ?? null
+    }
   };
 }
 
@@ -38,7 +59,11 @@ describe("GitlabService", () => {
 
   const makeService = (): GitlabService => {
     const prisma: any = {};
-    const accessService: any = {};
+    const accessService: any = {
+      ensureProjectReadable: jest.fn().mockResolvedValue(undefined),
+      ensureProjectWritable: jest.fn().mockResolvedValue(undefined),
+      getProjectAccess: jest.fn().mockResolvedValue(undefined)
+    };
     const auditService: any = {
       log: jest.fn().mockResolvedValue(undefined)
     };
@@ -148,6 +173,148 @@ describe("GitlabService", () => {
       expect.objectContaining({
         constructor: ServiceUnavailableException,
         message: "Atlasium GitLab system token is not authorized"
+      })
+    );
+  });
+
+  it("includes the HTTPS clone URL in repository status", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(200, {
+        id: 123,
+        name: "Navigation",
+        description: "Managed repo",
+        web_url: "https://git.atlasium.info/atlasium/nav",
+        http_url_to_repo: "https://git.atlasium.info/atlasium/nav.git",
+        path_with_namespace: "atlasium/nav",
+        default_branch: "main",
+        visibility: "private",
+        last_activity_at: "2026-04-01T10:00:00.000Z"
+      }) as Response
+    );
+
+    await expect(
+      service.getRepositoryStatus("project-1", {
+        userId: "reader-1",
+        globalRole: "reader"
+      } as any)
+    ).resolves.toEqual(
+      expect.objectContaining({
+        connected: true,
+        httpCloneUrl: "https://git.atlasium.info/atlasium/nav.git"
+      })
+    );
+  });
+
+  it("lists merge requests for the requested state and maps draft and author details", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(200, [
+        {
+          id: 81,
+          iid: 7,
+          title: "Draft: Sync notes",
+          state: "opened",
+          web_url: "https://git.atlasium.info/atlasium/nav/-/merge_requests/7",
+          source_branch: "feature/notes",
+          target_branch: "main",
+          updated_at: "2026-04-01T12:00:00.000Z",
+          draft: true,
+          author: {
+            id: 4,
+            username: "luis",
+            name: "Luis",
+            avatar_url: "https://git.atlasium.info/uploads/-/system/user/avatar.png"
+          }
+        }
+      ]) as Response
+    );
+
+    await expect(
+      service.listMergeRequests(
+        "project-1",
+        "merged",
+        {
+          userId: "reader-1",
+          globalRole: "reader"
+        } as any
+      )
+    ).resolves.toEqual([
+      {
+        id: 81,
+        iid: 7,
+        title: "Draft: Sync notes",
+        state: "opened",
+        webUrl: "https://git.atlasium.info/atlasium/nav/-/merge_requests/7",
+        sourceBranch: "feature/notes",
+        targetBranch: "main",
+        updatedAt: "2026-04-01T12:00:00.000Z",
+        draft: true,
+        author: {
+          name: "Luis",
+          username: "luis",
+          avatarUrl: "https://git.atlasium.info/uploads/-/system/user/avatar.png"
+        }
+      }
+    ]);
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://git.atlasium.info/api/v4/projects/123/merge_requests?state=merged&per_page=20&order_by=updated_at&sort=desc",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer user-token"
+        })
+      })
+    );
+  });
+
+  it("downloads the repository archive for the requested ref", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      binaryResponse(200, new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+        "content-type": "application/zip"
+      }) as Response
+    );
+
+    await expect(
+      service.getRepositoryArchive(
+        "project-1",
+        "feature/export",
+        {
+          userId: "reader-1",
+          globalRole: "reader"
+        } as any
+      )
+    ).resolves.toEqual({
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+      fileName: "atlasium-nav-feature-export.zip",
+      contentType: "application/zip"
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://git.atlasium.info/api/v4/projects/123/repository/archive.zip?sha=feature%2Fexport",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer user-token"
+        })
       })
     );
   });

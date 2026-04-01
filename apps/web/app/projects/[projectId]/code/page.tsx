@@ -10,6 +10,7 @@ import {
   createProjectRepository,
   createRepositoryBranch,
   createRepositoryMergeRequest,
+  downloadRepositoryArchive,
   getGitlabConnectionStatus,
   getProjectRepositoryStatus,
   getRepositoryFile,
@@ -17,10 +18,13 @@ import {
   GitlabConnectionStatus,
   listRepositoryBranches,
   listRepositoryCommits,
+  listRepositoryMergeRequests,
   ProjectRepositoryStatus,
   RepositoryBranch,
   RepositoryCommit,
   RepositoryFile,
+  RepositoryMergeRequest,
+  RepositoryMergeRequestState,
   RepositoryTree
 } from "../../../../lib/gitlab";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
@@ -46,8 +50,10 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [commits, setCommits] = useState<RepositoryCommit[]>([]);
   const [tree, setTree] = useState<RepositoryTree | null>(null);
   const [selectedFile, setSelectedFile] = useState<RepositoryFile | null>(null);
-  const [browserRef, setBrowserRef] = useState<string>("");
-  const [browserPath, setBrowserPath] = useState<string>("");
+  const [mergeRequests, setMergeRequests] = useState<RepositoryMergeRequest[]>([]);
+  const [browserRef, setBrowserRef] = useState("");
+  const [browserPath, setBrowserPath] = useState("");
+  const [mergeRequestFilter, setMergeRequestFilter] = useState<RepositoryMergeRequestState>("opened");
   const [newBranchName, setNewBranchName] = useState("");
   const [newBranchSourceRef, setNewBranchSourceRef] = useState("");
   const [mergeRequestSourceBranch, setMergeRequestSourceBranch] = useState("");
@@ -59,20 +65,47 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [creatingBranch, setCreatingBranch] = useState(false);
   const [creatingMergeRequest, setCreatingMergeRequest] = useState(false);
   const [contentLoading, setContentLoading] = useState(false);
+  const [mergeRequestsLoading, setMergeRequestsLoading] = useState(false);
+  const [downloadingArchive, setDownloadingArchive] = useState(false);
+  const [cloneCopied, setCloneCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contentError, setContentError] = useState<string | null>(null);
+  const [mergeRequestsError, setMergeRequestsError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   const canWrite = access?.canWrite ?? false;
   const isAdmin = access?.isAdmin ?? false;
   const repositoryConnected = repository?.connected === true;
   const gitlabConnected = connection?.connected === true && !connection.reconnectRequired;
+  const connectedRepository = repositoryConnected ? repository : null;
+  const currentBrowseRef = connectedRepository ? browserRef || connectedRepository.defaultBranch : "";
+  const currentBranchSourceRef = newBranchSourceRef || currentBrowseRef;
+  const currentMergeRequestTargetBranch = connectedRepository
+    ? mergeRequestTargetBranch || connectedRepository.defaultBranch
+    : "";
+  const currentMergeRequestSourceBranch =
+    mergeRequestSourceBranch || branches.find((branch) => !branch.default)?.name || currentBrowseRef;
 
-  const loadAccess = useCallback(async (authToken: string): Promise<ProjectAccess> => {
-    const nextAccess = await getProjectAccess(params.projectId, authToken);
-    setAccess(nextAccess);
-    return nextAccess;
-  }, [params.projectId]);
+  const resetRepositoryWorkspace = useCallback((): void => {
+    setBranches([]);
+    setCommits([]);
+    setTree(null);
+    setSelectedFile(null);
+    setMergeRequests([]);
+    setBrowserRef("");
+    setBrowserPath("");
+    setContentError(null);
+    setMergeRequestsError(null);
+  }, []);
+
+  const loadAccess = useCallback(
+    async (authToken: string): Promise<ProjectAccess> => {
+      const nextAccess = await getProjectAccess(params.projectId, authToken);
+      setAccess(nextAccess);
+      return nextAccess;
+    },
+    [params.projectId]
+  );
 
   const loadConnection = useCallback(async (authToken: string): Promise<GitlabConnectionStatus> => {
     const nextConnection = await getGitlabConnectionStatus(authToken);
@@ -80,55 +113,59 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     return nextConnection;
   }, []);
 
-  const loadRepository = useCallback(async (authToken: string): Promise<ProjectRepositoryStatus> => {
-    const nextRepository = await getProjectRepositoryStatus(params.projectId, authToken);
-    setRepository(nextRepository);
-    return nextRepository;
-  }, [params.projectId]);
+  const loadRepository = useCallback(
+    async (authToken: string): Promise<ProjectRepositoryStatus> => {
+      const nextRepository = await getProjectRepositoryStatus(params.projectId, authToken);
+      setRepository(nextRepository);
+      return nextRepository;
+    },
+    [params.projectId]
+  );
 
-  const loadRepositoryContent = useCallback(async (authToken: string, nextRepository: ProjectRepositoryStatus): Promise<void> => {
-    if (!nextRepository.connected) {
-      setBranches([]);
-      setCommits([]);
-      setTree(null);
-      setSelectedFile(null);
-      setBrowserRef("");
-      setBrowserPath("");
-      return;
-    }
+  const loadRepositoryContent = useCallback(
+    async (
+      authToken: string,
+      nextRepository: Extract<ProjectRepositoryStatus, { connected: true }>,
+      paramsOverride: { ref?: string; path?: string } = {}
+    ): Promise<void> => {
+      setContentLoading(true);
+      try {
+        const resolvedRef = paramsOverride.ref?.trim() || nextRepository.defaultBranch;
+        const resolvedPath = paramsOverride.path?.trim() || "";
+        const [nextBranches, nextCommits, nextTree] = await Promise.all([
+          listRepositoryBranches(params.projectId, authToken),
+          listRepositoryCommits(params.projectId, authToken, { ref: resolvedRef }),
+          getRepositoryTree(params.projectId, authToken, { ref: resolvedRef, path: resolvedPath })
+        ]);
 
-    setContentLoading(true);
-    try {
-      const resolvedRef = browserRef || nextRepository.defaultBranch;
-      const [nextBranches, nextCommits, nextTree] = await Promise.all([
-        listRepositoryBranches(params.projectId, authToken),
-        listRepositoryCommits(params.projectId, authToken, { ref: resolvedRef }),
-        getRepositoryTree(params.projectId, authToken, { ref: resolvedRef, path: browserPath })
-      ]);
-      setBranches(nextBranches);
-      setCommits(nextCommits);
-      setTree(nextTree);
-      setContentError(null);
+        setBranches(nextBranches);
+        setCommits(nextCommits);
+        setTree(nextTree);
+        setContentError(null);
+      } catch (loadError) {
+        setContentError((loadError as Error).message || "Unable to load repository content.");
+      } finally {
+        setContentLoading(false);
+      }
+    },
+    [params.projectId]
+  );
 
-      if (!browserRef) {
-        setBrowserRef(resolvedRef);
+  const loadMergeRequests = useCallback(
+    async (authToken: string, state: RepositoryMergeRequestState): Promise<void> => {
+      setMergeRequestsLoading(true);
+      try {
+        const nextMergeRequests = await listRepositoryMergeRequests(params.projectId, authToken, { state });
+        setMergeRequests(nextMergeRequests);
+        setMergeRequestsError(null);
+      } catch (loadError) {
+        setMergeRequestsError((loadError as Error).message || "Unable to load merge requests.");
+      } finally {
+        setMergeRequestsLoading(false);
       }
-      if (!newBranchSourceRef) {
-        setNewBranchSourceRef(resolvedRef);
-      }
-      if (!mergeRequestTargetBranch) {
-        setMergeRequestTargetBranch(nextRepository.defaultBranch);
-      }
-      const candidateSourceBranch = nextBranches.find((branch) => !branch.default)?.name ?? resolvedRef;
-      if (!mergeRequestSourceBranch) {
-        setMergeRequestSourceBranch(candidateSourceBranch);
-      }
-    } catch (loadError) {
-      setContentError((loadError as Error).message || "Unable to load repository content.");
-    } finally {
-      setContentLoading(false);
-    }
-  }, [browserPath, browserRef, mergeRequestSourceBranch, mergeRequestTargetBranch, newBranchSourceRef, params.projectId]);
+    },
+    [params.projectId]
+  );
 
   useEffect(() => {
     const storedToken = localStorage.getItem("doctoral_token");
@@ -140,11 +177,8 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     setToken(storedToken);
     setLoading(true);
     Promise.all([loadAccess(storedToken), loadConnection(storedToken), loadRepository(storedToken)])
-      .then(async ([, nextConnection, nextRepository]) => {
+      .then(() => {
         setError(null);
-        if (nextRepository.connected && nextConnection.connected && !nextConnection.reconnectRequired) {
-          await loadRepositoryContent(storedToken, nextRepository);
-        }
       })
       .catch((loadError) => {
         setError((loadError as Error).message || "Unable to load Code workspace.");
@@ -152,15 +186,35 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       .finally(() => {
         setLoading(false);
       });
-  }, [loadAccess, loadConnection, loadRepository, loadRepositoryContent, router]);
+  }, [loadAccess, loadConnection, loadRepository, router]);
 
   useEffect(() => {
-    if (!token || !repositoryConnected || !gitlabConnected) {
+    if (!token || !connectedRepository || !gitlabConnected) {
+      if (!connectedRepository || !gitlabConnected) {
+        resetRepositoryWorkspace();
+      }
       return;
     }
 
-    void loadRepositoryContent(token, repository as Extract<ProjectRepositoryStatus, { connected: true }>);
-  }, [browserPath, browserRef, gitlabConnected, loadRepositoryContent, repository, repositoryConnected, token]);
+    void loadRepositoryContent(token, connectedRepository, {
+      ref: currentBrowseRef,
+      path: browserPath
+    });
+  }, [browserPath, connectedRepository, currentBrowseRef, gitlabConnected, loadRepositoryContent, resetRepositoryWorkspace, token]);
+
+  useEffect(() => {
+    if (!token || !connectedRepository || !gitlabConnected) {
+      setMergeRequests([]);
+      setMergeRequestsError(null);
+      return;
+    }
+
+    void loadMergeRequests(token, mergeRequestFilter);
+  }, [connectedRepository, gitlabConnected, loadMergeRequests, mergeRequestFilter, token]);
+
+  useEffect(() => {
+    setSelectedFile(null);
+  }, [browserPath, currentBrowseRef]);
 
   const onCreateRepository = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
@@ -177,8 +231,14 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       setRepository(nextRepository);
       setBrowserPath("");
       setBrowserRef(nextRepository.connected ? nextRepository.defaultBranch : "");
+      setNewBranchSourceRef("");
+      setMergeRequestSourceBranch("");
+      setMergeRequestTargetBranch("");
       if (nextRepository.connected) {
-        await loadRepositoryContent(token, nextRepository);
+        await Promise.all([
+          loadRepositoryContent(token, nextRepository, { ref: nextRepository.defaultBranch, path: "" }),
+          loadMergeRequests(token, mergeRequestFilter)
+        ]);
       }
       setSuccess("Managed repository provisioned.");
     } catch (createError) {
@@ -196,7 +256,6 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
 
     if (entry.type === "tree") {
       setBrowserPath(entry.path);
-      setSelectedFile(null);
       return;
     }
 
@@ -205,13 +264,55 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     try {
       const file = await getRepositoryFile(params.projectId, token, {
         filePath: entry.path,
-        ref: browserRef || (repositoryConnected ? repository.defaultBranch : undefined)
+        ref: currentBrowseRef || undefined
       });
       setSelectedFile(file);
     } catch (fileError) {
       setContentError((fileError as Error).message || "Unable to load file content.");
     } finally {
       setContentLoading(false);
+    }
+  };
+
+  const onCopyCloneUrl = async (): Promise<void> => {
+    if (!connectedRepository) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(connectedRepository.httpCloneUrl);
+      setCloneCopied(true);
+      window.setTimeout(() => setCloneCopied(false), 2000);
+    } catch {
+      setError("Unable to copy the clone URL.");
+    }
+  };
+
+  const onDownloadArchive = async (): Promise<void> => {
+    if (!token || !connectedRepository) {
+      setError("Missing session token. Please sign in again.");
+      return;
+    }
+
+    setDownloadingArchive(true);
+    setError(null);
+    try {
+      const archive = await downloadRepositoryArchive(params.projectId, token, {
+        ref: currentBrowseRef || connectedRepository.defaultBranch
+      });
+      const objectUrl = URL.createObjectURL(archive.blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = archive.fileName;
+      anchor.rel = "noopener";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (downloadError) {
+      setError((downloadError as Error).message || "Unable to download the repository archive.");
+    } finally {
+      setDownloadingArchive(false);
     }
   };
 
@@ -228,13 +329,18 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     try {
       const created = await createRepositoryBranch(params.projectId, token, {
         name: newBranchName.trim(),
-        sourceRef: newBranchSourceRef.trim()
+        sourceRef: currentBranchSourceRef.trim()
       });
       setNewBranchName("");
+      setBrowserRef(created.name);
+      setNewBranchSourceRef(created.name);
       setMergeRequestSourceBranch(created.name);
       const nextRepository = await loadRepository(token);
       if (nextRepository.connected) {
-        await loadRepositoryContent(token, nextRepository);
+        await loadRepositoryContent(token, nextRepository, {
+          ref: created.name,
+          path: browserPath
+        });
       }
       setSuccess(`Branch ${created.name} created.`);
     } catch (branchError) {
@@ -256,13 +362,14 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     setSuccess(null);
     try {
       const mergeRequest = await createRepositoryMergeRequest(params.projectId, token, {
-        sourceBranch: mergeRequestSourceBranch.trim(),
-        targetBranch: mergeRequestTargetBranch.trim(),
+        sourceBranch: currentMergeRequestSourceBranch.trim(),
+        targetBranch: currentMergeRequestTargetBranch.trim(),
         title: mergeRequestTitle.trim(),
         description: mergeRequestDescription.trim() || undefined
       });
       setMergeRequestTitle("");
       setMergeRequestDescription("");
+      await loadMergeRequests(token, mergeRequestFilter);
       setSuccess(`Merge request !${mergeRequest.iid} created.`);
     } catch (mergeRequestError) {
       setError((mergeRequestError as Error).message || "Unable to create the merge request.");
@@ -270,10 +377,6 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       setCreatingMergeRequest(false);
     }
   };
-
-  useEffect(() => {
-    setSelectedFile(null);
-  }, [browserPath, browserRef]);
 
   const connectStateMessage = useMemo(() => {
     if (!connection?.connected) {
@@ -332,21 +435,47 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
           </section>
         ) : null}
 
-        {!loading && repositoryConnected && gitlabConnected ? (
+        {!loading && connectedRepository && gitlabConnected ? (
           <>
             <section className="panel code-overview-card">
               <div className="stack-xs">
-                <p className="eyebrow">{repository.pathWithNamespace}</p>
-                <h2 className="section-heading">{repository.name}</h2>
-                {repository.description ? <p>{repository.description}</p> : <p className="text-muted">No repository description.</p>}
+                <p className="eyebrow">{connectedRepository.pathWithNamespace}</p>
+                <h2 className="section-heading">{connectedRepository.name}</h2>
+                {connectedRepository.description ? (
+                  <p>{connectedRepository.description}</p>
+                ) : (
+                  <p className="text-muted">No repository description.</p>
+                )}
               </div>
-              <div className="button-row">
-                <span className="badge">{repository.visibility}</span>
-                {repository.managed ? <span className="badge">Managed</span> : null}
-                <span className="badge">Default: {repository.defaultBranch}</span>
-                <a className="button button-secondary" href={repository.webUrl} target="_blank" rel="noreferrer">
-                  Open in GitLab
-                </a>
+
+              <div className="stack-md code-overview-side">
+                <div className="button-row code-overview-actions">
+                  <span className="badge">{connectedRepository.visibility}</span>
+                  {connectedRepository.managed ? <span className="badge">Managed</span> : null}
+                  <span className="badge">Default: {connectedRepository.defaultBranch}</span>
+                  <a className="button button-secondary" href={connectedRepository.webUrl} target="_blank" rel="noreferrer">
+                    Open in GitLab
+                  </a>
+                </div>
+
+                <section className="panel panel-subtle stack-sm code-clone-panel">
+                  <div className="stack-xs">
+                    <h3 className="section-heading">Clone &amp; Download</h3>
+                    <p className="text-muted">Use HTTPS clone or download the current ref as a ZIP archive.</p>
+                  </div>
+                  <label>
+                    HTTPS clone URL
+                    <input className="input code-clone-input" value={connectedRepository.httpCloneUrl} readOnly />
+                  </label>
+                  <div className="button-row">
+                    <button className="button button-secondary" type="button" onClick={() => void onCopyCloneUrl()}>
+                      {cloneCopied ? "Copied" : "Copy clone URL"}
+                    </button>
+                    <button className="button" type="button" onClick={() => void onDownloadArchive()} disabled={downloadingArchive}>
+                      {downloadingArchive ? "Downloading..." : "Download ZIP"}
+                    </button>
+                  </div>
+                </section>
               </div>
             </section>
 
@@ -358,10 +487,11 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                 </div>
                 <label>
                   Browse ref
-                  <select className="input" value={browserRef} onChange={(event) => setBrowserRef(event.target.value)}>
+                  <select className="input" value={currentBrowseRef} onChange={(event) => setBrowserRef(event.target.value)}>
                     {branches.map((branch) => (
                       <option key={branch.name} value={branch.name}>
-                        {branch.name}{branch.default ? " (default)" : ""}
+                        {branch.name}
+                        {branch.default ? " (default)" : ""}
                       </option>
                     ))}
                   </select>
@@ -392,7 +522,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     </label>
                     <label>
                       Source ref
-                      <select className="input" value={newBranchSourceRef} onChange={(event) => setNewBranchSourceRef(event.target.value)}>
+                      <select className="input" value={currentBranchSourceRef} onChange={(event) => setNewBranchSourceRef(event.target.value)}>
                         {branches.map((branch) => (
                           <option key={branch.name} value={branch.name}>
                             {branch.name}
@@ -416,7 +546,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                   <form className="form-grid" onSubmit={(event) => void onCreateMergeRequest(event)}>
                     <label>
                       Source branch
-                      <select className="input" value={mergeRequestSourceBranch} onChange={(event) => setMergeRequestSourceBranch(event.target.value)}>
+                      <select className="input" value={currentMergeRequestSourceBranch} onChange={(event) => setMergeRequestSourceBranch(event.target.value)}>
                         {branches.map((branch) => (
                           <option key={branch.name} value={branch.name}>
                             {branch.name}
@@ -426,7 +556,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     </label>
                     <label>
                       Target branch
-                      <select className="input" value={mergeRequestTargetBranch} onChange={(event) => setMergeRequestTargetBranch(event.target.value)}>
+                      <select className="input" value={currentMergeRequestTargetBranch} onChange={(event) => setMergeRequestTargetBranch(event.target.value)}>
                         {branches.map((branch) => (
                           <option key={branch.name} value={branch.name}>
                             {branch.name}
@@ -452,6 +582,56 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
               </section>
             </div>
 
+            <section className="panel stack-md">
+              <div className="toolbar-row code-section-toolbar">
+                <div className="stack-xs">
+                  <h3 className="section-heading">Merge requests</h3>
+                  <p className="text-muted">Track GitLab merge requests for this managed repository.</p>
+                </div>
+                <label className="code-filter-control">
+                  State
+                  <select className="input" value={mergeRequestFilter} onChange={(event) => setMergeRequestFilter(event.target.value as RepositoryMergeRequestState)}>
+                    <option value="opened">Opened</option>
+                    <option value="merged">Merged</option>
+                    <option value="closed">Closed</option>
+                    <option value="all">All</option>
+                  </select>
+                </label>
+              </div>
+
+              {mergeRequestsError ? <p className="alert alert-error">{mergeRequestsError}</p> : null}
+              {mergeRequestsLoading && mergeRequests.length === 0 ? <p className="alert alert-info">Loading merge requests...</p> : null}
+
+              <div className="code-results-list">
+                {mergeRequests.map((mergeRequest) => (
+                  <article key={mergeRequest.id} className="code-result-card code-merge-request-card">
+                    <div className="stack-xs">
+                      <p className="eyebrow">!{mergeRequest.iid}</p>
+                      <strong>{mergeRequest.title}</strong>
+                      <div className="button-row">
+                        <span className="badge">{mergeRequest.state}</span>
+                        {mergeRequest.draft ? <span className="badge">Draft</span> : null}
+                      </div>
+                      <div className="stack-xs code-merge-request-meta">
+                        <p>
+                          {mergeRequest.sourceBranch} → {mergeRequest.targetBranch}
+                        </p>
+                        <p className="text-muted">
+                          {mergeRequest.author ? `${mergeRequest.author.name} (@${mergeRequest.author.username})` : "Unknown author"} · {new Date(mergeRequest.updatedAt).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                    <a className="button button-secondary" href={mergeRequest.webUrl} target="_blank" rel="noreferrer">
+                      Open
+                    </a>
+                  </article>
+                ))}
+                {!mergeRequestsLoading && mergeRequests.length === 0 ? (
+                  <p className="text-muted">No merge requests available for the selected state.</p>
+                ) : null}
+              </div>
+            </section>
+
             <section className="code-workspace-grid">
               <div className="panel stack-md code-file-browser">
                 <div className="toolbar-row">
@@ -460,7 +640,14 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     <p className="text-muted">{tree?.path || "/"}</p>
                   </div>
                   {tree?.path ? (
-                    <button className="button button-secondary" type="button" onClick={() => { setBrowserPath(parentPath(tree.path)); setSelectedFile(null); }}>
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      onClick={() => {
+                        setBrowserPath(parentPath(tree.path));
+                        setSelectedFile(null);
+                      }}
+                    >
                       Up
                     </button>
                   ) : null}
@@ -491,7 +678,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
               <div className="panel stack-md code-commit-list">
                 <div className="stack-xs">
                   <h3 className="section-heading">Recent commits</h3>
-                  <p className="text-muted">Latest activity for {browserRef || repository.defaultBranch}.</p>
+                  <p className="text-muted">Latest activity for {currentBrowseRef || connectedRepository.defaultBranch}.</p>
                 </div>
                 <div className="stack-sm">
                   {commits.map((commit) => (

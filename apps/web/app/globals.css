@@ -2511,6 +2511,39 @@ body.documents-workspace-dragging * {
   gap: 1.2rem;
 }
 
+.code-overview-side {
+  min-width: min(100%, 28rem);
+}
+
+.code-overview-actions {
+  justify-content: flex-end;
+}
+
+.code-clone-panel {
+  width: min(100%, 28rem);
+}
+
+.code-clone-input {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.code-section-toolbar {
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.code-filter-control {
+  min-width: 10rem;
+}
+
+.code-merge-request-card {
+  align-items: center;
+}
+
+.code-merge-request-meta {
+  gap: 0.2rem;
+}
+
 .code-workspace-grid {
   display: grid;
   grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.25fr) minmax(260px, 0.95fr);
@@ -2571,5 +2604,18 @@ body.documents-workspace-dragging * {
   .code-branch-row,
   .code-commit-card {
     flex-direction: column;
+  }
+
+  .code-overview-actions,
+  .code-section-toolbar {
+    justify-content: flex-start;
+    align-items: flex-start;
+  }
+
+  .code-clone-panel,
+  .code-overview-side,
+  .code-filter-control {
+    width: 100%;
+    min-width: 0;
   }
 }

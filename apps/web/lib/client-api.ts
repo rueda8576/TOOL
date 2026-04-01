@@ -1,5 +1,20 @@
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
+function buildAuthRequestInit(token: string, init?: RequestInit): RequestInit {
+  const hasFormDataBody = typeof FormData !== "undefined" && init?.body instanceof FormData;
+  const headers = new Headers(init?.headers ?? undefined);
+
+  headers.set("Authorization", `Bearer ${token}`);
+  if (!hasFormDataBody && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  return {
+    ...(init ?? {}),
+    headers
+  };
+}
+
 function collectErrorMessages(value: unknown): string[] {
   if (typeof value === "string") {
     return [value];
@@ -50,20 +65,29 @@ export async function authFetch<T>(
     init?: RequestInit;
   }
 ): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...(params.init ?? {}),
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${params.token}`,
-      ...(params.init?.headers ?? {})
-    }
-  });
+  const response = await fetch(`${API_BASE_URL}${path}`, buildAuthRequestInit(params.token, params.init));
 
   if (!response.ok) {
     throw new Error(await readErrorMessage(response));
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function authFetchResponse(
+  path: string,
+  params: {
+    token: string;
+    init?: RequestInit;
+  }
+): Promise<Response> {
+  const response = await fetch(`${API_BASE_URL}${path}`, buildAuthRequestInit(params.token, params.init));
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response));
+  }
+
+  return response;
 }
 
 export type LoginResponse = {

@@ -43,6 +43,7 @@ type GitlabProject = {
   name: string;
   description: string | null;
   web_url: string;
+  http_url_to_repo?: string;
   path_with_namespace: string;
   default_branch: string | null;
   visibility: string;
@@ -115,6 +116,16 @@ type GitlabMergeRequest = {
   web_url: string;
   source_branch: string;
   target_branch: string;
+  updated_at: string;
+  draft?: boolean;
+  work_in_progress?: boolean;
+  author?: {
+    id: number;
+    username: string;
+    name: string;
+    avatar_url?: string | null;
+    web_url?: string;
+  };
 };
 
 type GitlabProjectMember = {
@@ -151,6 +162,7 @@ type RepositoryStatus =
       name: string;
       description: string | null;
       webUrl: string;
+      httpCloneUrl: string;
       pathWithNamespace: string;
       defaultBranch: string;
       visibility: string;
@@ -184,6 +196,9 @@ const GITLAB_OAUTH_SCOPE = "api read_user";
 const GITLAB_ACCESS_LEVEL_REPORTER = 20;
 const GITLAB_ACCESS_LEVEL_DEVELOPER = 30;
 const GITLAB_ACCESS_LEVEL_MAINTAINER = 40;
+const GITLAB_MERGE_REQUEST_STATES = ["opened", "merged", "closed", "all"] as const;
+
+type RepositoryMergeRequestState = (typeof GITLAB_MERGE_REQUEST_STATES)[number];
 
 class GitlabApiError extends Error {
   constructor(
@@ -344,6 +359,8 @@ export class GitlabService {
         name: project.name,
         description: project.description,
         webUrl: project.web_url,
+        httpCloneUrl:
+          project.http_url_to_repo ?? this.buildRepositoryCloneUrl(project.path_with_namespace),
         pathWithNamespace: project.path_with_namespace,
         defaultBranch: project.default_branch ?? repository.defaultBranch,
         visibility: project.visibility,
@@ -359,6 +376,7 @@ export class GitlabService {
         name: repository.project.name,
         description: repository.project.description,
         webUrl: repository.webUrl,
+        httpCloneUrl: this.buildRepositoryCloneUrl(repository.pathWithNamespace),
         pathWithNamespace: repository.pathWithNamespace,
         defaultBranch: repository.defaultBranch,
         visibility: "private",
@@ -781,6 +799,104 @@ export class GitlabService {
     });
   }
 
+  async listMergeRequests(
+    projectId: string,
+    state: RepositoryMergeRequestState | undefined,
+    user: AuthenticatedUser
+  ): Promise<
+    Array<{
+      id: number;
+      iid: number;
+      title: string;
+      state: string;
+      webUrl: string;
+      sourceBranch: string;
+      targetBranch: string;
+      updatedAt: string;
+      draft: boolean;
+      author: {
+        name: string;
+        username: string;
+        avatarUrl: string | null;
+      } | null;
+    }>
+  > {
+    const repository = await this.requireReadableRepository(projectId, user);
+
+    return this.withUserAccessToken(user.userId, async (accessToken) => {
+      const resolvedState = state ?? "opened";
+      const search = new URLSearchParams({
+        state: resolvedState,
+        per_page: "20",
+        order_by: "updated_at",
+        sort: "desc"
+      });
+
+      try {
+        const mergeRequests = await this.executeGitlabRequest<GitlabMergeRequest[]>(
+          accessToken,
+          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/merge_requests?${search.toString()}`
+        );
+
+        return mergeRequests.map((mergeRequest) => ({
+          id: mergeRequest.id,
+          iid: mergeRequest.iid,
+          title: mergeRequest.title,
+          state: mergeRequest.state,
+          webUrl: mergeRequest.web_url,
+          sourceBranch: mergeRequest.source_branch,
+          targetBranch: mergeRequest.target_branch,
+          updatedAt: mergeRequest.updated_at,
+          draft:
+            mergeRequest.draft ??
+            mergeRequest.work_in_progress ??
+            /^(draft|wip):/i.test(mergeRequest.title),
+          author: mergeRequest.author
+            ? {
+                name: mergeRequest.author.name,
+                username: mergeRequest.author.username,
+                avatarUrl: mergeRequest.author.avatar_url ?? null
+              }
+            : null
+        }));
+      } catch (error) {
+        throw this.mapRepositoryAccessError(error);
+      }
+    });
+  }
+
+  async getRepositoryArchive(
+    projectId: string,
+    ref: string | undefined,
+    user: AuthenticatedUser
+  ): Promise<{
+    buffer: Buffer;
+    fileName: string;
+    contentType: string;
+  }> {
+    const repository = await this.requireReadableRepository(projectId, user);
+
+    return this.withUserAccessToken(user.userId, async (accessToken) => {
+      const resolvedRef = ref?.trim() || repository.defaultBranch;
+      const search = new URLSearchParams({ sha: resolvedRef });
+
+      try {
+        const archive = await this.executeGitlabBinaryRequest(
+          accessToken,
+          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/archive.zip?${search.toString()}`
+        );
+
+        return {
+          buffer: archive.buffer,
+          fileName: this.buildRepositoryArchiveFileName(repository.pathWithNamespace, resolvedRef),
+          contentType: archive.contentType ?? "application/zip"
+        };
+      } catch (error) {
+        throw this.mapRepositoryAccessError(error);
+      }
+    });
+  }
+
   async createBranch(
     projectId: string,
     dto: CreateRepositoryBranchDto,
@@ -1062,6 +1178,32 @@ export class GitlabService {
     return JSON.parse(text) as T;
   }
 
+  private async executeGitlabBinaryRequest(
+    accessToken: string,
+    path: string,
+    init?: RequestInit
+  ): Promise<{ buffer: Buffer; contentType: string | null }> {
+    const response = await fetch(`${this.getGitlabApiBaseUrl()}/api/v4${path}`, {
+      ...init,
+      headers: {
+        Accept: "application/octet-stream",
+        Authorization: `Bearer ${accessToken}`,
+        ...(init?.headers ?? {})
+      }
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new GitlabApiError(response.status, text, text || `GitLab API error (${response.status})`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return {
+      buffer: Buffer.from(arrayBuffer),
+      contentType: response.headers.get("content-type")
+    };
+  }
+
   private async markReconnectRequired(userId: string): Promise<void> {
     await this.prisma.gitLabConnection.updateMany({
       where: {
@@ -1125,6 +1267,23 @@ export class GitlabService {
     }
 
     return normalized;
+  }
+
+  private buildRepositoryCloneUrl(pathWithNamespace: string): string {
+    return `${this.getGitlabBrowserBaseUrl()}/${pathWithNamespace.replace(/^\/+/, "")}.git`;
+  }
+
+  private buildRepositoryArchiveFileName(pathWithNamespace: string, ref: string): string {
+    const pathFragment = pathWithNamespace
+      .trim()
+      .replace(/^\/+|\/+$/g, "")
+      .replace(/[^a-zA-Z0-9._/-]+/g, "-")
+      .replace(/\//g, "-");
+    const refFragment = ref
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return `${pathFragment || "repository"}-${refFragment || "archive"}.zip`;
   }
 
   private resolveTokenExpiry(payload: GitlabOAuthTokenPayload): Date | null {

@@ -1,4 +1,4 @@
-import { authFetch } from "./client-api";
+import { authFetch, authFetchResponse } from "./client-api";
 
 export type GitlabConnectionStatus = {
   connected: boolean;
@@ -18,6 +18,7 @@ export type ProjectRepositoryStatus =
       name: string;
       description: string | null;
       webUrl: string;
+      httpCloneUrl: string;
       pathWithNamespace: string;
       defaultBranch: string;
       visibility: string;
@@ -72,7 +73,44 @@ export type RepositoryMergeRequest = {
   title: string;
   state: string;
   webUrl: string;
+  sourceBranch: string;
+  targetBranch: string;
+  updatedAt: string;
+  draft: boolean;
+  author: {
+    name: string;
+    username: string;
+    avatarUrl: string | null;
+  } | null;
 };
+
+export type RepositoryMergeRequestState = "opened" | "merged" | "closed" | "all";
+
+export type CreatedRepositoryMergeRequest = {
+  id: number;
+  iid: number;
+  title: string;
+  state: string;
+  webUrl: string;
+};
+
+function parseFileNameFromContentDisposition(headerValue: string | null): string | null {
+  if (!headerValue) {
+    return null;
+  }
+
+  const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+
+  const plainMatch = headerValue.match(/filename="?([^"]+)"?/i);
+  return plainMatch?.[1] ?? null;
+}
 
 export async function getGitlabConnectionStatus(token: string): Promise<GitlabConnectionStatus> {
   return authFetch<GitlabConnectionStatus>("/auth/gitlab/connection", { token });
@@ -180,12 +218,50 @@ export async function createRepositoryMergeRequest(
   projectId: string,
   token: string,
   payload: { sourceBranch: string; targetBranch: string; title: string; description?: string }
-): Promise<RepositoryMergeRequest> {
-  return authFetch<RepositoryMergeRequest>(`/projects/${projectId}/repository/merge-requests`, {
+): Promise<CreatedRepositoryMergeRequest> {
+  return authFetch<CreatedRepositoryMergeRequest>(`/projects/${projectId}/repository/merge-requests`, {
     token,
     init: {
       method: "POST",
       body: JSON.stringify(payload)
     }
   });
+}
+
+export async function listRepositoryMergeRequests(
+  projectId: string,
+  token: string,
+  params?: { state?: RepositoryMergeRequestState }
+): Promise<RepositoryMergeRequest[]> {
+  const search = new URLSearchParams();
+  if (params?.state) {
+    search.set("state", params.state);
+  }
+  const suffix = search.toString().length > 0 ? `?${search.toString()}` : "";
+  return authFetch<RepositoryMergeRequest[]>(`/projects/${projectId}/repository/merge-requests${suffix}`, {
+    token
+  });
+}
+
+export async function downloadRepositoryArchive(
+  projectId: string,
+  token: string,
+  params?: { ref?: string }
+): Promise<{ blob: Blob; fileName: string }> {
+  const search = new URLSearchParams();
+  if (params?.ref?.trim()) {
+    search.set("ref", params.ref.trim());
+  }
+  const suffix = search.toString().length > 0 ? `?${search.toString()}` : "";
+  const response = await authFetchResponse(`/projects/${projectId}/repository/archive${suffix}`, {
+    token,
+    init: {
+      method: "GET"
+    }
+  });
+
+  return {
+    blob: await response.blob(),
+    fileName: parseFileNameFromContentDisposition(response.headers.get("Content-Disposition")) ?? "repository.zip"
+  };
 }
