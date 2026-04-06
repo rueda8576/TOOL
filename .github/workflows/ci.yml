@@ -52,7 +52,7 @@ jobs:
         run: pnpm --filter @doctoral/db db:test:prepare
       - name: API aggregated coverage
         run: pnpm --filter @doctoral/api test:coverage
-      - name: Worker unit tests with coverage
-        run: pnpm --filter @doctoral/worker test:coverage
+      - name: Worker coverage gate
+        run: pnpm --filter @doctoral/worker test:coverage:gate
       - name: Build
         run: pnpm build

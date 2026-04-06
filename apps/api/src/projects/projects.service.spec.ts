@@ -1,4 +1,4 @@
-import { ForbiddenException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { ProjectRole } from "@prisma/client";
 
 import { ProjectsService } from "./projects.service";
@@ -17,7 +17,8 @@ describe("ProjectsService", () => {
         findUnique: jest.fn(),
         create: jest.fn(),
         findMany: jest.fn(),
-        update: jest.fn()
+        update: jest.fn(),
+        delete: jest.fn()
       },
       projectMember: {
         findMany: jest.fn(),
@@ -212,6 +213,97 @@ describe("ProjectsService", () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it("rejects duplicate project keys before provisioning a managed repository", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.project.findUnique.mockResolvedValue({ id: "existing-project" });
+
+    await expect(
+      service.createProject(
+        {
+          key: "phd1",
+          name: "Duplicate"
+        },
+        {
+          userId: "admin-1",
+          email: "admin@example.com",
+          globalRole: "admin"
+        }
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(gitlabService.provisionManagedRemoteRepository).not.toHaveBeenCalled();
+  });
+
+  it("rolls back the provisioned repository when project creation transaction fails", async () => {
+    const { service, prisma, gitlabService } = makeService();
+
+    prisma.project.findUnique.mockResolvedValue(null);
+    gitlabService.provisionManagedRemoteRepository.mockResolvedValue({
+      gitlabProjectId: "gl-rollback",
+      pathWithNamespace: "atlasium/PHD2",
+      webUrl: "https://git.atlasium.info/atlasium/PHD2",
+      defaultBranch: "main"
+    });
+    prisma.$transaction.mockRejectedValue(new Error("db write failed"));
+
+    await expect(
+      service.createProject(
+        {
+          key: "PHD2",
+          name: "Rollback project"
+        },
+        {
+          userId: "admin-1",
+          email: "admin@example.com",
+          globalRole: "admin"
+        }
+      )
+    ).rejects.toThrow("db write failed");
+
+    expect(gitlabService.rollbackManagedRemoteProvision).toHaveBeenCalledWith("gl-rollback");
+    expect(gitlabService.syncProjectRepositoryAccess).not.toHaveBeenCalled();
+  });
+
+  it("deletes the created project and rolls back GitLab when repository access sync fails", async () => {
+    const { service, prisma, gitlabService } = makeService();
+
+    prisma.project.findUnique.mockResolvedValue(null);
+    gitlabService.provisionManagedRemoteRepository.mockResolvedValue({
+      gitlabProjectId: "gl-sync",
+      pathWithNamespace: "atlasium/PHD3",
+      webUrl: "https://git.atlasium.info/atlasium/PHD3",
+      defaultBranch: "main"
+    });
+    prisma.project.create.mockResolvedValue({
+      id: "p-sync",
+      key: "PHD3",
+      name: "Sync project",
+      description: null
+    });
+    gitlabService.syncProjectRepositoryAccess.mockRejectedValue(new Error("sync failed"));
+
+    await expect(
+      service.createProject(
+        {
+          key: "PHD3",
+          name: "Sync project"
+        },
+        {
+          userId: "admin-1",
+          email: "admin@example.com",
+          globalRole: "admin"
+        }
+      )
+    ).rejects.toThrow("sync failed");
+
+    expect(prisma.project.delete).toHaveBeenCalledWith({
+      where: {
+        id: "p-sync"
+      }
+    });
+    expect(gitlabService.rollbackManagedRemoteProvision).toHaveBeenCalledWith("gl-sync");
+  });
+
   it("pins project idempotently and logs audit", async () => {
     const { service, prisma, accessService, auditService } = makeService();
     const createdAt = new Date("2026-03-03T11:00:00.000Z");
@@ -378,6 +470,128 @@ describe("ProjectsService", () => {
         email: "admin@example.com",
         globalRole: "admin"
       })
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("restores the project when GitLab archive synchronization fails during deletion", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    const deletedAt = new Date("2026-03-29T09:15:00.000Z");
+
+    prisma.project.findFirst.mockResolvedValue({ id: "p-restore" });
+    prisma.project.update
+      .mockResolvedValueOnce({
+        id: "p-restore",
+        deletedAt
+      })
+      .mockResolvedValueOnce({
+        id: "p-restore",
+        deletedAt: null
+      });
+    gitlabService.archiveManagedRepository.mockRejectedValue(new Error("archive failed"));
+
+    await expect(
+      service.deleteProject("p-restore", {
+        userId: "admin-1",
+        email: "admin@example.com",
+        globalRole: "admin"
+      })
+    ).rejects.toThrow("archive failed");
+
+    expect(prisma.project.update).toHaveBeenNthCalledWith(2, {
+      where: {
+        id: "p-restore"
+      },
+      data: {
+        deletedAt: null
+      }
+    });
+    expect(gitlabService.unarchiveManagedRepository).toHaveBeenCalledWith("p-restore");
+  });
+
+  it("lists project members with user identity mapping", async () => {
+    const { service, prisma, accessService } = makeService();
+    prisma.projectMember.findMany.mockResolvedValue([
+      {
+        userId: "user-1",
+        user: {
+          name: "Luis",
+          email: "luis@example.com"
+        }
+      }
+    ]);
+
+    await expect(
+      service.listMembers("project-1", {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      })
+    ).resolves.toEqual([
+      {
+        userId: "user-1",
+        name: "Luis",
+        email: "luis@example.com"
+      }
+    ]);
+
+    expect(accessService.ensureProjectReadable).toHaveBeenCalledWith("reader-1", "reader", "project-1");
+  });
+
+  it("adds a member by normalized email, logs audit, and syncs repository access", async () => {
+    const { service, prisma, accessService, auditService, gitlabService } = makeService();
+    prisma.user.findUnique.mockResolvedValue({ id: "member-1" });
+    prisma.projectMember.upsert.mockResolvedValue({
+      projectId: "project-1",
+      userId: "member-1"
+    });
+
+    await expect(
+      service.addMember(
+        "project-1",
+        {
+          email: "Member@Example.com"
+        },
+        {
+          userId: "editor-1",
+          email: "editor@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).resolves.toEqual({
+      projectId: "project-1",
+      userId: "member-1"
+    });
+
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("editor-1", "editor", "project-1");
+    expect(prisma.user.findUnique).toHaveBeenCalledWith({
+      where: { email: "member@example.com" },
+      select: { id: true }
+    });
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "project.member.add",
+        entityType: "project_member"
+      })
+    );
+    expect(gitlabService.syncProjectRepositoryAccess).toHaveBeenCalledWith("project-1");
+  });
+
+  it("rejects member addition when the target user does not exist", async () => {
+    const { service, prisma } = makeService();
+    prisma.user.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.addMember(
+        "project-1",
+        {
+          userId: "missing-user"
+        },
+        {
+          userId: "editor-1",
+          email: "editor@example.com",
+          globalRole: "editor"
+        }
+      )
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

@@ -34,6 +34,7 @@ const runSuiteCoverage = (suite) => {
       "--config",
       suite.config,
       "--runInBand",
+      "--forceExit",
       "--coverage",
       "--coverageDirectory",
       suiteCoverageDir,

@@ -1,5 +1,56 @@
 # Implementation TODO (v1 bootstrap)
 
+## API Coverage Push + Worker Gate Active (2026-04-06)
+- [x] Switch CI and root `test:ci` to use the worker 95% coverage gate immediately.
+- [x] Add a dedicated `DocumentsCollaborationServer` suite so the collaboration server is no longer at `0%`.
+- [x] Expand `GitlabService` coverage across OAuth, retry/reconnect, repository lifecycle, and `Code` read/write operations.
+- [x] Expand `WikiService` coverage across page creation, draft persistence, backlinks, revisions, and assets.
+- [x] Expand `ProjectsService` coverage across duplicate handling, rollback paths, member listing, and member assignment.
+- [x] Recompute aggregated API coverage and capture the real next hotspots from measured data.
+- [x] Validate the updated pipeline locally with worker gate active.
+
+### Review - API Coverage Push + Worker Gate Active
+- CI now gates the worker at `95/95/95/95` directly:
+  - `.github/workflows/ci.yml` runs `pnpm --filter @doctoral/worker test:coverage:gate`
+  - root `package.json` `test:ci` uses the same worker gate while keeping the API on non-gated aggregated coverage
+- Added a dedicated collaboration-server suite in `apps/api/src/documents/documents-collaboration.server.spec.ts` covering:
+  - server startup and upgrade routing
+  - auth rejection during websocket handshake
+  - room join/load behavior
+  - `disconnectUser`
+  - `flushWikiPageDraft`
+  - invalid version/path cleanup and room persistence
+- Expanded `apps/api/src/gitlab/gitlab.service.spec.ts` over the branches that were dominating uncovered `Code` behavior:
+  - OAuth authorization URL
+  - authorization-code exchange + connection upsert
+  - disconnect flow
+  - repository status fallback
+  - managed repository duplicate/path + rollback paths
+  - archive/unarchive reconciliation
+  - 401 refresh/retry and reconnect-required handling
+- Expanded `apps/api/src/wiki/wiki.service.spec.ts` with creation, draft save, publish delegation, backlinks, revisions, asset upload, and asset retrieval.
+- Expanded `apps/api/src/projects/projects.service.spec.ts` with duplicate key rejection, transaction rollback + remote cleanup, sync-failure cleanup, member listing, member assignment, and missing-user handling.
+- Hardened the aggregated coverage runner in `apps/api/scripts/run-coverage.cjs` with `--forceExit` so CI does not hang on open websocket/Yjs handles after otherwise-successful suites.
+- Local validation passed with:
+  - `pnpm --filter @doctoral/api test:unit`
+  - `pnpm --filter @doctoral/api test:coverage`
+  - `pnpm --filter @doctoral/worker test:coverage:gate`
+  - `pnpm test:ci`
+  - `git diff --check`
+- New measured API aggregated coverage:
+  - statements `79.93%`
+  - branches `53.09%`
+  - functions `79.50%`
+  - lines `79.50%`
+- Worker coverage remains above gate:
+  - statements `99.56%`
+  - branches `98.11%`
+  - functions `96.29%`
+  - lines `99.54%`
+- The API still does not justify enabling the global `95%` gate yet. The next measured hotspots are:
+  - lowest `lines`: `documents-collaboration.server.ts` `57.59%`, `gitlab.service.ts` `67.85%`, `wiki.controller.ts` `69.81%`, `documents.service.ts` `75.80%`
+  - lowest `branches`: `documents.controller.ts` `0%`, `wiki.controller.ts` `0%`, `documents-collaboration.server.ts` `30%`, `wiki.service.ts` `42.22%`, `gitlab.service.ts` `44.59%`
+
 ## Coverage Gate - 95% API + Worker (2026-04-06)
 - [x] Add stable aggregated API coverage flow across unit, HTTP, and integration suites.
 - [x] Normalize API/worker coverage scope with explicit include/exclude rules and stable report artifacts (`text-summary`, `json-summary`, `lcov`).

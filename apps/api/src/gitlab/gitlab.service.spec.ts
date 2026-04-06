@@ -1,5 +1,6 @@
 import { BadRequestException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 
+import { encryptValue } from "../common/crypto";
 import { GitlabService } from "./gitlab.service";
 
 type FetchResponse = {
@@ -57,8 +58,27 @@ describe("GitlabService", () => {
     }
   };
 
-  const makeService = (): GitlabService => {
-    const prisma: any = {};
+  const makeServiceWithDeps = (): {
+    service: GitlabService;
+    prisma: any;
+    accessService: any;
+    auditService: any;
+  } => {
+    const prisma: any = {
+      gitLabConnection: {
+        upsert: jest.fn(),
+        findUnique: jest.fn(),
+        delete: jest.fn(),
+        update: jest.fn()
+      },
+      project: {
+        findFirst: jest.fn()
+      },
+      projectRepository: {
+        findUnique: jest.fn(),
+        deleteMany: jest.fn()
+      }
+    };
     const accessService: any = {
       ensureProjectReadable: jest.fn().mockResolvedValue(undefined),
       ensureProjectWritable: jest.fn().mockResolvedValue(undefined),
@@ -67,21 +87,409 @@ describe("GitlabService", () => {
     const auditService: any = {
       log: jest.fn().mockResolvedValue(undefined)
     };
-    return new GitlabService(prisma, accessService, auditService);
+    return {
+      service: new GitlabService(prisma, accessService, auditService),
+      prisma,
+      accessService,
+      auditService
+    };
   };
+
+  const makeService = (): GitlabService => makeServiceWithDeps().service;
 
   let fetchSpy: jest.SpiedFunction<typeof fetch>;
 
   beforeEach(() => {
     process.env.GITLAB_BASE_URL = "https://git.atlasium.info";
+    process.env.GITLAB_EXTERNAL_URL = "https://git.atlasium.info";
+    process.env.GITLAB_OAUTH_CLIENT_ID = "client-id";
+    process.env.GITLAB_OAUTH_CLIENT_SECRET = "client-secret";
+    process.env.GITLAB_OAUTH_REDIRECT_URI = "https://atlasium.info/api/auth/gitlab/callback";
     process.env.GITLAB_SYSTEM_ACCESS_TOKEN = "system-token";
     process.env.GITLAB_SYSTEM_USER_ID = "999";
+    process.env.GITLAB_MANAGED_GROUP_ID = "3";
+    process.env.GITLAB_MANAGED_GROUP_PATH = "atlasium";
+    process.env.GITLAB_MANAGED_GROUP_NAME = "Atlasium";
+    process.env.JWT_SECRET = "integration-secret-123";
     fetchSpy = jest.spyOn(global, "fetch");
   });
 
   afterEach(() => {
     fetchSpy.mockRestore();
     jest.restoreAllMocks();
+  });
+
+  it("builds the GitLab authorization URL with the expected OAuth parameters", () => {
+    const service = makeService();
+
+    const url = new URL(service.buildAuthorizationUrl("state-123"));
+
+    expect(url.origin + url.pathname).toBe("https://git.atlasium.info/oauth/authorize");
+    expect(url.searchParams.get("client_id")).toBe("client-id");
+    expect(url.searchParams.get("redirect_uri")).toBe("https://atlasium.info/api/auth/gitlab/callback");
+    expect(url.searchParams.get("response_type")).toBe("code");
+    expect(url.searchParams.get("scope")).toBe("api read_user");
+    expect(url.searchParams.get("state")).toBe("state-123");
+  });
+
+  it("exchanges an authorization code, upserts the connection, and returns connection status", async () => {
+    const { service, prisma } = makeServiceWithDeps();
+    jest.spyOn(service as any, "exchangeUserOAuthToken").mockResolvedValue({
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      expires_in: 3600,
+      scope: "api read_user"
+    });
+    jest.spyOn(service as any, "fetchGitlabUser").mockResolvedValue({
+      id: 7,
+      username: "luis",
+      name: "Luis",
+      email: "luis@example.com",
+      avatar_url: "https://git.atlasium.info/avatar.png",
+      web_url: "https://git.atlasium.info/luis"
+    });
+    prisma.gitLabConnection.findUnique.mockResolvedValue({
+      username: "luis",
+      name: "Luis",
+      email: "luis@example.com",
+      avatarUrl: "https://git.atlasium.info/avatar.png",
+      webUrl: "https://git.atlasium.info/luis",
+      reconnectRequired: false
+    });
+
+    await expect(service.exchangeAuthorizationCode("user-1", "code-123")).resolves.toEqual({
+      connected: true,
+      reconnectRequired: false,
+      username: "luis",
+      name: "Luis",
+      email: "luis@example.com",
+      avatarUrl: "https://git.atlasium.info/avatar.png",
+      webUrl: "https://git.atlasium.info/luis"
+    });
+
+    expect(prisma.gitLabConnection.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: "user-1" },
+        create: expect.objectContaining({
+          userId: "user-1",
+          gitlabUserId: "7",
+          reconnectRequired: false,
+          accessTokenEncrypted: expect.any(String),
+          refreshTokenEncrypted: expect.any(String)
+        }),
+        update: expect.objectContaining({
+          gitlabUserId: "7",
+          reconnectRequired: false
+        })
+      })
+    );
+  });
+
+  it("disconnects an existing GitLab connection and returns false when none exists", async () => {
+    const { service, prisma } = makeServiceWithDeps();
+    prisma.gitLabConnection.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce(null);
+
+    await expect(service.disconnectUserConnection("user-1")).resolves.toBe(true);
+    await expect(service.disconnectUserConnection("user-1")).resolves.toBe(false);
+
+    expect(prisma.gitLabConnection.delete).toHaveBeenCalledWith({
+      where: {
+        userId: "user-1"
+      }
+    });
+  });
+
+  it("falls back to repository metadata when GitLab project lookup fails", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    fetchSpy.mockRejectedValueOnce(new Error("network down"));
+
+    await expect(
+      service.getRepositoryStatus("project-1", {
+        userId: "reader-1",
+        globalRole: "reader"
+      } as any)
+    ).resolves.toEqual(
+      expect.objectContaining({
+        connected: true,
+        gitlabProjectId: "123",
+        webUrl: "https://git.atlasium.info/atlasium/nav",
+        sshCloneUrl: "git@git.atlasium.info:atlasium/nav.git",
+        httpCloneUrl: "https://git.atlasium.info/atlasium/nav.git",
+        pathWithNamespace: "atlasium/nav",
+        managed: true
+      })
+    );
+  });
+
+  it("maps duplicate managed repository paths to a readable bad request", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "ensureManagedGroup").mockResolvedValue({ id: 3 });
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(400, {
+        message: {
+          path: ["has already been taken"]
+        }
+      }) as Response
+    );
+
+    await expect(service.provisionManagedRemoteRepository("NAV", "Navigation")).rejects.toEqual(
+      expect.objectContaining({
+        constructor: BadRequestException,
+        message: "Managed GitLab repository path already exists for this project key"
+      })
+    );
+  });
+
+  it("returns the existing repository status instead of reprovisioning an already connected repository", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    const getRepositoryStatusSpy = jest.spyOn(service, "getRepositoryStatus").mockResolvedValue({
+      connected: true,
+      gitlabProjectId: "123",
+      name: "Navigation",
+      description: null,
+      webUrl: repositoryRecord.webUrl,
+      sshCloneUrl: "git@git.atlasium.info:atlasium/nav.git",
+      httpCloneUrl: "https://git.atlasium.info/atlasium/nav.git",
+      pathWithNamespace: repositoryRecord.pathWithNamespace,
+      defaultBranch: "main",
+      visibility: "private",
+      lastActivityAt: "2026-04-06T10:00:00.000Z",
+      connectedAt: repositoryRecord.connectedAt.toISOString(),
+      connectedByUserId: repositoryRecord.connectedByUserId,
+      managed: true
+    });
+
+    await expect(
+      service.createRepository(
+        "project-1",
+        {} as any,
+        {
+          userId: "admin-1",
+          globalRole: "admin"
+        } as any
+      )
+    ).resolves.toEqual(
+      expect.objectContaining({
+        connected: true,
+        gitlabProjectId: "123"
+      })
+    );
+
+    expect(getRepositoryStatusSpy).toHaveBeenCalledWith(
+      "project-1",
+      expect.objectContaining({
+        userId: "admin-1"
+      })
+    );
+  });
+
+  it("rejects repository creation when the Atlasium project no longer exists", async () => {
+    const { service, prisma } = makeServiceWithDeps();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(null);
+    prisma.project.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.createRepository(
+        "missing-project",
+        {} as any,
+        {
+          userId: "admin-1",
+          globalRole: "admin"
+        } as any
+      )
+    ).rejects.toEqual(
+      expect.objectContaining({
+        message: "Project not found"
+      })
+    );
+  });
+
+  it("rolls back the managed GitLab repository when repository registration fails", async () => {
+    const { service, prisma } = makeServiceWithDeps();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(null);
+    prisma.project.findFirst.mockResolvedValue({
+      id: "project-1",
+      key: "NAV",
+      name: "Navigation"
+    });
+    jest.spyOn(service, "provisionManagedRemoteRepository").mockResolvedValue({
+      gitlabProjectId: "gl-1",
+      name: "Navigation",
+      description: null,
+      pathWithNamespace: "atlasium/nav",
+      webUrl: "https://git.atlasium.info/atlasium/nav",
+      defaultBranch: "main",
+      visibility: "private",
+      lastActivityAt: "2026-04-06T10:00:00.000Z"
+    });
+    jest.spyOn(service, "registerManagedRepository").mockRejectedValue(new Error("db failed"));
+    const deleteManagedRemoteRepositorySpy = jest
+      .spyOn(service as any, "deleteManagedRemoteRepository")
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.createRepository(
+        "project-1",
+        {} as any,
+        {
+          userId: "admin-1",
+          globalRole: "admin"
+        } as any
+      )
+    ).rejects.toThrow("db failed");
+
+    expect(deleteManagedRemoteRepositorySpy).toHaveBeenCalledWith("gl-1");
+  });
+
+  it("deletes the repository record and remote project when access sync fails after registration", async () => {
+    const { service, prisma } = makeServiceWithDeps();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(null);
+    prisma.project.findFirst.mockResolvedValue({
+      id: "project-1",
+      key: "NAV",
+      name: "Navigation"
+    });
+    jest.spyOn(service, "provisionManagedRemoteRepository").mockResolvedValue({
+      gitlabProjectId: "gl-2",
+      name: "Navigation",
+      description: null,
+      pathWithNamespace: "atlasium/nav",
+      webUrl: "https://git.atlasium.info/atlasium/nav",
+      defaultBranch: "main",
+      visibility: "private",
+      lastActivityAt: "2026-04-06T10:00:00.000Z"
+    });
+    jest.spyOn(service, "registerManagedRepository").mockResolvedValue(undefined);
+    jest.spyOn(service, "syncProjectRepositoryAccess").mockRejectedValue(new Error("sync failed"));
+    const deleteManagedRemoteRepositorySpy = jest
+      .spyOn(service as any, "deleteManagedRemoteRepository")
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.createRepository(
+        "project-1",
+        {} as any,
+        {
+          userId: "admin-1",
+          globalRole: "admin"
+        } as any
+      )
+    ).rejects.toThrow("sync failed");
+
+    expect(prisma.projectRepository.deleteMany).toHaveBeenCalledWith({
+      where: {
+        projectId: "project-1"
+      }
+    });
+    expect(deleteManagedRemoteRepositorySpy).toHaveBeenCalledWith("gl-2");
+  });
+
+  it("returns without touching GitLab when archiving or unarchiving a project with no repository record", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(null);
+
+    await expect(service.archiveManagedRepository("project-1")).resolves.toBeUndefined();
+    await expect(service.unarchiveManagedRepository("project-1")).resolves.toBeUndefined();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("ignores missing GitLab projects during archive and unarchive reconciliation", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(404, { message: "404 Project Not Found" }) as Response)
+      .mockResolvedValueOnce(jsonResponse(404, { message: "404 Project Not Found" }) as Response);
+
+    await expect(service.archiveManagedRepository("project-1")).resolves.toBeUndefined();
+    await expect(service.unarchiveManagedRepository("project-1")).resolves.toBeUndefined();
+  });
+
+  it("refreshes the user connection once after a 401 and retries the GitLab request", async () => {
+    const service = makeService();
+    const staleConnection = {
+      userId: "user-1",
+      accessTokenEncrypted: encryptValue("expired-token", process.env.JWT_SECRET!),
+      refreshTokenEncrypted: null,
+      tokenExpiresAt: null,
+      reconnectRequired: false
+    };
+    const refreshedConnection = {
+      ...staleConnection,
+      accessTokenEncrypted: encryptValue("fresh-token", process.env.JWT_SECRET!)
+    };
+    jest.spyOn(service as any, "requireConnectionRecord").mockResolvedValue(staleConnection);
+    jest
+      .spyOn(service as any, "ensureConnectionReady")
+      .mockResolvedValueOnce(staleConnection)
+      .mockResolvedValueOnce(refreshedConnection);
+    jest.spyOn(service as any, "refreshConnection").mockResolvedValue(refreshedConnection);
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(401, { message: "expired" }) as Response)
+      .mockResolvedValueOnce(jsonResponse(200, [] as unknown[]) as Response);
+
+    await expect(
+      (service as any).withUserAccessToken("user-1", async (accessToken: string) =>
+        (service as any).executeGitlabRequest(accessToken, "/user/keys?per_page=100")
+      )
+    ).resolves.toEqual([]);
+
+    expect((service as any).refreshConnection).toHaveBeenCalledWith(staleConnection);
+    expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        Authorization: "Bearer expired-token"
+      })
+    });
+    expect(fetchSpy.mock.calls[1]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        Authorization: "Bearer fresh-token"
+      })
+    });
+  });
+
+  it("marks the connection as requiring reconnection after a second 401", async () => {
+    const service = makeService();
+    const staleConnection = {
+      userId: "user-1",
+      accessTokenEncrypted: encryptValue("expired-token", process.env.JWT_SECRET!),
+      refreshTokenEncrypted: null,
+      tokenExpiresAt: null,
+      reconnectRequired: false
+    };
+    const refreshedConnection = {
+      ...staleConnection,
+      accessTokenEncrypted: encryptValue("still-invalid", process.env.JWT_SECRET!)
+    };
+    jest.spyOn(service as any, "requireConnectionRecord").mockResolvedValue(staleConnection);
+    jest
+      .spyOn(service as any, "ensureConnectionReady")
+      .mockResolvedValueOnce(staleConnection)
+      .mockResolvedValueOnce(refreshedConnection);
+    jest.spyOn(service as any, "refreshConnection").mockResolvedValue(refreshedConnection);
+    const markReconnectRequiredSpy = jest.spyOn(service as any, "markReconnectRequired").mockResolvedValue(undefined);
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(401, { message: "expired" }) as Response)
+      .mockResolvedValueOnce(jsonResponse(401, { message: "still expired" }) as Response);
+
+    await expect(
+      (service as any).withUserAccessToken("user-1", async (accessToken: string) =>
+        (service as any).executeGitlabRequest(accessToken, "/user/keys?per_page=100")
+      )
+    ).rejects.toEqual(
+      expect.objectContaining({
+        constructor: UnauthorizedException,
+        message: "GitLab reconnection required"
+      })
+    );
+
+    expect(markReconnectRequiredSpy).toHaveBeenCalledWith("user-1");
   });
 
   it("skips direct project membership creation when inherited group access already satisfies the desired role", async () => {

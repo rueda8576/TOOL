@@ -9,7 +9,7 @@
     "dev:web": "pnpm --filter @doctoral/web dev",
     "dev:worker": "pnpm --filter @doctoral/worker dev",
     "test": "pnpm -r test",
-    "test:ci": "pnpm --filter @doctoral/db db:test:prepare && pnpm --filter @doctoral/api test:coverage && pnpm --filter @doctoral/worker test:coverage && pnpm build",
+    "test:ci": "pnpm --filter @doctoral/db db:test:prepare && pnpm --filter @doctoral/api test:coverage && pnpm --filter @doctoral/worker test:coverage:gate && pnpm build",
     "test:ci:gate": "pnpm --filter @doctoral/db db:test:prepare && pnpm --filter @doctoral/api test:coverage:gate && pnpm --filter @doctoral/worker test:coverage:gate && pnpm build",
     "lint": "pnpm -r lint",
     "format": "pnpm -r format",
