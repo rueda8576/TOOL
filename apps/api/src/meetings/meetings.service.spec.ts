@@ -1,4 +1,4 @@
-import { NotFoundException } from "@nestjs/common";
+import { BadRequestException, NotFoundException } from "@nestjs/common";
 
 import { MeetingsService } from "./meetings.service";
 
@@ -226,5 +226,180 @@ describe("MeetingsService", () => {
     ).rejects.toBeInstanceOf(NotFoundException);
 
     expect(accessService.ensureProjectWritable).not.toHaveBeenCalled();
+  });
+
+  it("creates a meeting action linked to an existing task in the same project", async () => {
+    const { service, prisma, accessService, auditService } = makeService();
+    prisma.meeting.findFirst.mockResolvedValue({
+      id: "meeting-1",
+      projectId: "project-1"
+    });
+    prisma.task.findFirst.mockResolvedValue({ id: "task-1" });
+    prisma.meetingAction.create.mockResolvedValue({
+      id: "action-1",
+      meetingId: "meeting-1",
+      title: "Write follow-up",
+      linkedTaskId: "task-1"
+    });
+
+    const result = await service.createAction(
+      "meeting-1",
+      {
+        title: "Write follow-up",
+        description: "Capture final action",
+        linkedTaskId: "task-1",
+        dueDate: "2026-02-28T10:00:00.000Z"
+      },
+      {
+        userId: "user-1",
+        email: "user-1@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("user-1", "editor", "project-1");
+    expect(prisma.meetingAction.create).toHaveBeenCalledWith({
+      data: {
+        meetingId: "meeting-1",
+        title: "Write follow-up",
+        description: "Capture final action",
+        ownerId: undefined,
+        dueDate: new Date("2026-02-28T10:00:00.000Z"),
+        linkedTaskId: "task-1"
+      },
+      select: {
+        id: true,
+        meetingId: true,
+        title: true,
+        linkedTaskId: true
+      }
+    });
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "meeting.action.create",
+        metadata: {
+          meetingId: "meeting-1"
+        }
+      })
+    );
+    expect(result).toEqual({
+      id: "action-1",
+      meetingId: "meeting-1",
+      title: "Write follow-up",
+      linkedTaskId: "task-1"
+    });
+  });
+
+  it("rejects action creation when the linked task is outside the meeting project", async () => {
+    const { service, prisma } = makeService();
+    prisma.meeting.findFirst.mockResolvedValue({
+      id: "meeting-1",
+      projectId: "project-1"
+    });
+    prisma.task.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.createAction(
+        "meeting-1",
+        {
+          title: "Write follow-up",
+          linkedTaskId: "missing-task"
+        },
+        {
+          userId: "user-1",
+          email: "user-1@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("links an existing meeting action to a task in the same project", async () => {
+    const { service, prisma, accessService, auditService } = makeService();
+    prisma.meetingAction.findFirst.mockResolvedValue({
+      id: "action-1",
+      meetingId: "meeting-1",
+      meeting: {
+        projectId: "project-1",
+        deletedAt: null
+      }
+    });
+    prisma.task.findFirst.mockResolvedValue({ id: "task-1" });
+    prisma.meetingAction.update.mockResolvedValue({});
+
+    const result = await service.linkActionToTask(
+      "meeting-1",
+      "action-1",
+      { taskId: "task-1" },
+      {
+        userId: "user-1",
+        email: "user-1@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("user-1", "editor", "project-1");
+    expect(prisma.meetingAction.update).toHaveBeenCalledWith({
+      where: {
+        id: "action-1"
+      },
+      data: {
+        linkedTaskId: "task-1"
+      }
+    });
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "meeting.action.link_task",
+        metadata: { taskId: "task-1" }
+      })
+    );
+    expect(result).toEqual({
+      actionId: "action-1",
+      linkedTaskId: "task-1"
+    });
+  });
+
+  it("rejects link action when the action does not exist", async () => {
+    const { service, prisma } = makeService();
+    prisma.meetingAction.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.linkActionToTask(
+        "meeting-1",
+        "missing-action",
+        { taskId: "task-1" },
+        {
+          userId: "user-1",
+          email: "user-1@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("rejects link action when the task belongs to another project or is missing", async () => {
+    const { service, prisma } = makeService();
+    prisma.meetingAction.findFirst.mockResolvedValue({
+      id: "action-1",
+      meetingId: "meeting-1",
+      meeting: {
+        projectId: "project-1",
+        deletedAt: null
+      }
+    });
+    prisma.task.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.linkActionToTask(
+        "meeting-1",
+        "action-1",
+        { taskId: "task-2" },
+        {
+          userId: "user-1",
+          email: "user-1@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

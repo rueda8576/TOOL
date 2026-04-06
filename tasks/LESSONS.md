@@ -22,6 +22,8 @@
 - Task boards should prioritize reading state first: keep create/edit forms collapsed by default and open them explicitly via actions like `New task` or `Edit`.
 - For task actions, always provide both desktop and accessible paths (`right-click` context menu plus visible button trigger) so mobile and non-mouse workflows are covered.
 - When exposing assignee in cards, keep API and UI aligned with both `assigneeId` (compatibility) and denormalized assignee identity (`name`, `email`) for immediate clarity.
+- In kanban-style task boards, sorting cards by priority inside each status column makes urgency visible without adding another view or filter step.
+- If drag-and-drop is added to a task board, keep the interaction optimistic but bounded to the status change itself; the column should remain readable even before the server round-trip completes.
 
 ## Local runtime verification
 - If a newly added endpoint returns `Cannot <METHOD> /...` but code contains the route, first check for stale Node processes occupying the API port (`ss -ltnp | rg :4000`) before changing backend code.
@@ -80,6 +82,7 @@
 - Treat pins as per-user preferences in backend storage, not shared project metadata, to avoid coupling personal ordering with team-visible domain data.
 - In project-context pages, keep navigation contextual (`Overview`, module tabs) and separate global workspace navigation into an explicit `Exit project` action.
 - Centralize unsaved-change guards in a reusable hook (instead of per-page `window.confirm` duplication) so `Exit project` and `beforeunload` stay behaviorally consistent across modules.
+- In dense project workspaces like `Code`, split distinct repository activities (`files`, `commits`, `branches`, `merge requests`) into tabs with shared controls instead of stacking every panel vertically; this keeps navigation fast without hiding functionality.
 
 ## Project home dashboard
 - The `/projects/:projectId` landing page should surface live, cross-module signals (recent documents, in-progress tasks, current-month meetings) rather than static module descriptions.
@@ -145,3 +148,9 @@
 - In GitLab projects that inherit access from a managed parent group, do not blindly add or downgrade direct project memberships for users who already have sufficient inherited access; inspect `/members/all` and treat inherited/effective access as satisfying the desired role before issuing `POST`/`PUT`.
 - When frontend API helpers surface Nest error responses, parse structured JSON `message` payloads instead of dumping the raw JSON string; otherwise operators lose the actionable GitLab error behind a generic blob.
 - For Atlasium-managed GitLab, web SSO and CLI Git authentication are different surfaces: Atlasium OIDC should own GitLab web login, but `git clone` UX should default to SSH keys, with HTTPS explicitly documented as a PAT-based fallback.
+
+## Backend testing
+- In PNPM workspace scripts, avoid relying on `pnpm run <script> -- --coverage ...` for Jest in CI; forwarded args can be treated as test patterns and produce `No tests found`. Prefer dedicated coverage scripts or `pnpm exec jest ...`.
+- For Nest HTTP/controller tests that should exercise real auth/role wiring, keep the real `JwtAuthGuard` and `RolesGuard` in the module and mock `SessionAuthService.authenticateToken`; replacing the guard itself hides route metadata and role regressions.
+- If Prisma migration history does not contain an initial baseline, backend integration CI on a fresh Postgres DB must bootstrap schema (`db push` + `migrate resolve`) before `migrate deploy`; otherwise e2e validation fails before the app even boots.
+- When unit-testing worker jobs in a Prisma process, mock `child_process` partially with `jest.requireActual(...)` and override only `spawn`; replacing the whole module can break unrelated runtime imports that expect other `child_process` exports.

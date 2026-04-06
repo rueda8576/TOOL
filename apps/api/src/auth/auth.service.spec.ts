@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import { GlobalRole, InviteAccessMode, InviteStatus, ProjectRole } from "@prisma/client";
+import * as bcrypt from "bcryptjs";
 
 import { AuthService } from "./auth.service";
 
@@ -147,6 +148,127 @@ describe("AuthService", () => {
     expect(result.inviteId).toBe("invite-1");
     expect(result.token).toBeTruthy();
     expect(result.expiresAt).toBeInstanceOf(Date);
+  });
+
+  it("logs in an active user, creates a session, and returns the DB role instead of trusting the request", async () => {
+    const { service, prisma, jwtService, auditService } = makeService();
+    const password = "password-123";
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      name: "Example User",
+      globalRole: GlobalRole.EDITOR,
+      passwordHash: await bcrypt.hash(password, 10)
+    });
+    prisma.session.create.mockResolvedValue({});
+
+    const result = await service.login({
+      email: "USER@example.com",
+      password
+    });
+
+    expect(prisma.user.findFirst).toHaveBeenCalledWith({
+      where: {
+        email: "user@example.com",
+        deletedAt: null,
+        isActive: true
+      }
+    });
+    expect(jwtService.sign).toHaveBeenCalledWith({
+      sub: "user-1",
+      email: "user@example.com",
+      role: "editor"
+    });
+    expect(prisma.session.create).toHaveBeenCalledWith({
+      data: {
+        userId: "user-1",
+        tokenHash: expect.any(String),
+        expiresAt: expect.any(Date)
+      }
+    });
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "user-1",
+      entityType: "session",
+      entityId: "user-1",
+      action: "auth.login"
+    });
+    expect(result).toEqual({
+      token: "jwt-token",
+      expiresAt: expect.any(Date),
+      user: {
+        id: "user-1",
+        email: "user@example.com",
+        name: "Example User",
+        globalRole: "editor"
+      }
+    });
+  });
+
+  it("rejects login when the password is invalid", async () => {
+    const { service, prisma } = makeService();
+    const password = "password-123";
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      name: "Example User",
+      globalRole: GlobalRole.EDITOR,
+      passwordHash: await bcrypt.hash(password, 10)
+    });
+
+    await expect(
+      service.login({
+        email: "user@example.com",
+        password: "wrong-password"
+      })
+    ).rejects.toThrow("Invalid credentials");
+  });
+
+  it("returns accepted=true for password reset without leaking whether the user exists", async () => {
+    const { service, prisma, queueService, auditService } = makeService();
+    prisma.user.findUnique.mockResolvedValue({ id: "user-1" });
+    prisma.notificationEvent = {
+      create: jest.fn().mockResolvedValue({ id: "event-1" })
+    };
+
+    const result = await service.requestPasswordReset({
+      email: "USER@example.com"
+    });
+
+    expect(prisma.user.findUnique).toHaveBeenCalledWith({
+      where: { email: "user@example.com" },
+      select: { id: true }
+    });
+    expect(prisma.notificationEvent.create).toHaveBeenCalledWith({
+      data: {
+        userId: "user-1",
+        type: "PASSWORD_RESET",
+        status: "PENDING",
+        payload: {
+          template: "password-reset",
+          resetToken: expect.any(String)
+        }
+      }
+    });
+    expect(queueService.enqueueEmail).toHaveBeenCalledWith({ notificationEventId: "event-1" });
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "user-1",
+      entityType: "user",
+      entityId: "user-1",
+      action: "auth.password.reset_requested"
+    });
+    expect(result).toEqual({ accepted: true });
+  });
+
+  it("returns accepted=true for password reset when the email is unknown and does not enqueue anything", async () => {
+    const { service, prisma, queueService } = makeService();
+    prisma.user.findUnique.mockResolvedValue(null);
+
+    const result = await service.requestPasswordReset({
+      email: "missing@example.com"
+    });
+
+    expect(queueService.enqueueEmail).not.toHaveBeenCalled();
+    expect(result).toEqual({ accepted: true });
   });
 
   it("rejects all-projects invite payload when project-specific assignments are provided", async () => {

@@ -68,4 +68,34 @@ describe("SessionAuthService", () => {
       })
     ).rejects.toThrow("Invalid collaboration token");
   });
+
+  it("rejects tokens whose payload has no subject", async () => {
+    const { service, jwtService } = makeService();
+    jwtService.verify.mockReturnValue({
+      email: "user@example.com",
+      role: "editor"
+    });
+
+    await expect(
+      service.authenticateToken("token-4", {
+        invalidToken: "Missing collaboration subject"
+      })
+    ).rejects.toThrow("Missing collaboration subject");
+  });
+
+  it("rejects expired sessions with a custom message", async () => {
+    const { service, jwtService, prisma } = makeService();
+    jwtService.verify.mockReturnValue({
+      sub: "user-1",
+      email: "user@example.com",
+      role: "editor"
+    });
+    prisma.session.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.authenticateToken("token-5", {
+        expiredSession: "Realtime session expired"
+      })
+    ).rejects.toThrow("Realtime session expired");
+  });
 });

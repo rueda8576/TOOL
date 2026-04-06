@@ -479,4 +479,334 @@ describe("GitlabService", () => {
       })
     );
   });
+
+  it("lists branches for the readable repository", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(200, [
+        {
+          name: "main",
+          default: true,
+          merged: false,
+          can_push: true,
+          protected: true,
+          web_url: "https://git.atlasium.info/atlasium/nav/-/tree/main"
+        }
+      ]) as Response
+    );
+
+    await expect(
+      service.listBranches(
+        "project-1",
+        {
+          userId: "user-1",
+          globalRole: "reader"
+        } as any
+      )
+    ).resolves.toEqual([
+      {
+        name: "main",
+        default: true,
+        merged: false,
+        canPush: true,
+        protected: true,
+        webUrl: "https://git.atlasium.info/atlasium/nav/-/tree/main"
+      }
+    ]);
+  });
+
+  it("lists commits using the requested ref", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(200, [
+        {
+          id: "abc123",
+          short_id: "abc123",
+          title: "Add navigation draft",
+          message: "Add navigation draft\n\nMore context",
+          authored_date: "2026-04-06T12:00:00.000Z",
+          author_name: "Luis",
+          web_url: "https://git.atlasium.info/atlasium/nav/-/commit/abc123"
+        }
+      ]) as Response
+    );
+
+    await expect(
+      service.listCommits(
+        "project-1",
+        "feature/nav",
+        {
+          userId: "user-1",
+          globalRole: "reader"
+        } as any
+      )
+    ).resolves.toEqual([
+      {
+        id: "abc123",
+        shortId: "abc123",
+        title: "Add navigation draft",
+        message: "Add navigation draft\n\nMore context",
+        authoredDate: "2026-04-06T12:00:00.000Z",
+        authorName: "Luis",
+        webUrl: "https://git.atlasium.info/atlasium/nav/-/commit/abc123"
+      }
+    ]);
+
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      "https://git.atlasium.info/api/v4/projects/123/repository/commits?per_page=25&ref_name=feature%2Fnav"
+    );
+  });
+
+  it("returns the repository tree for the requested path and ref", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(200, [
+        {
+          id: "tree-1",
+          name: "src",
+          path: "src",
+          type: "tree"
+        },
+        {
+          id: "blob-1",
+          name: "index.ts",
+          path: "src/index.ts",
+          type: "blob"
+        }
+      ]) as Response
+    );
+
+    await expect(
+      service.getRepositoryTree(
+        "project-1",
+        "src",
+        "feature/nav",
+        {
+          userId: "user-1",
+          globalRole: "reader"
+        } as any
+      )
+    ).resolves.toEqual({
+      ref: "feature/nav",
+      path: "src",
+      entries: [
+        { id: "tree-1", name: "src", path: "src", type: "tree" },
+        { id: "blob-1", name: "index.ts", path: "src/index.ts", type: "blob" }
+      ]
+    });
+  });
+
+  it("returns text repository files decoded from base64", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(200, {
+        file_path: "README.md",
+        file_name: "README.md",
+        ref: "main",
+        size: 14,
+        content: Buffer.from("# Navigation\n").toString("base64")
+      }) as Response
+    );
+
+    await expect(
+      service.getRepositoryFile(
+        "project-1",
+        "README.md",
+        undefined,
+        {
+          userId: "user-1",
+          globalRole: "reader"
+        } as any
+      )
+    ).resolves.toEqual({
+      filePath: "README.md",
+      fileName: "README.md",
+      ref: "main",
+      size: 14,
+      binary: false,
+      content: "# Navigation\n"
+    });
+  });
+
+  it("returns binary repository files without exposing decoded text content", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(200, {
+        file_path: "assets/logo.png",
+        file_name: "logo.png",
+        ref: "main",
+        size: 4,
+        content: Buffer.from([0x00, 0xff, 0x10, 0x89]).toString("base64")
+      }) as Response
+    );
+
+    await expect(
+      service.getRepositoryFile(
+        "project-1",
+        "assets/logo.png",
+        undefined,
+        {
+          userId: "user-1",
+          globalRole: "reader"
+        } as any
+      )
+    ).resolves.toEqual({
+      filePath: "assets/logo.png",
+      fileName: "logo.png",
+      ref: "main",
+      size: 4,
+      binary: true,
+      content: null
+    });
+  });
+
+  it("creates a repository branch and writes an audit log", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(201, {
+        name: "feature/nav",
+        default: false,
+        web_url: "https://git.atlasium.info/atlasium/nav/-/tree/feature/nav"
+      }) as Response
+    );
+
+    await expect(
+      service.createBranch(
+        "project-1",
+        {
+          name: "feature/nav",
+          sourceRef: "main"
+        },
+        {
+          userId: "user-1",
+          globalRole: "editor"
+        } as any
+      )
+    ).resolves.toEqual({
+      name: "feature/nav",
+      webUrl: "https://git.atlasium.info/atlasium/nav/-/tree/feature/nav",
+      default: false
+    });
+
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://git.atlasium.info/api/v4/projects/123/repository/branches");
+    expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        branch: "feature/nav",
+        ref: "main"
+      })
+    });
+    expect((service as any).auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "project.repository.branch.create"
+      })
+    );
+  });
+
+  it("creates a merge request and writes an audit log", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(201, {
+        id: 91,
+        iid: 14,
+        title: "Merge navigation updates",
+        state: "opened",
+        web_url: "https://git.atlasium.info/atlasium/nav/-/merge_requests/14"
+      }) as Response
+    );
+
+    await expect(
+      service.createMergeRequest(
+        "project-1",
+        {
+          sourceBranch: "feature/nav",
+          targetBranch: "main",
+          title: "Merge navigation updates",
+          description: "Ready for review"
+        },
+        {
+          userId: "user-1",
+          globalRole: "editor"
+        } as any
+      )
+    ).resolves.toEqual({
+      id: 91,
+      iid: 14,
+      title: "Merge navigation updates",
+      state: "opened",
+      webUrl: "https://git.atlasium.info/atlasium/nav/-/merge_requests/14"
+    });
+
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://git.atlasium.info/api/v4/projects/123/merge_requests");
+    expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        source_branch: "feature/nav",
+        target_branch: "main",
+        title: "Merge navigation updates",
+        description: "Ready for review"
+      })
+    });
+    expect((service as any).auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "project.repository.merge_request.create"
+      })
+    );
+  });
 });

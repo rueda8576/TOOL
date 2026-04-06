@@ -8,7 +8,11 @@
     "start": "node dist/main.js",
     "seed:admin": "ts-node-dev --transpile-only src/scripts/seed-admin.ts",
     "lint": "echo 'No lint configured for @doctoral/api'",
-    "test": "jest --runInBand",
+    "test": "pnpm run test:unit",
+    "test:unit": "jest --config jest.config.ts --runInBand",
+    "test:unit:coverage": "jest --config jest.config.ts --runInBand --coverage --coverageReporters=text-summary",
+    "test:http": "jest --config jest.http.config.ts --runInBand",
+    "test:integration": "jest --config jest.integration.config.ts --runInBand",
     "test:watch": "jest --watch"
   },
   "dependencies": {

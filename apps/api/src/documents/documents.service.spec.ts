@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { CompileStatus, DocumentType } from "@prisma/client";
-import { mkdtemp, readdir, readFile } from "fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
 
@@ -12,16 +12,19 @@ describe("DocumentsService", () => {
     prisma: any;
     accessService: any;
     storageService: any;
+    queueService: any;
     auditService: any;
   } => {
     const prisma: any = {
       $transaction: jest.fn(),
       document: {
+        create: jest.fn(),
         findMany: jest.fn(),
         findFirst: jest.fn().mockResolvedValue({ id: "d1", projectId: "p1" }),
         update: jest.fn()
       },
       documentBranch: {
+        create: jest.fn(),
         upsert: jest.fn().mockResolvedValue({ id: "b1" }),
         updateMany: jest.fn()
       },
@@ -30,6 +33,10 @@ describe("DocumentsService", () => {
         create: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn()
+      },
+      documentCompileJob: {
+        create: jest.fn(),
+        update: jest.fn()
       }
     };
     prisma.$transaction.mockImplementation(async (callback: (tx: any) => Promise<unknown>) => callback(prisma));
@@ -57,6 +64,7 @@ describe("DocumentsService", () => {
       prisma,
       accessService,
       storageService,
+      queueService,
       auditService
     };
   };
@@ -140,6 +148,154 @@ describe("DocumentsService", () => {
     ).rejects.toBeInstanceOf(NotFoundException);
 
     expect(accessService.ensureProjectReadable).toHaveBeenCalledWith("u1", "reader", "p1");
+  });
+
+  it("creates a document with the main branch inside a transaction and writes audit log", async () => {
+    const { service, prisma, accessService, auditService } = createService();
+    prisma.document.create.mockResolvedValue({
+      id: "d-created",
+      projectId: "p1",
+      title: "Thesis paper",
+      type: DocumentType.PAPER
+    });
+    prisma.documentBranch.create.mockResolvedValue({ id: "branch-main" });
+
+    const result = await service.createDocument(
+      "p1",
+      {
+        title: "Thesis paper",
+        type: "paper",
+        authors: ["Alice", "Bob"],
+        tags: ["vision"],
+        publishedAt: "2026-04-06T10:00:00.000Z"
+      },
+      {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("u1", "editor", "p1");
+    expect(prisma.document.create).toHaveBeenCalledWith({
+      data: {
+        projectId: "p1",
+        title: "Thesis paper",
+        type: DocumentType.PAPER,
+        authors: ["Alice", "Bob"],
+        tags: ["vision"],
+        publishedAt: new Date("2026-04-06T10:00:00.000Z"),
+        createdById: "u1"
+      },
+      select: {
+        id: true,
+        projectId: true,
+        title: true,
+        type: true
+      }
+    });
+    expect(prisma.documentBranch.create).toHaveBeenCalledWith({
+      data: {
+        documentId: "d-created",
+        name: "main",
+        createdById: "u1"
+      },
+      select: { id: true }
+    });
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "u1",
+      projectId: "p1",
+      entityType: "document",
+      entityId: "d-created",
+      action: "document.create"
+    });
+    expect(result).toEqual({
+      id: "d-created",
+      projectId: "p1",
+      title: "Thesis paper",
+      type: DocumentType.PAPER,
+      mainBranchId: "branch-main"
+    });
+  });
+
+  it("creates a document branch from a valid base version", async () => {
+    const { service, prisma, accessService, auditService } = createService();
+    prisma.document.findFirst.mockResolvedValue({
+      id: "d1",
+      projectId: "p1"
+    });
+    prisma.documentVersion.findFirst.mockResolvedValue({ id: "v1" });
+    prisma.documentBranch.create.mockResolvedValue({
+      id: "branch-review",
+      documentId: "d1",
+      name: "review",
+      baseVersionId: "v1"
+    });
+
+    const result = await service.createBranch(
+      "d1",
+      {
+        name: "review",
+        baseVersionId: "v1"
+      },
+      {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("u1", "editor", "p1");
+    expect(prisma.documentBranch.create).toHaveBeenCalledWith({
+      data: {
+        documentId: "d1",
+        name: "review",
+        baseVersionId: "v1",
+        createdById: "u1"
+      },
+      select: {
+        id: true,
+        documentId: true,
+        name: true,
+        baseVersionId: true
+      }
+    });
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "document.branch.create",
+        metadata: { documentId: "d1", branchName: "review" }
+      })
+    );
+    expect(result).toEqual({
+      id: "branch-review",
+      documentId: "d1",
+      name: "review",
+      baseVersionId: "v1"
+    });
+  });
+
+  it("rejects branch creation when the base version does not belong to the document", async () => {
+    const { service, prisma } = createService();
+    prisma.document.findFirst.mockResolvedValue({
+      id: "d1",
+      projectId: "p1"
+    });
+    prisma.documentVersion.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.createBranch(
+        "d1",
+        {
+          name: "review",
+          baseVersionId: "missing-version"
+        },
+        {
+          userId: "u1",
+          email: "u1@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it("creates version from latex folder upload", async () => {
@@ -290,6 +446,280 @@ describe("DocumentsService", () => {
     expect(mainTex).toContain("\\graphicspath{{Figures/}}");
     expect(referencesBib).toContain("% Add bibliography entries here.");
     expect(entries).toContain("Figures");
+  });
+
+  it("queues compilation for a version with editable latex source", async () => {
+    const { service, prisma, accessService, queueService, auditService } = createService();
+    prisma.documentVersion.findFirst.mockResolvedValue({
+      id: "v1",
+      latexBundleFileId: null,
+      latexWorkspacePath: "latex-workspaces/v1",
+      document: {
+        projectId: "p1"
+      }
+    });
+    prisma.documentCompileJob.create.mockResolvedValue({ id: "compile-1" });
+    queueService.enqueueCompile.mockResolvedValue("queue-job-1");
+    prisma.documentCompileJob.update.mockResolvedValue({});
+    prisma.documentVersion.update.mockResolvedValue({});
+
+    const result = await service.enqueueCompile("v1", {
+      userId: "u1",
+      email: "u1@example.com",
+      globalRole: "editor"
+    });
+
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("u1", "editor", "p1");
+    expect(prisma.documentCompileJob.create).toHaveBeenCalledWith({
+      data: {
+        documentVersionId: "v1",
+        status: CompileStatus.PENDING
+      },
+      select: {
+        id: true
+      }
+    });
+    expect(queueService.enqueueCompile).toHaveBeenCalledWith({
+      documentVersionId: "v1",
+      compileJobId: "compile-1"
+    });
+    expect(prisma.documentVersion.update).toHaveBeenCalledWith({
+      where: { id: "v1" },
+      data: {
+        compileStatus: CompileStatus.PENDING,
+        compileLog: null
+      }
+    });
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "document.version.compile_queued",
+        metadata: {
+          compileJobId: "compile-1",
+          queueJobId: "queue-job-1"
+        }
+      })
+    );
+    expect(result).toEqual({
+      compileJobId: "compile-1",
+      documentVersionId: "v1",
+      status: CompileStatus.PENDING
+    });
+  });
+
+  it("rejects compilation for versions without editable latex source", async () => {
+    const { service, prisma } = createService();
+    prisma.documentVersion.findFirst.mockResolvedValue({
+      id: "v1",
+      latexBundleFileId: null,
+      latexWorkspacePath: null,
+      document: {
+        projectId: "p1"
+      }
+    });
+
+    await expect(
+      service.enqueueCompile("v1", {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "editor"
+      })
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("returns the compiled PDF when available", async () => {
+    const { service, prisma, accessService, storageService } = createService();
+    storageService.readObject.mockResolvedValue(Buffer.from("compiled-pdf"));
+    prisma.documentVersion.findFirst.mockResolvedValue({
+      id: "v1",
+      document: {
+        projectId: "p1"
+      },
+      compiledPdfFile: {
+        storagePath: "compiled/output.pdf",
+        originalName: "compiled-output.pdf"
+      },
+      pdfFile: {
+        storagePath: "uploads/original.pdf",
+        originalName: "original.pdf"
+      }
+    });
+
+    await expect(
+      service.getPdfBytes("v1", {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "reader"
+      })
+    ).resolves.toEqual({
+      buffer: Buffer.from("compiled-pdf"),
+      fileName: "compiled-output.pdf"
+    });
+
+    expect(accessService.ensureProjectReadable).toHaveBeenCalledWith("u1", "reader", "p1");
+    expect(storageService.readObject).toHaveBeenCalledWith("compiled/output.pdf");
+  });
+
+  it("falls back to the originally uploaded PDF when no compiled artifact exists", async () => {
+    const { service, prisma, storageService } = createService();
+    storageService.readObject.mockResolvedValue(Buffer.from("original-pdf"));
+    prisma.documentVersion.findFirst.mockResolvedValue({
+      id: "v1",
+      document: {
+        projectId: "p1"
+      },
+      compiledPdfFile: null,
+      pdfFile: {
+        storagePath: "uploads/original.pdf",
+        originalName: "original.pdf"
+      }
+    });
+
+    await expect(
+      service.getPdfBytes("v1", {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "reader"
+      })
+    ).resolves.toEqual({
+      buffer: Buffer.from("original-pdf"),
+      fileName: "original.pdf"
+    });
+  });
+
+  it("rejects PDF download when the version has no PDF artifact", async () => {
+    const { service, prisma } = createService();
+    prisma.documentVersion.findFirst.mockResolvedValue({
+      id: "v1",
+      document: {
+        projectId: "p1"
+      },
+      compiledPdfFile: null,
+      pdfFile: null
+    });
+
+    await expect(
+      service.getPdfBytes("v1", {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "reader"
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("lists a LaTeX workspace tree recursively", async () => {
+    const { service, prisma } = createService();
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-docs-tree-"));
+    const workspacePath = "latex-workspaces/version-tree";
+    const workspaceAbsolute = resolve(storageRoot, workspacePath);
+    await mkdir(join(workspaceAbsolute, "chapters"), { recursive: true });
+    await writeFile(join(workspaceAbsolute, "main.tex"), "\\section{Intro}", "utf8");
+    await writeFile(join(workspaceAbsolute, "chapters", "chapter1.tex"), "\\section{One}", "utf8");
+    (service as any).storageRoot = storageRoot;
+    prisma.documentVersion.findFirst.mockResolvedValue({
+      id: "v-tree",
+      latexWorkspacePath: workspacePath,
+      document: {
+        projectId: "p1"
+      }
+    });
+
+    const result = await service.getLatexTree("v-tree", {
+      userId: "u1",
+      email: "u1@example.com",
+      globalRole: "reader"
+    });
+
+    expect(result).toEqual({
+      documentVersionId: "v-tree",
+      files: [
+        { path: "chapters", isDirectory: true },
+        { path: "chapters/chapter1.tex", isDirectory: false },
+        { path: "main.tex", isDirectory: false }
+      ]
+    });
+  });
+
+  it("reads a file from the LaTeX workspace", async () => {
+    const { service, prisma } = createService();
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-docs-file-"));
+    const workspacePath = "latex-workspaces/version-file";
+    const workspaceAbsolute = resolve(storageRoot, workspacePath);
+    await mkdir(join(workspaceAbsolute, "sections"), { recursive: true });
+    await writeFile(join(workspaceAbsolute, "sections", "intro.tex"), "Intro text", "utf8");
+    (service as any).storageRoot = storageRoot;
+    prisma.documentVersion.findFirst.mockResolvedValue({
+      id: "v-file",
+      latexWorkspacePath: workspacePath,
+      document: {
+        projectId: "p1"
+      }
+    });
+
+    await expect(
+      service.getLatexFile(
+        "v-file",
+        "sections/intro.tex",
+        {
+          userId: "u1",
+          email: "u1@example.com",
+          globalRole: "reader"
+        }
+      )
+    ).resolves.toEqual({
+      documentVersionId: "v-file",
+      path: "sections/intro.tex",
+      content: "Intro text"
+    });
+  });
+
+  it("updates a LaTeX file, resets compile status, and returns the written size", async () => {
+    const { service, prisma, accessService, auditService } = createService();
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-docs-update-"));
+    const workspacePath = "latex-workspaces/version-update";
+    (service as any).storageRoot = storageRoot;
+    prisma.documentVersion.findFirst.mockResolvedValue({
+      id: "v-update",
+      latexWorkspacePath: workspacePath,
+      document: {
+        projectId: "p1"
+      }
+    });
+    prisma.documentVersion.update.mockResolvedValue({});
+
+    const result = await service.updateLatexFile(
+      "v-update",
+      "chapters/results.tex",
+      "Updated results",
+      {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("u1", "editor", "p1");
+    expect(prisma.documentVersion.update).toHaveBeenCalledWith({
+      where: { id: "v-update" },
+      data: {
+        compileStatus: CompileStatus.PENDING,
+        compileLog: null
+      }
+    });
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "u1",
+      projectId: "p1",
+      entityType: "document_latex_file",
+      entityId: "v-update:chapters/results.tex",
+      action: "document.version.latex_file.update"
+    });
+    expect(result).toEqual({
+      documentVersionId: "v-update",
+      path: "chapters/results.tex",
+      sizeBytes: Buffer.byteLength("Updated results", "utf8")
+    });
+    await expect(readFile(resolve(storageRoot, workspacePath, "chapters", "results.tex"), "utf8")).resolves.toBe(
+      "Updated results"
+    );
   });
 
   it("soft-deletes document, branches, and versions and logs audit", async () => {

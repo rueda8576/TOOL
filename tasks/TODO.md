@@ -1,5 +1,76 @@
 # Implementation TODO (v1 bootstrap)
 
+## Test Hardening + CI Upgrade (2026-04-06)
+- [x] Add dedicated backend test scripts/config split for API unit, API HTTP, API integration, and worker tests.
+- [x] Expand API unit coverage for `tasks.service`, `documents.service`, `meetings.service`, `auth.service`, `session-auth.service`, and `gitlab.service`.
+- [x] Add HTTP/controller test harness with `supertest` and coverage slices for `tasks`, `documents`, `auth`, `gitlab`, and `admin-users`.
+- [x] Replace the skipped API smoke skeleton with a real Postgres-backed integration flow.
+- [x] Add Jest-based worker tests for LaTeX compile, email, due reminders, and backups.
+- [x] Upgrade CI to run backend test layers with Postgres service, migrations, coverage summaries, and build verification.
+- [x] Validate the new suites/build locally and document the verified baseline.
+
+### Review - Test Hardening + CI Upgrade
+- Split API testing into three explicit Jest entry points:
+  - `test:unit` / `test:unit:coverage` for service-level specs under `src/`
+  - `test:http` for controller/guard/DTO coverage under `test/http/`
+  - `test:integration` for a real Postgres-backed app boot flow under `test/api-smoke.e2e-spec.ts`
+- Expanded API unit coverage for the highest-risk surfaces:
+  - `tasks.service`: create/update/dependency/subtask paths and assignee validation
+  - `documents.service`: branch creation, compile enqueue, PDF retrieval, LaTeX tree/file mutation
+  - `meetings.service`: action creation and task-link flows
+  - `auth.service`: login and password reset
+  - `session-auth.service`: invalid/expired token paths
+  - `gitlab.service`: branches, commits, tree, file, branch creation, merge request creation
+- Added HTTP/controller tests with real Nest controllers plus real `JwtAuthGuard`/`RolesGuard`, backed by a mocked `SessionAuthService`, covering:
+  - `401` unauthenticated paths
+  - `403` role restrictions
+  - `400` DTO/query validation failures
+  - success-path request binding and service call shapes
+- Replaced the skipped API smoke test with a real integration slice that:
+  - boots `AppModule`
+  - logs in through `/auth/login`
+  - creates a project and task through HTTP
+  - updates task status through HTTP
+  - verifies persisted state through Prisma
+- Added Jest worker tests for:
+  - `latex-compile.job`
+  - `email.job`
+  - `due-reminder.job`
+  - `backup.job`
+- Upgraded CI to run:
+  - API unit coverage
+  - worker unit coverage
+  - API HTTP/controller tests
+  - DB bootstrap + `migrate deploy`
+  - API integration tests
+  - monorepo build
+- Added `packages/db/scripts/prepare-test-db.cjs` to bootstrap clean databases with incomplete migration history (`db push` + `migrate resolve`) before the normal `migrate deploy` step.
+- Local validation completed successfully with:
+  - `pnpm --filter @doctoral/api test:unit:coverage`
+  - `pnpm --filter @doctoral/worker test:coverage`
+  - `pnpm --filter @doctoral/api test:http`
+  - `pnpm --filter @doctoral/db db:test:prepare`
+  - `pnpm --filter @doctoral/api test:integration`
+  - `pnpm test:ci`
+  - `pnpm build`
+  - `git diff --check`
+- Observed coverage baseline after this round:
+  - API: statements `68.09%`, branches `46.97%`, functions `72.31%`, lines `67.35%`
+  - worker: statements `85.38%`, branches `67.92%`, functions `84.00%`, lines `85.37%`
+
+## Web UX - Code Tabs + Kanban DnD + Priority Indicators (2026-04-06)
+- [x] Rework `/projects/:projectId/code` into a denser tabbed workspace for files, commits, branches, and merge requests.
+- [x] Replace the previous clone/download block with the compact clone actions integrated into the Code overview.
+- [x] Add drag-and-drop task moves across kanban columns on `/projects/:projectId/tasks`.
+- [x] Reorder task cards within each kanban column by priority and surface clearer priority badges/accents.
+- [x] Polish project overview task rows so they link cleanly into the tasks workspace and expose priority at a glance.
+
+### Review - Web UX - Code Tabs + Kanban DnD + Priority Indicators
+- The latest commit reshaped `Code` into a tabbed workspace with a compact overview, shared branch/ref controls, and a cleaner separation between browsing and merge-request actions.
+- The tasks board now supports direct drag-and-drop between columns instead of status-only edits through forms, which materially reduces friction for daily project management.
+- Priority is no longer just metadata text: cards are sorted by urgency inside each column and visually reinforced with dedicated badges/accents.
+- The project overview page now treats recent tasks as navigational entries into the tasks module instead of static summary text.
+
 ## CD - Conditional GitLab Compose Reconcile (2026-04-06)
 - [x] Detect when `docker-compose.gitlab.yml` changed across a deployment.
 - [x] Reconcile the GitLab compose stack automatically during CD only when that file changed.

@@ -9,6 +9,7 @@
     "dev:web": "pnpm --filter @doctoral/web dev",
     "dev:worker": "pnpm --filter @doctoral/worker dev",
     "test": "pnpm -r test",
+    "test:ci": "pnpm --filter @doctoral/api test:unit:coverage && pnpm --filter @doctoral/worker test:coverage && pnpm --filter @doctoral/api test:http && pnpm --filter @doctoral/db db:test:prepare && pnpm --filter @doctoral/api test:integration",
     "lint": "pnpm -r lint",
     "format": "pnpm -r format",
     "db:generate": "pnpm --filter @doctoral/db db:generate",
