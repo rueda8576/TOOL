@@ -100,4 +100,114 @@ describe("AuthController HTTP", () => {
       }
     });
   });
+
+  it("accepts invites and forwards the DTO untouched", async () => {
+    authService.acceptInvite.mockResolvedValue({
+      token: "invite-token",
+      userId: "user-2",
+      projectId: "project-1",
+      projectIds: ["project-1"]
+    });
+
+    const response = await request(app.getHttpServer())
+      .post("/auth/accept-invite")
+      .send({
+        token: "invite-token",
+        name: "New User",
+        password: "password-123"
+      })
+      .expect(201);
+
+    expect(authService.acceptInvite).toHaveBeenCalledWith({
+      token: "invite-token",
+      name: "New User",
+      password: "password-123"
+    });
+    expect(response.body.userId).toBe("user-2");
+  });
+
+  it("accepts password reset requests", async () => {
+    authService.requestPasswordReset.mockResolvedValue({ accepted: true });
+
+    await request(app.getHttpServer())
+      .post("/auth/password/reset")
+      .send({ email: "user@example.com" })
+      .expect(201);
+
+    expect(authService.requestPasswordReset).toHaveBeenCalledWith({
+      email: "user@example.com"
+    });
+  });
+
+  it("serves OIDC discovery metadata and redirects authorize requests", async () => {
+    const oidcService = app.get(OidcService) as unknown as Record<string, jest.Mock>;
+    oidcService.getDiscoveryDocument.mockReturnValue({ issuer: "https://atlasium.info/api/auth/oidc" });
+    oidcService.authorize.mockResolvedValue("https://git.atlasium.info/users/auth/openid_connect/callback?code=123");
+
+    const discovery = await request(app.getHttpServer())
+      .get("/auth/oidc/.well-known/openid-configuration")
+      .expect(200);
+
+    const authorize = await request(app.getHttpServer())
+      .get("/auth/oidc/authorize")
+      .query({
+        client_id: "atlasium-oidc",
+        redirect_uri: "https://git.atlasium.info/users/auth/openid_connect/callback",
+        response_type: "code",
+        scope: "openid"
+      })
+      .expect(302);
+
+    expect(discovery.body).toEqual({ issuer: "https://atlasium.info/api/auth/oidc" });
+    expect(oidcService.authorize).toHaveBeenCalled();
+    expect(authorize.headers.location).toContain("code=123");
+  });
+
+  it("binds SSH key create and delete operations for the current user", async () => {
+    authService.createGitlabSshKey.mockResolvedValue({
+      id: 7,
+      title: "Laptop",
+      key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAexample",
+      createdAt: "2026-04-06T10:00:00.000Z",
+      expiresAt: null,
+      usageType: "auth"
+    });
+    authService.deleteGitlabSshKey.mockResolvedValue({ deleted: true });
+
+    const createResponse = await request(app.getHttpServer())
+      .post("/auth/gitlab/ssh-keys")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .send({
+        title: "Laptop",
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAexample"
+      })
+      .expect(201);
+
+    const deleteResponse = await request(app.getHttpServer())
+      .delete("/auth/gitlab/ssh-keys/7")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    expect(authService.createGitlabSshKey).toHaveBeenCalledWith(
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      },
+      {
+        title: "Laptop",
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAexample"
+      }
+    );
+    expect(authService.deleteGitlabSshKey).toHaveBeenCalledWith(
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      },
+      "7"
+    );
+    expect(createResponse.body.id).toBe(7);
+    expect(deleteResponse.body).toEqual({ deleted: true });
+  });
 });

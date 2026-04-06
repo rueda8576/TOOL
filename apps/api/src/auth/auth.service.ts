@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
-import { InviteAccessMode, InviteStatus, NotificationEventType, NotificationStatus, ProjectRole } from "@prisma/client";
+import { GlobalRole, InviteAccessMode, InviteStatus, NotificationEventType, NotificationStatus, ProjectRole } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { JwtService } from "@nestjs/jwt";
 
@@ -52,6 +52,15 @@ export class AuthService {
     private readonly gitlabService: GitlabService
   ) {}
 
+  private createSessionToken(params: { userId: string; email: string; globalRole: GlobalRole }): string {
+    return this.jwtService.sign({
+      sub: params.userId,
+      email: params.email,
+      role: prismaRoleToApiRole(params.globalRole),
+      jti: generateSecureToken(12)
+    });
+  }
+
   async login(dto: LoginDto): Promise<{
     token: string;
     expiresAt: Date;
@@ -76,10 +85,10 @@ export class AuthService {
       throw new UnauthorizedException("Invalid credentials");
     }
 
-    const token = this.jwtService.sign({
-      sub: user.id,
+    const token = this.createSessionToken({
+      userId: user.id,
       email: user.email,
-      role: prismaRoleToApiRole(user.globalRole)
+      globalRole: user.globalRole
     });
 
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -293,10 +302,10 @@ export class AuthService {
       }
     });
 
-    const token = this.jwtService.sign({
-      sub: user.id,
+    const token = this.createSessionToken({
+      userId: user.id,
       email: user.email,
-      role: prismaRoleToApiRole(user.globalRole)
+      globalRole: user.globalRole
     });
 
     await this.prisma.session.create({

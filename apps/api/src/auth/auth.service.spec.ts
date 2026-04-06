@@ -177,7 +177,8 @@ describe("AuthService", () => {
     expect(jwtService.sign).toHaveBeenCalledWith({
       sub: "user-1",
       email: "user@example.com",
-      role: "editor"
+      role: "editor",
+      jti: expect.any(String)
     });
     expect(prisma.session.create).toHaveBeenCalledWith({
       data: {

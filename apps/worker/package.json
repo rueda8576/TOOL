@@ -8,7 +8,8 @@
     "start": "node dist/main.js",
     "lint": "echo 'No lint configured for @doctoral/worker'",
     "test": "jest --config jest.config.ts --runInBand",
-    "test:coverage": "jest --config jest.config.ts --runInBand --coverage --coverageReporters=text-summary"
+    "test:coverage": "jest --config jest.config.ts --runInBand --coverage",
+    "test:coverage:gate": "pnpm run test:coverage && node scripts/assert-coverage.cjs --threshold=95"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

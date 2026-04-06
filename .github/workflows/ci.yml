@@ -48,15 +48,11 @@ jobs:
           pnpm --filter @doctoral/api exec which jest
           pnpm --filter @doctoral/worker exec which jest
           echo "DATABASE_URL=${DATABASE_URL}"
-      - name: API unit tests with coverage
-        run: pnpm --filter @doctoral/api test:unit:coverage
-      - name: Worker unit tests with coverage
-        run: pnpm --filter @doctoral/worker test:coverage
-      - name: API HTTP tests
-        run: pnpm --filter @doctoral/api test:http
       - name: Prepare test database
         run: pnpm --filter @doctoral/db db:test:prepare
-      - name: API integration tests
-        run: pnpm --filter @doctoral/api test:integration
+      - name: API aggregated coverage
+        run: pnpm --filter @doctoral/api test:coverage
+      - name: Worker unit tests with coverage
+        run: pnpm --filter @doctoral/worker test:coverage
       - name: Build
         run: pnpm build

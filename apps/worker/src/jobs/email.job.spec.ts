@@ -56,6 +56,48 @@ describe("processEmailJob", () => {
     expect(prisma.notificationEvent.findUnique).not.toHaveBeenCalled();
   });
 
+  it("returns silently when the job carries no supported payload", async () => {
+    const sendMail = jest.fn().mockResolvedValue(undefined);
+    const { processEmailJob } = await loadJob(sendMail);
+    const prisma = {
+      notificationEvent: {
+        findUnique: jest.fn(),
+        update: jest.fn()
+      }
+    } as any;
+
+    await processEmailJob(prisma, { data: {} } as any);
+
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(prisma.notificationEvent.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("returns silently when the referenced notification event no longer exists", async () => {
+    const sendMail = jest.fn().mockResolvedValue(undefined);
+    const { processEmailJob } = await loadJob(sendMail);
+    const prisma = {
+      notificationEvent: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        update: jest.fn()
+      }
+    } as any;
+
+    await processEmailJob(prisma, { data: { notificationEventId: "missing-event" } } as any);
+
+    expect(prisma.notificationEvent.findUnique).toHaveBeenCalledWith({
+      where: { id: "missing-event" },
+      include: {
+        user: {
+          include: {
+            notificationPreference: true
+          }
+        }
+      }
+    });
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(prisma.notificationEvent.update).not.toHaveBeenCalled();
+  });
+
   it("cancels notification emails when the user disabled email notifications", async () => {
     const sendMail = jest.fn().mockResolvedValue(undefined);
     const { processEmailJob } = await loadJob(sendMail);

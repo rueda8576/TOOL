@@ -1,5 +1,46 @@
 # Implementation TODO (v1 bootstrap)
 
+## Coverage Gate - 95% API + Worker (2026-04-06)
+- [x] Add stable aggregated API coverage flow across unit, HTTP, and integration suites.
+- [x] Normalize API/worker coverage scope with explicit include/exclude rules and stable report artifacts (`text-summary`, `json-summary`, `lcov`).
+- [x] Add the missing API unit tests needed to lift uncovered infra/services/utilities toward the 95% target.
+- [x] Extend HTTP/controller coverage to `projects`, `meetings`, `notifications`, and `wiki`.
+- [x] Add API integration paths for invite acceptance/login and document branch/compile flow.
+- [x] Add worker config/helper tests and raise remaining branch coverage in job specs.
+- [ ] Activate global 95/95/95/95 thresholds for API and worker once the normalized coverage reaches target.
+- [x] Update `test:ci` and CI workflow to use the new gateable coverage commands.
+- [x] Validate the full coverage pipeline locally and document final percentages.
+
+### Review - Coverage Gate - 95% API + Worker
+- Added an aggregated API coverage runner in `apps/api/scripts/run-coverage.cjs` that executes unit, HTTP, and integration suites separately, merges `coverage-final.json`, and emits stable `text-summary`, `json-summary`, and `lcov` artifacts.
+- Normalized coverage scope to the exact backend rules from the plan:
+  - API includes `src/**/*.ts` and excludes specs, modules, `main.ts`, scripts, `*.types.ts`, `*.decorator.ts`, `config/load-env.ts`, and `common/authenticated-user.ts`.
+  - worker includes `src/**/*.ts` and excludes specs, `main.ts`, and `config/load-env.ts`.
+- Added gate-ready scripts without forcing them into CI prematurely:
+  - API: `pnpm --filter @doctoral/api test:coverage:gate`
+  - worker: `pnpm --filter @doctoral/worker test:coverage:gate`
+  - root: `pnpm test:ci:gate`
+- Expanded backend tests further in this round:
+  - new API unit coverage for `oidc.service`, `notifications.service`, `audit.service`, `storage.service`, `queue.service`, `app.controller`, `health.controller`, `crypto`, `session-cookie`, and `collaboration-server-registry`
+  - new HTTP/controller slices for `projects`, `meetings`, `notifications`, and `wiki`
+  - integration paths for `invite -> accept -> login` and `document -> branch/version -> compile enqueue`
+  - worker coverage uplift with config/helper tests and deep `latex-compile.job` branch coverage
+- The new integration flow exposed a real auth bug: repeated session JWTs could collide on `tokenHash`. Fixed in `apps/api/src/auth/auth.service.ts` by adding a per-session `jti` when minting session tokens.
+- Local validation completed successfully with:
+  - `pnpm --filter @doctoral/worker build`
+  - `pnpm --filter @doctoral/worker test:coverage`
+  - `pnpm --filter @doctoral/worker test:coverage:gate`
+  - `pnpm --filter @doctoral/api test:coverage`
+  - `pnpm test:ci`
+  - `git diff --check`
+- Final measured coverage with the exact normalized scope:
+  - API aggregated: statements `64.75%`, branches `45.04%`, functions `64.95%`, lines `63.85%`
+  - worker: statements `99.56%`, branches `98.11%`, functions `96.29%`, lines `99.54%`
+- Result:
+  - worker is now genuinely above the 95% target and its dedicated gate passes
+  - API is still far below the target once measured against the exact final scope, so the global 95/95/95/95 CI gate remains intentionally disabled
+  - `pnpm test:ci` passes end-to-end on the non-gated baseline path
+
 ## Test Hardening + CI Upgrade (2026-04-06)
 - [x] Add dedicated backend test scripts/config split for API unit, API HTTP, API integration, and worker tests.
 - [x] Expand API unit coverage for `tasks.service`, `documents.service`, `meetings.service`, `auth.service`, `session-auth.service`, and `gitlab.service`.

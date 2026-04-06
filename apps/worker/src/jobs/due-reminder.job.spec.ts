@@ -147,4 +147,60 @@ describe("processDueReminderJob", () => {
     expect(prisma.notificationEvent.create).not.toHaveBeenCalled();
     expect(emailQueue.add).not.toHaveBeenCalled();
   });
+
+  it("skips tasks that are overdue, missing assignees, or disabled for due reminders", async () => {
+    const dueSoon = new Date(Date.now() + 60 * 60 * 1000);
+    const prisma = {
+      task: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: "task-1",
+            title: "Missing assignee relation",
+            assigneeId: "user-1",
+            dueDate: dueSoon,
+            assignee: null
+          },
+          {
+            id: "task-2",
+            title: "Reminder disabled",
+            assigneeId: "user-2",
+            dueDate: dueSoon,
+            assignee: {
+              notificationPreference: {
+                emailEnabled: true,
+                taskDue: false,
+                taskDueLeadHours: 24
+              }
+            }
+          },
+          {
+            id: "task-3",
+            title: "Already overdue",
+            assigneeId: "user-3",
+            dueDate: new Date(Date.now() - 60 * 60 * 1000),
+            assignee: {
+              notificationPreference: {
+                emailEnabled: true,
+                taskDue: true,
+                taskDueLeadHours: 24
+              }
+            }
+          }
+        ])
+      },
+      notificationEvent: {
+        findFirst: jest.fn(),
+        create: jest.fn()
+      }
+    } as any;
+    const emailQueue = {
+      add: jest.fn()
+    } as any;
+
+    await processDueReminderJob(prisma, emailQueue, { data: { triggeredBy: "scheduler" } } as any);
+
+    expect(prisma.notificationEvent.findFirst).not.toHaveBeenCalled();
+    expect(prisma.notificationEvent.create).not.toHaveBeenCalled();
+    expect(emailQueue.add).not.toHaveBeenCalled();
+  });
 });

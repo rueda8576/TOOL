@@ -85,6 +85,22 @@ describe("processBackupJob", () => {
       return child;
     });
 
+  const makeSpawnError = (): jest.Mock =>
+    jest.fn(() => {
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+      };
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+
+      process.nextTick(() => {
+        child.emit("error", new Error("pg_dump crashed"));
+      });
+
+      return child;
+    });
+
   afterEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
@@ -175,6 +191,70 @@ describe("processBackupJob", () => {
         completedAt: expect.any(Date),
         details: {
           error: expect.stringContaining("pg_dump failed with code 1")
+        }
+      }
+    });
+  });
+
+  it("cleans up stale backup files after a successful run", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-backup-retention-"));
+    const backupsDir = join(storageRoot, "backups");
+    await mkdir(backupsDir, { recursive: true });
+    await writeFile(join(storageRoot, "sample.txt"), "content");
+
+    const staleDump = join(backupsDir, "db-stale.sql");
+    const freshDump = join(backupsDir, "db-fresh.sql");
+    await writeFile(staleDump, "old");
+    await writeFile(freshDump, "new");
+    const oldTimestamp = Date.now() - 40 * 24 * 60 * 60 * 1000;
+    await import("fs/promises").then(({ utimes }) => utimes(staleDump, oldTimestamp / 1000, oldTimestamp / 1000));
+
+    const { processBackupJob } = await loadJob({
+      storageRoot,
+      backupsDir,
+      spawnImpl: makeSpawnSuccess()
+    });
+    const prisma = {
+      backupRun: {
+        create: jest.fn().mockResolvedValue({ id: "backup-3" }),
+        update: jest.fn().mockResolvedValue(undefined)
+      }
+    } as any;
+
+    await processBackupJob(prisma, { data: {} } as any);
+
+    await expect(import("fs/promises").then(({ access }) => access(freshDump))).resolves.toBeUndefined();
+    await expect(import("fs/promises").then(({ access }) => access(staleDump))).rejects.toThrow();
+  });
+
+  it("marks the backup run as failed when pg_dump emits an error event", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-backup-error-"));
+    const backupsDir = join(storageRoot, "backups");
+    await mkdir(backupsDir, { recursive: true });
+
+    const { processBackupJob } = await loadJob({
+      storageRoot,
+      backupsDir,
+      spawnImpl: makeSpawnError()
+    });
+    const prisma = {
+      backupRun: {
+        create: jest.fn().mockResolvedValue({ id: "backup-4" }),
+        update: jest.fn().mockResolvedValue(undefined)
+      }
+    } as any;
+
+    await expect(processBackupJob(prisma, { data: {} } as any)).rejects.toThrow("pg_dump crashed");
+
+    expect(prisma.backupRun.update).toHaveBeenCalledWith({
+      where: {
+        id: "backup-4"
+      },
+      data: {
+        status: BackupStatus.FAILED,
+        completedAt: expect.any(Date),
+        details: {
+          error: "pg_dump crashed"
         }
       }
     });

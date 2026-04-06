@@ -93,4 +93,125 @@ describe("GitlabController HTTP", () => {
       content: "# Atlasium"
     });
   });
+
+  it("allows admins to search GitLab projects and binds the query", async () => {
+    gitlabService.searchProjects.mockResolvedValue([
+      {
+        id: "gl-1",
+        name: "Navigation",
+        pathWithNamespace: "atlasium/nav"
+      }
+    ]);
+
+    const response = await request(app.getHttpServer())
+      .get("/gitlab/projects/search")
+      .query({ q: "nav" })
+      .set(authHeaders("admin", { userId: "admin-1" }))
+      .expect(200);
+
+    expect(gitlabService.searchProjects).toHaveBeenCalledWith(
+      {
+        userId: "admin-1",
+        email: "admin@example.com",
+        globalRole: "admin"
+      },
+      "nav"
+    );
+    expect(response.body[0].pathWithNamespace).toBe("atlasium/nav");
+  });
+
+  it("binds commit and merge-request list queries", async () => {
+    gitlabService.listCommits.mockResolvedValue([{ id: "abc123" }]);
+    gitlabService.listMergeRequests.mockResolvedValue([{ id: 7 }]);
+
+    const commits = await request(app.getHttpServer())
+      .get("/projects/project-1/repository/commits")
+      .query({ ref: "feature/nav" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    const mergeRequests = await request(app.getHttpServer())
+      .get("/projects/project-1/repository/merge-requests")
+      .query({ state: "opened" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    expect(gitlabService.listCommits).toHaveBeenCalledWith(
+      "project-1",
+      "feature/nav",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      }
+    );
+    expect(gitlabService.listMergeRequests).toHaveBeenCalledWith(
+      "project-1",
+      "opened",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      }
+    );
+    expect(commits.body).toEqual([{ id: "abc123" }]);
+    expect(mergeRequests.body).toEqual([{ id: 7 }]);
+  });
+
+  it("streams repository archives and binds merge request creation DTOs", async () => {
+    gitlabService.getRepositoryArchive.mockResolvedValue({
+      fileName: "atlasium-nav-main.zip",
+      contentType: "application/zip",
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04])
+    });
+    gitlabService.createMergeRequest.mockResolvedValue({
+      id: 8,
+      iid: 8,
+      title: "Merge notes",
+      webUrl: "https://git.atlasium.info/atlasium/nav/-/merge_requests/8",
+      state: "opened"
+    });
+
+    const archive = await request(app.getHttpServer())
+      .get("/projects/project-1/repository/archive")
+      .query({ ref: "main" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    const mergeRequest = await request(app.getHttpServer())
+      .post("/projects/project-1/repository/merge-requests")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .send({
+        title: "Merge notes",
+        sourceBranch: "feature/notes",
+        targetBranch: "main"
+      })
+      .expect(201);
+
+    expect(gitlabService.getRepositoryArchive).toHaveBeenCalledWith(
+      "project-1",
+      "main",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      }
+    );
+    expect(gitlabService.createMergeRequest).toHaveBeenCalledWith(
+      "project-1",
+      {
+        title: "Merge notes",
+        sourceBranch: "feature/notes",
+        targetBranch: "main"
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+    expect(archive.headers["content-type"]).toContain("application/zip");
+    expect(archive.headers["content-disposition"]).toBe("attachment; filename=\"atlasium-nav-main.zip\"");
+    expect(mergeRequest.body.id).toBe(8);
+  });
 });

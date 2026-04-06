@@ -2,6 +2,8 @@ import { ValidationPipe, INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { GlobalRole, PrismaClient } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
+import { rm } from "fs/promises";
+import { join } from "path";
 import request from "supertest";
 
 import { AppModule } from "../src/app.module";
@@ -70,6 +72,10 @@ describe("API integration", () => {
     `);
   };
 
+  const truncateStorage = async (): Promise<void> => {
+    await rm(join(process.cwd(), "storage"), { recursive: true, force: true });
+  };
+
   const seedAdminUser = async (): Promise<{ id: string; email: string; password: string }> => {
     const password = "password-123";
     const passwordHash = await bcrypt.hash(password, 10);
@@ -99,6 +105,15 @@ describe("API integration", () => {
     };
   };
 
+  const loginAs = async (email: string, password: string): Promise<string> => {
+    const response = await request(app.getHttpServer())
+      .post("/auth/login")
+      .send({ email, password })
+      .expect(201);
+
+    return response.body.token as string;
+  };
+
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule]
@@ -125,22 +140,19 @@ describe("API integration", () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     await truncateDatabase(prisma);
+    await truncateStorage();
   });
 
   afterAll(async () => {
     await truncateDatabase(prisma);
+    await truncateStorage();
     await app.close();
   });
 
   it("boots the real app, logs in, creates a project, mutates a task, and persists the result", async () => {
     const seededAdmin = await seedAdminUser();
 
-    const loginResponse = await request(app.getHttpServer())
-      .post("/auth/login")
-      .send({ email: seededAdmin.email, password: seededAdmin.password })
-      .expect(201);
-
-    const token = loginResponse.body.token as string;
+    const token = await loginAs(seededAdmin.email, seededAdmin.password);
     expect(token).toEqual(expect.any(String));
 
     const createProjectResponse = await request(app.getHttpServer())
@@ -208,6 +220,132 @@ describe("API integration", () => {
       projectId,
       status: "IN_PROGRESS",
       title: "Write integration spec"
+    });
+  });
+
+  it("invites a user, accepts the invite, and allows that user to log in", async () => {
+    const seededAdmin = await seedAdminUser();
+    const adminToken = await loginAs(seededAdmin.email, seededAdmin.password);
+
+    const inviteResponse = await request(app.getHttpServer())
+      .post("/auth/invite")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        email: "invitee@example.com",
+        globalRole: "reader",
+        accessMode: "all",
+        defaultProjectRole: "reader"
+      })
+      .expect(201);
+
+    expect(queueService.enqueueEmail).toHaveBeenCalledTimes(1);
+
+    const acceptResponse = await request(app.getHttpServer())
+      .post("/auth/accept-invite")
+      .send({
+        token: inviteResponse.body.token,
+        name: "Invited Reader",
+        password: "password-456"
+      })
+      .expect(201);
+
+    expect(acceptResponse.body.userId).toEqual(expect.any(String));
+    expect(acceptResponse.body.projectIds).toEqual([]);
+
+    const invitedToken = await loginAs("invitee@example.com", "password-456");
+    expect(invitedToken).toEqual(expect.any(String));
+
+    const invitedUser = await prisma.user.findUnique({
+      where: { email: "invitee@example.com" },
+      select: {
+        id: true,
+        globalRole: true,
+        isActive: true
+      }
+    });
+
+    expect(invitedUser).toEqual({
+      id: acceptResponse.body.userId,
+      globalRole: GlobalRole.READER,
+      isActive: true
+    });
+  });
+
+  it("creates a document flow with branch/version creation and compile enqueue", async () => {
+    const seededAdmin = await seedAdminUser();
+    const token = await loginAs(seededAdmin.email, seededAdmin.password);
+
+    const createProjectResponse = await request(app.getHttpServer())
+      .post("/projects")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        key: "DOCOPS",
+        name: "Document Ops"
+      })
+      .expect(201);
+
+    const projectId = createProjectResponse.body.id as string;
+
+    const createDocumentResponse = await request(app.getHttpServer())
+      .post(`/projects/${projectId}/documents`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        title: "Integration Paper",
+        type: "paper",
+        authors: ["Invited Reader"]
+      })
+      .expect(201);
+
+    const documentId = createDocumentResponse.body.id as string;
+
+    const createBranchResponse = await request(app.getHttpServer())
+      .post(`/documents/${documentId}/branches`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        name: "draft"
+      })
+      .expect(201);
+
+    const createVersionResponse = await request(app.getHttpServer())
+      .post(`/documents/${documentId}/versions`)
+      .set("Authorization", `Bearer ${token}`)
+      .field("branchName", "draft")
+      .field("notes", "Initial draft")
+      .field("latexEntryFile", "main.tex")
+      .expect(201);
+
+    const documentVersionId = createVersionResponse.body.id as string;
+
+    const compileResponse = await request(app.getHttpServer())
+      .post(`/document-versions/${documentVersionId}/compile`)
+      .set("Authorization", `Bearer ${token}`)
+      .expect(201);
+
+    expect(queueService.enqueueCompile).toHaveBeenCalledWith({
+      documentVersionId,
+      compileJobId: compileResponse.body.compileJobId
+    });
+
+    const persistedVersion = await prisma.documentVersion.findUnique({
+      where: { id: documentVersionId },
+      select: {
+        branch: {
+          select: {
+            name: true
+          }
+        },
+        latexWorkspacePath: true,
+        compileStatus: true
+      }
+    });
+
+    expect(createBranchResponse.body.name).toBe("draft");
+    expect(persistedVersion).toEqual({
+      branch: {
+        name: "draft"
+      },
+      latexWorkspacePath: expect.stringContaining(`latex-workspaces/${documentVersionId}`),
+      compileStatus: "PENDING"
     });
   });
 });

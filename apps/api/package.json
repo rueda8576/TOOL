@@ -11,6 +11,8 @@
     "test": "pnpm run test:unit",
     "test:unit": "jest --config jest.config.ts --runInBand",
     "test:unit:coverage": "jest --config jest.config.ts --runInBand --coverage --coverageReporters=text-summary",
+    "test:coverage": "node scripts/run-coverage.cjs",
+    "test:coverage:gate": "node scripts/run-coverage.cjs --threshold=95",
     "test:http": "jest --config jest.http.config.ts --runInBand",
     "test:integration": "jest --config jest.integration.config.ts --runInBand",
     "test:watch": "jest --watch"
@@ -48,6 +50,9 @@
     "@types/node": "^22.10.2",
     "@types/supertest": "^6.0.3",
     "@types/ws": "^8.18.1",
+    "istanbul-lib-coverage": "^3.2.2",
+    "istanbul-lib-report": "^3.0.1",
+    "istanbul-reports": "^3.1.7",
     "jest": "^29.7.0",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
