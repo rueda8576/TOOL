@@ -136,6 +136,9 @@ jobs:
             set -euo pipefail
             on_error() {
               IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml logs --tail=200 migrate api web worker postgres || true
+              if docker ps -a --format '{{.Names}}' | grep -qx 'atlasium-gitlab'; then
+                docker compose -f docker-compose.gitlab.yml logs --tail=200 gitlab || true
+              fi
             }
             trap on_error ERR
             run_privileged() {
@@ -150,6 +153,7 @@ jobs:
               fi
             }
             cd /opt/atlasium
+            PRE_DEPLOY_HEAD="$(git rev-parse HEAD 2>/dev/null || true)"
             git fetch --all --prune
             git reset --hard "${DEPLOY_SHA}"
             git clean -fd
@@ -175,6 +179,15 @@ jobs:
             run_privileged nginx -t
             run_privileged systemctl reload nginx
             echo "Nginx config applied and reloaded."
+            if [ -n "${PRE_DEPLOY_HEAD}" ] && ! git diff --quiet "${PRE_DEPLOY_HEAD}" HEAD -- docker-compose.gitlab.yml; then
+              echo "GitLab compose config changed in this deploy."
+              if docker ps -a --format '{{.Names}}' | grep -qx 'atlasium-gitlab'; then
+                docker compose -f docker-compose.gitlab.yml up -d
+                docker compose -f docker-compose.gitlab.yml ps
+              else
+                echo "GitLab stack not initialized on this VPS; skipping automatic GitLab reconcile."
+              fi
+            fi
             docker compose -f docker-compose.prod.yml ps
 
       - name: Healthcheck (VPS local required + public HTTPS probe)
@@ -237,6 +250,9 @@ jobs:
             set -euo pipefail
             on_error() {
               IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml logs --tail=200 migrate api web worker postgres || true
+              if docker ps -a --format '{{.Names}}' | grep -qx 'atlasium-gitlab'; then
+                docker compose -f docker-compose.gitlab.yml logs --tail=200 gitlab || true
+              fi
             }
             trap on_error ERR
             run_privileged() {
@@ -251,6 +267,7 @@ jobs:
               fi
             }
             cd /opt/atlasium
+            PRE_DEPLOY_HEAD="$(git rev-parse HEAD 2>/dev/null || true)"
             git fetch --all --prune
             git reset --hard origin/main
             git clean -fd
@@ -276,6 +293,15 @@ jobs:
             run_privileged nginx -t
             run_privileged systemctl reload nginx
             echo "Nginx config applied and reloaded."
+            if [ -n "${PRE_DEPLOY_HEAD}" ] && ! git diff --quiet "${PRE_DEPLOY_HEAD}" HEAD -- docker-compose.gitlab.yml; then
+              echo "GitLab compose config changed in this deploy."
+              if docker ps -a --format '{{.Names}}' | grep -qx 'atlasium-gitlab'; then
+                docker compose -f docker-compose.gitlab.yml up -d
+                docker compose -f docker-compose.gitlab.yml ps
+              else
+                echo "GitLab stack not initialized on this VPS; skipping automatic GitLab reconcile."
+              fi
+            fi
             docker compose -f docker-compose.prod.yml ps
 
       - name: Healthcheck (VPS local required + public HTTPS probe)

@@ -1,5 +1,17 @@
 # Implementation TODO (v1 bootstrap)
 
+## CD - Conditional GitLab Compose Reconcile (2026-04-06)
+- [x] Detect when `docker-compose.gitlab.yml` changed across a deployment.
+- [x] Reconcile the GitLab compose stack automatically during CD only when that file changed.
+- [x] Keep Atlasium deploy behavior unchanged when GitLab config did not change.
+- [x] Validate workflow syntax and document the result.
+
+### Review - CD - Conditional GitLab Compose Reconcile
+- The deploy workflow now captures the pre-deploy Git HEAD on the VPS, compares it with the checked-out target commit, and only reconciles `docker-compose.gitlab.yml` when that file changed.
+- Automatic GitLab reconcile is guarded behind an existing `atlasium-gitlab` container check, so CD still does not bootstrap GitLab on fresh VPS setups.
+- Both auto and manual deploy paths now include GitLab logs in the SSH error trap when the GitLab stack exists, which makes failures easier to diagnose.
+- Validated with YAML parsing (`ruby`/`YAML.load_file`) and `git diff --check`.
+
 ## GitLab Identity + SSH-First Access (2026-04-06)
 - [x] Enable GitLab auto-SSO with Atlasium while preserving local-root bypass and disabling self-sign-up.
 - [x] Extend backend repository status with `sshCloneUrl`.
