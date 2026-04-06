@@ -238,11 +238,18 @@ export default function ProjectDetailPage({
                 <ul className="list project-overview-list">
                   {inProgressTasks.map((task) => (
                     <li className="list-item project-overview-item" key={task.id}>
-                      <strong>{task.title}</strong>
-                      <p className="project-overview-meta">
-                        Priority: {task.priority} | {task.assignee ? `Assigned to ${task.assignee.name}` : "Unassigned"}
-                        {task.dueDate ? ` | Due ${formatDate(task.dueDate)}` : ""}
-                      </p>
+                      <Link className="project-overview-item-link" href={`/projects/${params.projectId}/tasks`}>
+                        <div className="project-overview-task-row">
+                          <strong>{task.title}</strong>
+                          <span className={`badge task-priority-badge task-priority-${task.priority}`}>
+                            {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
+                          </span>
+                        </div>
+                        <p className="project-overview-meta">
+                          {task.assignee ? task.assignee.name : "Unassigned"}
+                          {task.dueDate ? ` · Due ${formatDate(task.dueDate)}` : ""}
+                        </p>
+                      </Link>
                     </li>
                   ))}
                 </ul>

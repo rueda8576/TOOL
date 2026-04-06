@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { DragEvent, FormEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
@@ -39,6 +39,13 @@ const statusOptions: Array<{ value: TaskStatus; label: string }> = [
   { value: "done", label: "Done" }
 ];
 
+const priorityOrder: Record<TaskPriority, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3
+};
+
 type TaskFormMode = "create" | "edit";
 type ContextMenuState = { taskId: string; x: number; y: number } | null;
 
@@ -66,6 +73,8 @@ export default function ProjectTasksPage({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null);
 
   const loadTasks = useCallback(
     async (authToken: string): Promise<void> => {
@@ -122,23 +131,15 @@ export default function ProjectTasksPage({
   }, [loadAccess, loadMembers, loadTasks, router]);
 
   useEffect(() => {
-    if (!contextMenu) {
-      return;
-    }
+    if (!contextMenu) return;
 
-    const closeMenu = (): void => {
-      setContextMenu(null);
-    };
-
+    const closeMenu = (): void => { setContextMenu(null); };
     const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        setContextMenu(null);
-      }
+      if (event.key === "Escape") setContextMenu(null);
     };
 
     window.addEventListener("click", closeMenu);
     window.addEventListener("keydown", closeOnEscape);
-
     return () => {
       window.removeEventListener("click", closeMenu);
       window.removeEventListener("keydown", closeOnEscape);
@@ -146,18 +147,18 @@ export default function ProjectTasksPage({
   }, [contextMenu]);
 
   const tasksByStatus = useMemo(() => {
-    return tasks.reduce<Record<TaskStatus, TaskListItem[]>>(
-      (accumulator, task) => {
-        accumulator[task.status].push(task);
-        return accumulator;
+    const groups = tasks.reduce<Record<TaskStatus, TaskListItem[]>>(
+      (acc, task) => {
+        acc[task.status].push(task);
+        return acc;
       },
-      {
-        todo: [],
-        in_progress: [],
-        blocked: [],
-        done: []
-      }
+      { todo: [], in_progress: [], blocked: [], done: [] }
     );
+    // Sort each column: critical first, then high, medium, low
+    for (const col of Object.values(groups)) {
+      col.sort((a, b) => (priorityOrder[a.priority] ?? 4) - (priorityOrder[b.priority] ?? 4));
+    }
+    return groups;
   }, [tasks]);
 
   const canWrite = projectAccess?.canWrite ?? false;
@@ -182,9 +183,7 @@ export default function ProjectTasksPage({
 
   const openEditForm = (taskId: string): void => {
     const task = tasks.find((item) => item.id === taskId);
-    if (!task) {
-      return;
-    }
+    if (!task) return;
 
     setFormMode("edit");
     setEditingTaskId(task.id);
@@ -204,34 +203,21 @@ export default function ProjectTasksPage({
       setError("You do not have write access to this project.");
       return;
     }
-
     if (showForm && formMode === "create") {
       setShowForm(false);
       setContextMenu(null);
       return;
     }
-
     openCreateForm();
   };
 
   const onSubmit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
-
-    if (!token) {
-      setError("Missing session token. Please sign in again.");
-      return;
-    }
-
-    if (!canWrite) {
-      setError("You do not have write access to this project.");
-      return;
-    }
+    if (!token) { setError("Missing session token. Please sign in again."); return; }
+    if (!canWrite) { setError("You do not have write access to this project."); return; }
 
     const trimmedTitle = title.trim();
-    if (!trimmedTitle) {
-      setError("Title is required.");
-      return;
-    }
+    if (!trimmedTitle) { setError("Title is required."); return; }
 
     setSubmitting(true);
     setError(null);
@@ -257,7 +243,6 @@ export default function ProjectTasksPage({
         });
         setSuccess("Task created successfully.");
       }
-
       await loadTasks(token);
       resetForm();
       setShowForm(false);
@@ -269,26 +254,15 @@ export default function ProjectTasksPage({
   };
 
   const deleteTaskFromBoard = async (taskId: string): Promise<void> => {
-    if (!token) {
-      setError("Missing session token. Please sign in again.");
-      return;
-    }
-
-    if (!canWrite) {
-      setError("You do not have write access to this project.");
-      return;
-    }
+    if (!token) { setError("Missing session token. Please sign in again."); return; }
+    if (!canWrite) { setError("You do not have write access to this project."); return; }
 
     const confirmed = window.confirm("Delete this task?");
-    if (!confirmed) {
-      setContextMenu(null);
-      return;
-    }
+    if (!confirmed) { setContextMenu(null); return; }
 
     setActiveTaskActionId(taskId);
     setError(null);
     setSuccess(null);
-
     try {
       await deleteTaskApi(taskId, token);
       setSuccess("Task deleted successfully.");
@@ -302,15 +276,11 @@ export default function ProjectTasksPage({
   };
 
   const openContextMenu = (taskId: string, x: number, y: number): void => {
-    if (!canWrite) {
-      return;
-    }
-
+    if (!canWrite) return;
     const menuWidth = 190;
     const menuHeight = 110;
     const safeX = Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8));
     const safeY = Math.max(8, Math.min(y, window.innerHeight - menuHeight - 8));
-
     setContextMenu({ taskId, x: safeX, y: safeY });
   };
 
@@ -322,9 +292,61 @@ export default function ProjectTasksPage({
   const onCardActionsClick = (taskId: string, event: MouseEvent<HTMLButtonElement>): void => {
     event.preventDefault();
     event.stopPropagation();
-
     const buttonRect = event.currentTarget.getBoundingClientRect();
     openContextMenu(taskId, buttonRect.right, buttonRect.bottom);
+  };
+
+  // ── Drag & drop handlers ──────────────────────────────────────────
+
+  const onCardDragStart = (taskId: string, event: DragEvent<HTMLDivElement>): void => {
+    setDraggingTaskId(taskId);
+    event.dataTransfer.effectAllowed = "move";
+  };
+
+  const onCardDragEnd = (): void => {
+    setDraggingTaskId(null);
+    setDragOverColumn(null);
+  };
+
+  const onColumnDragOver = (columnStatus: TaskStatus, event: DragEvent<HTMLElement>): void => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverColumn(columnStatus);
+  };
+
+  const onColumnDragLeave = (event: DragEvent<HTMLElement>): void => {
+    // Only clear if leaving the column itself, not entering a child
+    if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+      setDragOverColumn(null);
+    }
+  };
+
+  const onColumnDrop = async (columnStatus: TaskStatus, event: DragEvent<HTMLElement>): Promise<void> => {
+    event.preventDefault();
+    setDragOverColumn(null);
+
+    if (!draggingTaskId || !token) return;
+
+    const task = tasks.find((t) => t.id === draggingTaskId);
+    if (!task || task.status === columnStatus) {
+      setDraggingTaskId(null);
+      return;
+    }
+
+    const taskId = draggingTaskId;
+    setDraggingTaskId(null);
+
+    // Optimistic update
+    setTasks((current) =>
+      current.map((t) => (t.id === taskId ? { ...t, status: columnStatus } : t))
+    );
+
+    try {
+      await updateTaskApi(taskId, token, { status: columnStatus });
+    } catch (dragError) {
+      setError((dragError as Error).message || "Failed to move task.");
+      await loadTasks(token);
+    }
   };
 
   return (
@@ -427,10 +449,7 @@ export default function ProjectTasksPage({
                 className="button button-secondary"
                 type="button"
                 disabled={submitting}
-                onClick={() => {
-                  setShowForm(false);
-                  resetForm();
-                }}
+                onClick={() => { setShowForm(false); resetForm(); }}
               >
                 Cancel
               </button>
@@ -442,38 +461,66 @@ export default function ProjectTasksPage({
       {loading ? <p className="alert alert-info">Loading tasks...</p> : null}
 
       <section className="kanban">
-        {taskColumns.map((column) => (
-          <article className="kanban-column" key={column.status}>
-            <h3>{column.title}</h3>
-            {tasksByStatus[column.status].length === 0 ? <p>No tasks in this column.</p> : null}
-            {tasksByStatus[column.status].map((task) => (
-              <div className="list-item task-card" key={task.id} onContextMenu={(event) => onCardContextMenu(task.id, event)}>
-                <div className="task-card-header">
-                  <strong>{task.title}</strong>
-                  {canWrite ? (
-                    <button
-                      className="task-actions-button"
-                      type="button"
-                      aria-label="Task actions"
-                      onClick={(event) => onCardActionsClick(task.id, event)}
-                      disabled={activeTaskActionId === task.id}
-                    >
-                      ...
-                    </button>
-                  ) : null}
-                </div>
-                {task.description ? <p>{task.description}</p> : null}
-                <p className="task-assignee">
-                  Assigned to: {task.assignee ? `${task.assignee.name} (${task.assignee.email})` : "Unassigned"}
-                </p>
-                <div className="task-meta">
-                  <span className="badge">Priority: {task.priority}</span>
-                  {task.dueDate ? <span className="badge">Due: {new Date(task.dueDate).toLocaleDateString()}</span> : null}
-                </div>
+        {taskColumns.map((column) => {
+          const columnTasks = tasksByStatus[column.status];
+          return (
+            <article
+              key={column.status}
+              className={`kanban-column${dragOverColumn === column.status && draggingTaskId ? " kanban-column-drag-over" : ""}`}
+              onDragOver={(event) => onColumnDragOver(column.status, event)}
+              onDragLeave={onColumnDragLeave}
+              onDrop={(event) => void onColumnDrop(column.status, event)}
+            >
+              <div className="kanban-column-header">
+                <h3>{column.title}</h3>
+                {columnTasks.length > 0 ? (
+                  <span className="kanban-column-count">{columnTasks.length}</span>
+                ) : null}
               </div>
-            ))}
-          </article>
-        ))}
+              {columnTasks.length === 0 ? (
+                <p className="kanban-empty">No tasks here.</p>
+              ) : null}
+              {columnTasks.map((task) => (
+                <div
+                  className={`list-item task-card${draggingTaskId === task.id ? " task-card-dragging" : ""}`}
+                  key={task.id}
+                  data-priority={task.priority}
+                  draggable={canWrite}
+                  onDragStart={(event) => onCardDragStart(task.id, event)}
+                  onDragEnd={onCardDragEnd}
+                  onContextMenu={(event) => onCardContextMenu(task.id, event)}
+                >
+                  <div className="task-card-header">
+                    <strong>{task.title}</strong>
+                    {canWrite ? (
+                      <button
+                        className="task-actions-button"
+                        type="button"
+                        aria-label="Task actions"
+                        onClick={(event) => onCardActionsClick(task.id, event)}
+                        disabled={activeTaskActionId === task.id}
+                      >
+                        ···
+                      </button>
+                    ) : null}
+                  </div>
+                  {task.description ? <p>{task.description}</p> : null}
+                  <p className="task-assignee">
+                    {task.assignee ? task.assignee.name : "Unassigned"}
+                  </p>
+                  <div className="task-meta">
+                    <span className={`badge task-priority-badge task-priority-${task.priority}`}>
+                      {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
+                    </span>
+                    {task.dueDate ? (
+                      <span className="badge">Due: {new Date(task.dueDate).toLocaleDateString()}</span>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </article>
+          );
+        })}
       </section>
 
       {contextMenu ? (
@@ -486,18 +533,14 @@ export default function ProjectTasksPage({
           <button
             className="task-context-item"
             type="button"
-            onClick={() => {
-              openEditForm(contextMenu.taskId);
-            }}
+            onClick={() => { openEditForm(contextMenu.taskId); }}
           >
             Edit
           </button>
           <button
             className="task-context-item task-context-item-danger"
             type="button"
-            onClick={() => {
-              void deleteTaskFromBoard(contextMenu.taskId);
-            }}
+            onClick={() => { void deleteTaskFromBoard(contextMenu.taskId); }}
           >
             Delete
           </button>
