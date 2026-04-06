@@ -1,4 +1,11 @@
-import { BadRequestException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import {
+  BadGatewayException,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  ServiceUnavailableException,
+  UnauthorizedException
+} from "@nestjs/common";
 
 import { encryptValue } from "../common/crypto";
 import { GitlabService } from "./gitlab.service";
@@ -198,6 +205,16 @@ describe("GitlabService", () => {
       where: {
         userId: "user-1"
       }
+    });
+  });
+
+  it("returns a disconnected connection status when no GitLab OAuth record exists", async () => {
+    const { service, prisma } = makeServiceWithDeps();
+    prisma.gitLabConnection.findUnique.mockResolvedValue(null);
+
+    await expect(service.getConnectionStatus("user-1")).resolves.toEqual({
+      connected: false,
+      reconnectRequired: false
     });
   });
 
@@ -1216,5 +1233,226 @@ describe("GitlabService", () => {
         action: "project.repository.merge_request.create"
       })
     );
+  });
+
+  it("rejects manual repository linking and searching flows for managed GitLab projects", async () => {
+    const service = makeService();
+
+    await expect(service.searchProjects({} as any, "nav")).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.linkRepository("project-1", {} as any, {} as any)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.disconnectRepository("project-1", {} as any)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("fails readable and writable repository lookups when the repository is not provisioned", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(null);
+
+    await expect(
+      (service as any).requireReadableRepository("project-1", {
+        userId: "reader-1",
+        globalRole: "reader"
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    await expect(
+      (service as any).requireWritableRepository("project-1", {
+        userId: "editor-1",
+        globalRole: "editor"
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("rejects repository file reads without a file path", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+
+    await expect(
+      service.getRepositoryFile(
+        "project-1",
+        "   ",
+        "main",
+        {
+          userId: "reader-1",
+          globalRole: "reader"
+        } as any
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("refresh helpers reject reconnect-required or disconnected user states", async () => {
+    const { service, prisma } = makeServiceWithDeps();
+    prisma.gitLabConnection.findUnique.mockResolvedValue(null);
+
+    await expect((service as any).requireConnectionRecord("user-1")).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(
+      (service as any).ensureConnectionReady({
+        userId: "user-1",
+        reconnectRequired: true
+      })
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it("refreshes expiring user tokens and handles missing refresh tokens", async () => {
+    const { service } = makeServiceWithDeps();
+    const refreshConnectionSpy = jest
+      .spyOn(service as any, "refreshConnection")
+      .mockResolvedValue({ userId: "user-1", reconnectRequired: false });
+
+    await expect(
+      (service as any).ensureConnectionReady({
+        userId: "user-1",
+        reconnectRequired: false,
+        tokenExpiresAt: new Date(Date.now() + 10_000)
+      })
+    ).resolves.toEqual({ userId: "user-1", reconnectRequired: false });
+    expect(refreshConnectionSpy).toHaveBeenCalled();
+    refreshConnectionSpy.mockRestore();
+
+    const markReconnectRequiredSpy = jest.spyOn(service as any, "markReconnectRequired").mockResolvedValue(undefined);
+    await expect(
+      (service as any).refreshConnection({
+        userId: "user-1",
+        refreshTokenEncrypted: null
+      })
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(markReconnectRequiredSpy).toHaveBeenCalledWith("user-1");
+  });
+
+  it("exchanges OAuth tokens directly and surfaces exchange failures", async () => {
+    const service = makeService();
+
+    fetchSpy
+      .mockResolvedValueOnce(
+        {
+          ok: true,
+          json: async () => ({
+            access_token: "access-token",
+            refresh_token: "refresh-token",
+            expires_in: 3600
+          })
+        } as Response
+      )
+      .mockResolvedValueOnce(
+        {
+          ok: false,
+          text: async () => "invalid_grant"
+        } as Response
+      );
+
+    await expect(
+      (service as any).exchangeUserOAuthToken({
+        grantType: "authorization_code",
+        params: { code: "code-123" }
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        access_token: "access-token",
+        refresh_token: "refresh-token"
+      })
+    );
+
+    await expect(
+      (service as any).exchangeUserOAuthToken({
+        grantType: "refresh_token",
+        params: { refresh_token: "bad-token" }
+      })
+    ).rejects.toEqual(
+      expect.objectContaining({
+        constructor: UnauthorizedException,
+        message: "invalid_grant"
+      })
+    );
+  });
+
+  it("supports empty JSON responses and binary GitLab request failures", async () => {
+    const service = makeService();
+
+    fetchSpy
+      .mockResolvedValueOnce(
+        {
+          ok: true,
+          text: async () => ""
+        } as Response
+      )
+      .mockResolvedValueOnce(
+        {
+          ok: false,
+          status: 404,
+          text: async () => "404 Project Not Found"
+        } as Response
+      );
+
+    await expect((service as any).executeGitlabRequest("token", "/noop")).resolves.toBeUndefined();
+    await expect((service as any).executeGitlabBinaryRequest("token", "/archive")).rejects.toMatchObject({
+      status: 404
+    });
+  });
+
+  it("maps repository, infrastructure, and SSH key errors to Nest exceptions", () => {
+    const service = makeService();
+
+    expect((service as any).mapRepositoryAccessError(new Error("network"))).toBeInstanceOf(Error);
+    expect((service as any).mapRepositoryAccessError({})).toBeInstanceOf(BadGatewayException);
+    expect((service as any).mapInfrastructureError({})).toBeInstanceOf(BadGatewayException);
+    expect((service as any).mapUserSshKeyError({})).toBeInstanceOf(BadGatewayException);
+  });
+
+  it("maps GitLabApiError variants across repository, infrastructure, and SSH key helpers", async () => {
+    const service = makeService();
+    const captureGitlabError = async (status: number, body: string) => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: false,
+        status,
+        text: async () => body
+      } as Response);
+      try {
+        await (service as any).executeGitlabRequest("token", "/failing");
+      } catch (error) {
+        return error;
+      }
+      throw new Error("Expected GitLab request to fail");
+    };
+
+    const repo401 = (service as any).mapRepositoryAccessError(await captureGitlabError(401, "expired"));
+    const repo403 = (service as any).mapRepositoryAccessError(await captureGitlabError(403, "forbidden"));
+    const repo500 = (service as any).mapRepositoryAccessError(await captureGitlabError(500, "boom"));
+    const repo400 = (service as any).mapRepositoryAccessError(
+      await captureGitlabError(400, JSON.stringify({ message: { path: ["taken"] } }))
+    );
+    const infra404 = (service as any).mapInfrastructureError(await captureGitlabError(404, "missing"));
+    const ssh404 = (service as any).mapUserSshKeyError(await captureGitlabError(404, "missing"));
+
+    expect(repo401).toBeInstanceOf(UnauthorizedException);
+    expect(repo403).toBeInstanceOf(ForbiddenException);
+    expect(repo500).toBeInstanceOf(BadGatewayException);
+    expect(repo400).toBeInstanceOf(BadRequestException);
+    expect(infra404).toBeInstanceOf(ServiceUnavailableException);
+    expect(ssh404).toBeInstanceOf(NotFoundException);
+  });
+
+  it("validates repository paths, SSH key ids, archive names, and token expiry helpers", () => {
+    const service = makeService();
+
+    expect((service as any).normalizeRepositoryPath(" NAV Project ")).toBe("nav-project");
+    expect(() => (service as any).normalizeRepositoryPath("!!!")).toThrow(BadRequestException);
+
+    expect((service as any).normalizeUserSshKeyId(" 42 ")).toBe("42");
+    expect(() => (service as any).normalizeUserSshKeyId("ssh-key")).toThrow(BadRequestException);
+
+    expect((service as any).buildRepositoryArchiveFileName("/atlasium/nav/", "feature/nav")).toBe(
+      "atlasium-nav-feature-nav.zip"
+    );
+    expect((service as any).resolveTokenExpiry({ expires_in: 0 })).toBeNull();
+    expect((service as any).resolveTokenExpiry({ expires_in: 3600 })).toBeInstanceOf(Date);
+  });
+
+  it("extracts structured and raw GitLab error messages", () => {
+    const service = makeService();
+
+    expect((service as any).extractGitlabErrorMessage("", "fallback")).toBe("fallback");
+    expect((service as any).extractGitlabErrorMessage("plain text", "fallback")).toBe("plain text");
+    expect(
+      (service as any).extractGitlabErrorMessage(JSON.stringify({ message: { path: ["taken"], title: ["invalid"] } }), "fallback")
+    ).toBe("taken. invalid");
   });
 });

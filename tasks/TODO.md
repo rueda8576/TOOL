@@ -1,5 +1,75 @@
 # Implementation TODO (v1 bootstrap)
 
+## API Coverage Push vNext - Controllers + Branch Hotspots (2026-04-06)
+- [x] Expand `DocumentsController` HTTP coverage across create/delete/version/compile/log/tree/file/update routes and upload callbacks.
+- [x] Expand `WikiController` HTTP coverage across create/tree/flush/publish/delete/backlinks/upload/update/revisions routes and upload callbacks.
+- [x] Deepen `DocumentsCollaborationServer` coverage across malformed room queries, presence/wiki-presence rooms, send/cleanup, invalid workspace, and queued persistence.
+- [x] Raise `WikiService` branch coverage with helper validation, not-found branches, delete edge cases, backlink edge cases, and asset error paths.
+- [x] Raise `GitlabService` branch coverage with connection status, helper validation, OAuth exchange failures, request helpers, error mapping, and manual-flow rejections.
+- [x] Recompute aggregated API coverage, rerun worker gate, and validate full `pnpm test:ci`.
+
+### Review - API Coverage Push vNext - Controllers + Branch Hotspots
+- `DocumentsController` HTTP coverage now exercises the routes that were still uncovered:
+  - list/create/delete
+  - branch creation
+  - multipart version creation
+  - compile/compile-log/PDF/tree/file/update
+  - upload storage callbacks via real multipart requests in `supertest`
+- `WikiController` HTTP coverage now exercises:
+  - create/tree/get-by-path/search
+  - draft save / realtime flush / publish
+  - delete / backlinks / revisions
+  - asset upload + asset streaming
+  - legacy `PUT /wiki-pages/:pageId` update alias
+- `DocumentsCollaborationServer` coverage was pushed further with tests for:
+  - malformed room queries before auth
+  - `presence` and `wiki-presence` joins
+  - invalid workspace roots
+  - partial room close vs full teardown
+  - `safeSend` behavior for closed sockets and send callback failures
+  - queued file persistence when a persist is already in flight
+- `WikiService` coverage was extended with targeted branch tests for:
+  - slug/folder/path normalization
+  - wiki link parsing
+  - readable/not-found helpers
+  - blank-title `updatePage` fallback
+  - delete edge case where `deletedAt` is still null
+  - missing backlink page path
+  - missing/oversized asset uploads
+  - missing uploaded file metadata
+  - missing asset content
+- `GitlabService` coverage was extended with targeted helper/lifecycle tests for:
+  - disconnected connection status
+  - manual link/search/disconnect rejections
+  - readable/writable repository not-found paths
+  - empty `filePath` rejection
+  - reconnect-required and missing-refresh-token paths
+  - direct OAuth exchange success/failure
+  - empty JSON response handling and binary request failure
+  - repository/infrastructure/SSH key error mapping
+  - repository path / SSH key id / archive filename / token-expiry helpers
+  - structured GitLab error extraction
+- Local validation passed with:
+  - `pnpm --filter @doctoral/api test:http`
+  - `pnpm --filter @doctoral/api test:unit`
+  - `pnpm --filter @doctoral/api test:coverage`
+  - `pnpm --filter @doctoral/worker test:coverage:gate`
+  - `pnpm test:ci`
+  - `git diff --check`
+- New measured API aggregated coverage after this tranche:
+  - statements `85.05%`
+  - branches `59.09%`
+  - functions `85.65%`
+  - lines `84.81%`
+- Improvement over the previous baseline:
+  - statements `+5.12`
+  - branches `+6.00`
+  - functions `+6.15`
+  - lines `+5.31`
+- Updated lowest API hotspots now are:
+  - lowest `lines`: `documents-collaboration.server.ts` `70.67%`, `documents.service.ts` `75.80%`, `gitlab.service.ts` `78.80%`
+  - lowest `branches`: `documents-collaboration.server.ts` `38.00%`, `gitlab.controller.ts` `50.00%`, `search-wiki-pages-query.dto.ts` `50.00%`, `gitlab.service.ts` `57.20%`, `documents.service.ts` `58.45%`
+
 ## API Coverage Push + Worker Gate Active (2026-04-06)
 - [x] Switch CI and root `test:ci` to use the worker 95% coverage gate immediately.
 - [x] Add a dedicated `DocumentsCollaborationServer` suite so the collaboration server is no longer at `0%`.

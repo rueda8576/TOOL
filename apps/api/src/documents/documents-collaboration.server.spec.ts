@@ -125,6 +125,37 @@ describe("DocumentsCollaborationServer", () => {
     expect(socket.close).toHaveBeenCalledWith(1008, "Invalid collaboration token");
   });
 
+  it("rejects malformed collaboration room queries before authentication", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-query-"));
+    const { DocumentsCollaborationServer } = await loadServer(storageRoot);
+    const sessionAuthService: any = {
+      authenticateToken: jest.fn()
+    };
+    const server = instantiateServer(DocumentsCollaborationServer, {} as any, sessionAuthService, {} as any);
+
+    const missingTokenSocket = makeSocket(WebSocket.CONNECTING);
+    await (server as any).handleConnection(missingTokenSocket, {
+      url: "/collab?kind=presence&documentId=doc-1",
+      headers: { host: "localhost" }
+    });
+    expect(missingTokenSocket.close).toHaveBeenCalledWith(1008, "Missing collaboration token");
+
+    const missingDocumentSocket = makeSocket(WebSocket.CONNECTING);
+    await (server as any).handleConnection(missingDocumentSocket, {
+      url: "/collab?kind=presence&token=ok",
+      headers: { host: "localhost" }
+    });
+    expect(missingDocumentSocket.close).toHaveBeenCalledWith(1008, "Missing documentId");
+
+    const unsupportedKindSocket = makeSocket(WebSocket.CONNECTING);
+    await (server as any).handleConnection(unsupportedKindSocket, {
+      url: "/collab?kind=unknown&token=ok",
+      headers: { host: "localhost" }
+    });
+    expect(unsupportedKindSocket.close).toHaveBeenCalledWith(1008, "Unsupported collaboration room kind");
+    expect(sessionAuthService.authenticateToken).not.toHaveBeenCalled();
+  });
+
   it("joins a file room, loads initial content, and tracks the connection", async () => {
     const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-file-"));
     const workspaceRelativePath = "workspaces/version-1";
@@ -175,6 +206,73 @@ describe("DocumentsCollaborationServer", () => {
     expect(result.room.doc.getText("content").toString()).toBe("\\section{Intro}");
     expect(result.room.connections.get(socket)).toEqual(new Set());
     expect(result.room.connectionUsers.get(socket)).toBe("user-1");
+  });
+
+  it("joins presence and wiki-presence rooms using project access state", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-presence-"));
+    const { DocumentsCollaborationServer } = await loadServer(storageRoot);
+    const prisma: any = {
+      document: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "document-1",
+          projectId: "project-1"
+        })
+      },
+      wikiPage: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "page-1",
+          projectId: "project-2"
+        })
+      }
+    };
+    const accessService: any = {
+      getProjectAccess: jest
+        .fn()
+        .mockResolvedValueOnce({
+          canWrite: false,
+          projectRole: ProjectRole.READER,
+          isAdmin: false
+        })
+        .mockResolvedValueOnce({
+          canWrite: true,
+          projectRole: ProjectRole.EDITOR,
+          isAdmin: false
+        })
+    };
+    const server = instantiateServer(DocumentsCollaborationServer, prisma, {} as any, accessService);
+
+    const presenceResult = await (server as any).joinRoom(
+      {
+        kind: "presence",
+        token: "ok",
+        documentId: "document-1"
+      },
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      },
+      makeSocket()
+    );
+
+    const wikiPresenceResult = await (server as any).joinRoom(
+      {
+        kind: "wiki-presence",
+        token: "ok",
+        wikiPageId: "page-1"
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      },
+      makeSocket()
+    );
+
+    expect(presenceResult.room.kind).toBe("presence");
+    expect(presenceResult.canWrite).toBe(false);
+    expect(wikiPresenceResult.room.kind).toBe("wiki-presence");
+    expect(wikiPresenceResult.canWrite).toBe(true);
   });
 
   it("disconnects matching users and removes already-closed connections from their rooms", async () => {
@@ -252,6 +350,49 @@ describe("DocumentsCollaborationServer", () => {
     (server as any).closeRoomDueToInvalidVersion(room, "Document version is no longer available");
 
     expect((server as any).rooms.has(room.key)).toBe(false);
+  });
+
+  it("rejects workspace paths that escape the configured storage root", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-invalid-workspace-"));
+    const { DocumentsCollaborationServer } = await loadServer(storageRoot);
+    const prisma: any = {
+      documentVersion: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "version-1",
+          latexWorkspacePath: "../../outside",
+          document: {
+            projectId: "project-1"
+          }
+        })
+      }
+    };
+    const accessService: any = {
+      getProjectAccess: jest.fn().mockResolvedValue({
+        canWrite: true,
+        projectRole: ProjectRole.EDITOR,
+        isAdmin: false
+      })
+    };
+    const server = instantiateServer(DocumentsCollaborationServer, prisma, {} as any, accessService);
+
+    await expect(
+      (server as any).joinRoom(
+        {
+          kind: "file",
+          token: "ok",
+          documentVersionId: "version-1",
+          path: "main.tex"
+        },
+        {
+          userId: "user-1",
+          email: "user@example.com",
+          globalRole: "editor"
+        },
+        makeSocket()
+      )
+    ).rejects.toMatchObject({
+      message: "Invalid workspace path"
+    });
   });
 
   it("flushes a live wiki page room and returns the draft snapshot", async () => {
@@ -375,6 +516,34 @@ describe("DocumentsCollaborationServer", () => {
     expect((server as any).rooms.has(room.key)).toBe(false);
   });
 
+  it("keeps rooms alive when other connections remain during close handling", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-remaining-"));
+    const { DocumentsCollaborationServer } = await loadServer(storageRoot);
+    const server = instantiateServer(DocumentsCollaborationServer, {} as any, {} as any, {} as any);
+    const room = (server as any).getOrCreatePresenceRoom("presence:doc-4");
+    const firstSocket = makeSocket();
+    const secondSocket = makeSocket();
+    room.connections.set(firstSocket, new Set());
+    room.connections.set(secondSocket, new Set());
+    room.connectionUsers.set(firstSocket, "user-1");
+    room.connectionUsers.set(secondSocket, "user-2");
+    const teardownSpy = jest.spyOn(room, "teardown");
+
+    (server as any).onClose(
+      {
+        room,
+        canWrite: false,
+        userId: "user-1"
+      },
+      firstSocket
+    );
+
+    expect(room.connections.has(firstSocket)).toBe(false);
+    expect(room.connections.has(secondSocket)).toBe(true);
+    expect((server as any).rooms.has(room.key)).toBe(true);
+    expect(teardownSpy).not.toHaveBeenCalled();
+  });
+
   it("responds to awareness queries with the current awareness state", async () => {
     const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-awareness-"));
     const { DocumentsCollaborationServer } = await loadServer(storageRoot);
@@ -397,6 +566,54 @@ describe("DocumentsCollaborationServer", () => {
     );
 
     expect(socket.send).toHaveBeenCalled();
+  });
+
+  it("does not send initial sync payloads to closed sockets and closes sockets on send callback failures", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-send-"));
+    const { DocumentsCollaborationServer } = await loadServer(storageRoot);
+    const server = instantiateServer(DocumentsCollaborationServer, {} as any, {} as any, {} as any);
+    const room = (server as any).getOrCreatePresenceRoom("presence:doc-5");
+    room.awareness.setLocalState({ user: "editor-1" });
+
+    const closedSocket = makeSocket(WebSocket.CLOSED);
+    (server as any).sendInitialSync(room, closedSocket);
+    expect(closedSocket.send).not.toHaveBeenCalled();
+
+    const failingSocket = makeSocket(WebSocket.OPEN);
+    failingSocket.send = jest.fn((...args: any[]) => {
+      const callback =
+        typeof args[1] === "function"
+          ? args[1]
+          : typeof args[2] === "function"
+            ? args[2]
+            : undefined;
+      callback?.(new Error("boom"));
+    });
+
+    (server as any).sendInitialSync(room, failingSocket);
+    expect(failingSocket.close).toHaveBeenCalledWith(1011, "Send failed");
+  });
+
+  it("marks file-room persistence as queued when another persist is already in flight", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-queued-"));
+    const workspaceRootPath = join(storageRoot, "workspaces/version-queued");
+    await mkdir(workspaceRootPath, { recursive: true });
+
+    const { DocumentsCollaborationServer } = await loadServer(storageRoot);
+    const server = instantiateServer(DocumentsCollaborationServer, {} as any, {} as any, {} as any);
+    const room = (server as any).getOrCreateFileRoom({
+      roomKey: "file:version-queued:main.tex",
+      documentVersionId: "version-queued",
+      projectId: "project-1",
+      workspaceRootPath,
+      filePath: "main.tex",
+      absoluteFilePath: join(workspaceRootPath, "main.tex")
+    });
+    room.persistInFlight = true;
+
+    await (server as any).persistRoom(room, "queued");
+
+    expect(room.persistQueued).toBe(true);
   });
 
   it("rejects invalid LaTeX file paths when joining file rooms", async () => {

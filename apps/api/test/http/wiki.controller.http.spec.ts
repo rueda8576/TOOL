@@ -1,4 +1,7 @@
 import { INestApplication } from "@nestjs/common";
+import { rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import request from "supertest";
 
 import { WikiController } from "../../src/wiki/wiki.controller";
@@ -48,6 +51,68 @@ describe("WikiController HTTP", () => {
       .query({ q: "a" })
       .set(authHeaders("reader"))
       .expect(400);
+  });
+
+  it("creates pages and lists the wiki tree with bound params", async () => {
+    wikiService.createPage.mockResolvedValue({
+      id: "page-1",
+      projectId: "project-1",
+      slug: "roadmap",
+      title: "Roadmap",
+      path: "guides/roadmap",
+      revisionNumber: 1
+    });
+    wikiService.listTree.mockResolvedValue([
+      {
+        type: "page",
+        name: "roadmap",
+        path: "guides/roadmap",
+        pageId: "page-1",
+        title: "Roadmap",
+        hasDraftChanges: false,
+        draftUpdatedAt: null,
+        draftUpdatedBy: null,
+        children: []
+      }
+    ]);
+
+    const createResponse = await request(app.getHttpServer())
+      .post("/projects/project-1/wiki-pages")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .send({
+        title: "Roadmap",
+        slug: "roadmap",
+        folderPath: "guides",
+        contentMarkdown: "# Roadmap"
+      })
+      .expect(201);
+
+    const treeResponse = await request(app.getHttpServer())
+      .get("/projects/project-1/wiki-pages/tree")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    expect(wikiService.createPage).toHaveBeenCalledWith(
+      "project-1",
+      {
+        title: "Roadmap",
+        slug: "roadmap",
+        folderPath: "guides",
+        contentMarkdown: "# Roadmap"
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+    expect(wikiService.listTree).toHaveBeenCalledWith("project-1", {
+      userId: "reader-1",
+      email: "reader@example.com",
+      globalRole: "reader"
+    });
+    expect(createResponse.body.revisionNumber).toBe(1);
+    expect(treeResponse.body[0].pageId).toBe("page-1");
   });
 
   it("binds get-by-path query params and current user", async () => {
@@ -105,6 +170,113 @@ describe("WikiController HTTP", () => {
     expect(response.body.draftVersion).toBe(2);
   });
 
+  it("flushes, publishes, deletes, updates, and lists backlinks/revisions with bound params", async () => {
+    wikiService.flushRealtimeDraft.mockResolvedValue({
+      draftVersion: 3,
+      updatedAt: "2026-04-06T12:05:00.000Z",
+      updatedBy: {
+        id: "editor-1",
+        name: "Editor",
+        email: "editor@example.com"
+      }
+    });
+    wikiService.publishDraft.mockResolvedValue({
+      pageId: "page-1",
+      revisionNumber: 4,
+      publishedAt: "2026-04-06T12:10:00.000Z",
+      draftVersion: 4
+    });
+    wikiService.deletePage.mockResolvedValue({
+      id: "page-1",
+      deletedAt: "2026-04-06T12:20:00.000Z"
+    });
+    wikiService.listBacklinks.mockResolvedValue([
+      { fromPageId: "page-2", fromTitle: "Refs", fromPath: "refs" }
+    ]);
+    wikiService.updatePage.mockResolvedValue({
+      pageId: "page-1",
+      revisionNumber: 5
+    });
+    wikiService.listRevisions.mockResolvedValue([
+      {
+        id: "rev-5",
+        revisionNumber: 5,
+        publishedAt: "2026-04-06T12:30:00.000Z",
+        createdBy: {
+          id: "editor-1",
+          name: "Editor",
+          email: "editor@example.com"
+        },
+        changeNote: "Polish"
+      }
+    ]);
+
+    await request(app.getHttpServer())
+      .post("/wiki-pages/page-1/realtime-flush")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post("/wiki-pages/page-1/publish")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .send({ baseDraftVersion: 3, changeNote: "Publish" })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete("/wiki-pages/page-1")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .expect(200);
+
+    const backlinksResponse = await request(app.getHttpServer())
+      .get("/wiki-pages/page-1/backlinks")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .put("/wiki-pages/page-1")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .send({ title: "Roadmap v2", contentMarkdown: "Updated", changeNote: "Polish" })
+      .expect(200);
+
+    const revisionsResponse = await request(app.getHttpServer())
+      .get("/wiki-pages/page-1/revisions")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    expect(wikiService.flushRealtimeDraft).toHaveBeenCalledWith("page-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+    expect(wikiService.publishDraft).toHaveBeenCalledWith(
+      "page-1",
+      { baseDraftVersion: 3, changeNote: "Publish" },
+      expect.objectContaining({ userId: "editor-1" })
+    );
+    expect(wikiService.deletePage).toHaveBeenCalledWith("page-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+    expect(wikiService.listBacklinks).toHaveBeenCalledWith("page-1", {
+      userId: "reader-1",
+      email: "reader@example.com",
+      globalRole: "reader"
+    });
+    expect(wikiService.updatePage).toHaveBeenCalledWith(
+      "page-1",
+      { title: "Roadmap v2", contentMarkdown: "Updated", changeNote: "Polish" },
+      expect.objectContaining({ userId: "editor-1" })
+    );
+    expect(wikiService.listRevisions).toHaveBeenCalledWith("page-1", {
+      userId: "reader-1",
+      email: "reader@example.com",
+      globalRole: "reader"
+    });
+    expect(backlinksResponse.body[0].fromPageId).toBe("page-2");
+    expect(revisionsResponse.body[0].id).toBe("rev-5");
+  });
+
   it("streams asset bytes with inline headers", async () => {
     wikiService.getWikiAssetContent.mockResolvedValue({
       mimeType: "image/png",
@@ -126,5 +298,37 @@ describe("WikiController HTTP", () => {
     expect(response.headers["content-disposition"]).toBe('inline; filename="diagram.png"');
     expect(Buffer.isBuffer(response.body)).toBe(true);
     expect(response.body.toString()).toBe("png");
+  });
+
+  it("uploads wiki assets through multipart storage callbacks", async () => {
+    const uploadDir = join(tmpdir(), "doctoral-platform-uploads");
+    rmSync(uploadDir, { recursive: true, force: true });
+
+    wikiService.uploadWikiAsset.mockResolvedValue({
+      assetId: "asset-1",
+      url: "/wiki-assets/asset-1/content",
+      mimeType: "image/png",
+      sizeBytes: 3,
+      originalName: "diagram.png"
+    });
+
+    const response = await request(app.getHttpServer())
+      .post("/projects/project-1/wiki-assets")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .attach("file", Buffer.from("png"), "diagram.png")
+      .expect(201);
+
+    expect(wikiService.uploadWikiAsset).toHaveBeenCalledWith(
+      "project-1",
+      expect.objectContaining({
+        originalname: "diagram.png"
+      }),
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+    expect(response.body.assetId).toBe("asset-1");
   });
 });

@@ -1,4 +1,7 @@
 import { INestApplication } from "@nestjs/common";
+import { rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import request from "supertest";
 
 import { DocumentsController } from "../../src/documents/documents.controller";
@@ -47,6 +50,81 @@ describe("DocumentsController HTTP", () => {
       .set(authHeaders("editor"))
       .send({ title: "Doc", type: "invalid-type" })
       .expect(400);
+  });
+
+  it("lists documents and binds the current user", async () => {
+    documentsService.listDocuments.mockResolvedValue([
+      {
+        id: "document-1",
+        projectId: "project-1",
+        title: "Roadmap",
+        type: "paper"
+      }
+    ]);
+
+    const response = await request(app.getHttpServer())
+      .get("/projects/project-1/documents")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    expect(documentsService.listDocuments).toHaveBeenCalledWith("project-1", {
+      userId: "reader-1",
+      email: "reader@example.com",
+      globalRole: "reader"
+    });
+    expect(response.body[0].id).toBe("document-1");
+  });
+
+  it("creates and deletes documents through the expected routes", async () => {
+    documentsService.createDocument.mockResolvedValue({
+      id: "document-1",
+      projectId: "project-1",
+      title: "Roadmap",
+      type: "paper",
+      mainBranchId: "branch-1"
+    });
+    documentsService.deleteDocument.mockResolvedValue({
+      id: "document-1",
+      deletedAt: "2026-04-06T10:00:00.000Z"
+    });
+
+    const createResponse = await request(app.getHttpServer())
+      .post("/projects/project-1/documents")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .send({
+        title: "Roadmap",
+        type: "paper",
+        authors: ["Ada"],
+        tags: ["planning"]
+      })
+      .expect(201);
+
+    const deleteResponse = await request(app.getHttpServer())
+      .delete("/documents/document-1")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .expect(200);
+
+    expect(documentsService.createDocument).toHaveBeenCalledWith(
+      "project-1",
+      {
+        title: "Roadmap",
+        type: "paper",
+        authors: ["Ada"],
+        tags: ["planning"]
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+    expect(documentsService.deleteDocument).toHaveBeenCalledWith("document-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+    expect(createResponse.body.mainBranchId).toBe("branch-1");
+    expect(deleteResponse.body.deletedAt).toBe("2026-04-06T10:00:00.000Z");
   });
 
   it("binds documentVersionId and query params for latex file reads", async () => {
@@ -167,6 +245,88 @@ describe("DocumentsController HTTP", () => {
     expect(compileResponse.body.compileJobId).toBe("compile-1");
     expect(pdfResponse.headers["content-type"]).toContain("application/pdf");
     expect(pdfResponse.headers["content-disposition"]).toBe("inline; filename=\"roadmap.pdf\"");
+  });
+
+  it("returns compile logs and LaTeX tree data with bound params", async () => {
+    documentsService.getCompileLog.mockResolvedValue({
+      documentVersionId: "version-1",
+      compileStatus: "FAILED",
+      compileLog: "Missing figure",
+      compiledPdfFileId: null
+    });
+    documentsService.getLatexTree.mockResolvedValue({
+      documentVersionId: "version-1",
+      files: [{ path: "main.tex", isDirectory: false }]
+    });
+
+    const compileLogResponse = await request(app.getHttpServer())
+      .get("/document-versions/version-1/compile-log")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    const treeResponse = await request(app.getHttpServer())
+      .get("/document-versions/version-1/latex/tree")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    expect(documentsService.getCompileLog).toHaveBeenCalledWith("version-1", {
+      userId: "reader-1",
+      email: "reader@example.com",
+      globalRole: "reader"
+    });
+    expect(documentsService.getLatexTree).toHaveBeenCalledWith("version-1", {
+      userId: "reader-1",
+      email: "reader@example.com",
+      globalRole: "reader"
+    });
+    expect(compileLogResponse.body.compileStatus).toBe("FAILED");
+    expect(treeResponse.body.files).toEqual([{ path: "main.tex", isDirectory: false }]);
+  });
+
+  it("creates document versions via multipart upload and exercises upload storage callbacks", async () => {
+    const uploadDir = join(tmpdir(), "doctoral-platform-uploads");
+    rmSync(uploadDir, { recursive: true, force: true });
+
+    documentsService.createVersion.mockResolvedValue({
+      id: "version-2",
+      documentId: "document-1",
+      branchId: "branch-1",
+      versionNumber: 2,
+      compileStatus: "PENDING"
+    });
+
+    const response = await request(app.getHttpServer())
+      .post("/documents/document-1/versions")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .field("branchName", "main")
+      .field("notes", "Initial upload")
+      .field("latexEntryFile", "main.tex")
+      .field("latexPaths", "main.tex,references.bib")
+      .attach("pdf", Buffer.from("%PDF-1.4"), "roadmap.pdf")
+      .attach("latexBundle", Buffer.from("zip"), "bundle.zip")
+      .attach("latexFiles", Buffer.from("\\section{Intro}"), "main.tex")
+      .expect(201);
+
+    expect(documentsService.createVersion).toHaveBeenCalledWith(
+      "document-1",
+      {
+        branchName: "main",
+        notes: "Initial upload",
+        latexEntryFile: "main.tex",
+        latexPaths: "main.tex,references.bib"
+      },
+      expect.objectContaining({
+        pdf: [expect.objectContaining({ originalname: "roadmap.pdf" })],
+        latexBundle: [expect.objectContaining({ originalname: "bundle.zip" })],
+        latexFiles: [expect.objectContaining({ originalname: "main.tex" })]
+      }),
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+    expect(response.body.id).toBe("version-2");
   });
 
   it("updates LaTeX files through the DTO payload", async () => {

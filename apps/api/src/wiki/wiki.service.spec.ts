@@ -77,6 +77,53 @@ describe("WikiService", () => {
     };
   };
 
+  it("validates wiki slugs, folder paths, plain paths, and parsed wiki links", () => {
+    const { service } = makeService();
+
+    expect((service as any).normalizeSlug("RoadMap")).toBe("roadmap");
+    expect(() => (service as any).normalizeSlug("Road map")).toThrow(BadRequestException);
+
+    expect((service as any).normalizeFolderPath(" Guides/Systems ")).toBe("guides/systems");
+    expect((service as any).normalizeFolderPath("   ")).toBe("");
+    expect(() => (service as any).normalizeFolderPath("guides/invalid path")).toThrow(BadRequestException);
+
+    expect((service as any).normalizePath(" /Guides/Roadmap/ ")).toBe("guides/roadmap");
+    expect(() => (service as any).normalizePath("   ")).toThrow(BadRequestException);
+    expect(() => (service as any).normalizePath("guides/invalid path")).toThrow(BadRequestException);
+
+    expect((service as any).parseWikiLinks("[[guides/roadmap]] [[bad path]] [[guides\\\\notes]] [[guides/roadmap]]")).toEqual([
+      "guides/roadmap",
+      "guides/notes"
+    ]);
+  });
+
+  it("fails read helpers when the wiki page no longer exists", async () => {
+    const { service, prisma, accessService } = makeService();
+    prisma.wikiPage.findFirst.mockResolvedValue(null);
+
+    await expect(
+      (service as any).ensurePageReadable("missing-page", {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    await expect(
+      service.getByPath(
+        "project-1",
+        "missing-page",
+        {
+          userId: "reader-1",
+          email: "reader@example.com",
+          globalRole: "reader"
+        }
+      )
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(accessService.ensureProjectReadable).not.toHaveBeenCalled();
+  });
+
   it("rejects page creation when project path already exists", async () => {
     const { service, prisma, accessService } = makeService();
     prisma.wikiPage.findFirst.mockResolvedValue({ id: "existing-page" });
@@ -815,6 +862,54 @@ describe("WikiService", () => {
     );
   });
 
+  it("updates a page using the existing title when the incoming title is blank and there is no draft", async () => {
+    const { service } = makeService();
+    jest.spyOn(service as any, "getPageForMutation").mockResolvedValue({
+      id: "page-1",
+      projectId: "project-1",
+      title: "Existing title",
+      draft: null
+    });
+    const saveDraftSpy = jest.spyOn(service, "saveDraft").mockResolvedValue({
+      draftVersion: 2,
+      updatedAt: "2026-03-03T12:00:00.000Z",
+      updatedBy: {
+        id: "editor-1",
+        name: "Editor",
+        email: "editor@example.com"
+      }
+    });
+    jest.spyOn(service, "publishDraft").mockResolvedValue({
+      pageId: "page-1",
+      revisionNumber: 2,
+      publishedAt: "2026-03-03T12:10:00.000Z",
+      draftVersion: 3
+    });
+
+    await service.updatePage(
+      "page-1",
+      {
+        title: "   ",
+        contentMarkdown: "Updated content"
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(saveDraftSpy).toHaveBeenCalledWith(
+      "page-1",
+      {
+        title: "Existing title",
+        contentMarkdown: "Updated content",
+        baseDraftVersion: 1
+      },
+      expect.objectContaining({ userId: "editor-1" })
+    );
+  });
+
   it("rejects wiki page deletion for reader users", async () => {
     const { service, prisma, accessService } = makeService();
     const tx: any = {
@@ -875,6 +970,44 @@ describe("WikiService", () => {
     expect(accessService.ensureProjectWritable).not.toHaveBeenCalled();
   });
 
+  it("throws when delete returns a page without deletedAt", async () => {
+    const { service, prisma } = makeService();
+    const tx: any = {
+      wikiPage: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "page-1",
+          projectId: "project-1",
+          title: "Roadmap",
+          slug: "roadmap",
+          folderPath: "",
+          path: "roadmap",
+          templateType: null,
+          updatedAt: new Date("2026-03-03T10:00:00.000Z"),
+          createdById: "user-1",
+          currentRevision: null,
+          draft: null
+        }),
+        update: jest.fn().mockResolvedValue({
+          id: "page-1",
+          deletedAt: null
+        })
+      },
+      wikiLink: {
+        deleteMany: jest.fn(),
+        updateMany: jest.fn()
+      }
+    };
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+
+    await expect(
+      service.deletePage("page-1", {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it("rejects unsupported wiki asset mime types", async () => {
     const { service, storageService } = makeService();
 
@@ -885,6 +1018,40 @@ describe("WikiService", () => {
           mimetype: "text/plain",
           size: 128,
           originalname: "notes.txt"
+        } as Express.Multer.File,
+        {
+          userId: "user-1",
+          email: "user-1@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(storageService.saveUpload).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing and oversized wiki uploads", async () => {
+    const { service, storageService } = makeService();
+
+    await expect(
+      service.uploadWikiAsset(
+        "project-1",
+        undefined,
+        {
+          userId: "user-1",
+          email: "user-1@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    await expect(
+      service.uploadWikiAsset(
+        "project-1",
+        {
+          mimetype: "image/png",
+          size: 10 * 1024 * 1024 + 1,
+          originalname: "huge.png"
         } as Express.Multer.File,
         {
           userId: "user-1",
@@ -1069,6 +1236,23 @@ describe("WikiService", () => {
     ]);
   });
 
+  it("returns not found when backlink lookup cannot reload the wiki page path", async () => {
+    const { service, prisma } = makeService();
+    jest.spyOn(service as any, "ensurePageReadable").mockResolvedValue({
+      id: "page-1",
+      projectId: "project-1"
+    });
+    prisma.wikiPage.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.listBacklinks("page-1", {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it("lists revision history in descending revision order", async () => {
     const { service, prisma } = makeService();
     jest.spyOn(service as any, "ensurePageReadable").mockResolvedValue({
@@ -1153,6 +1337,28 @@ describe("WikiService", () => {
     );
   });
 
+  it("throws when the uploaded wiki file metadata cannot be reloaded", async () => {
+    const { service, prisma, storageService } = makeService();
+    storageService.saveUpload.mockResolvedValue({ id: "file-1" });
+    prisma.fileObject.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.uploadWikiAsset(
+        "project-1",
+        {
+          originalname: "diagram.png",
+          mimetype: "image/png",
+          size: 12
+        } as any,
+        {
+          userId: "editor-1",
+          email: "editor@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it("returns wiki asset content after checking read access", async () => {
     const { service, prisma, storageService, accessService } = makeService();
     prisma.wikiAsset.findFirst.mockResolvedValue({
@@ -1179,5 +1385,18 @@ describe("WikiService", () => {
     });
 
     expect(accessService.ensureProjectReadable).toHaveBeenCalledWith("reader-1", "reader", "project-1");
+  });
+
+  it("returns not found when a wiki asset cannot be loaded", async () => {
+    const { service, prisma } = makeService();
+    prisma.wikiAsset.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.getWikiAssetContent("missing-asset", {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
