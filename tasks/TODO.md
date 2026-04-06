@@ -1,5 +1,28 @@
 # Implementation TODO (v1 bootstrap)
 
+## Fix Code Files Viewer Horizontal Overflow (2026-04-06)
+- [x] Contain desktop `Files` layout overflow so selecting a file does not push the whole page to the right.
+- [x] Keep code lines unwrapped and move horizontal scrolling into the file viewer only.
+- [x] Allow long selected-file paths to wrap inside the viewer header instead of expanding the page.
+- [x] Validate the web build after the CSS-only fix.
+
+### Review - Fix Code Files Viewer Horizontal Overflow
+- Root cause was the desktop two-column grid in `Code > Files`:
+  - `.code-files-layout` used `260px 1fr`, so the viewer column could not shrink below its min-content width.
+  - the selected file viewer rendered code inside a `<pre>` with `white-space: pre`, so long lines expanded the viewer column and pushed the entire page horizontally.
+  - the selected file path header also had no containment/wrapping rules.
+- The fix stayed CSS-only in `apps/web/app/globals.css`:
+  - changed the files grid to `260px minmax(0, 1fr)`
+  - added `min-width: 0` and `overflow: hidden` to the viewer panel
+  - made the selected-file path block wrap safely inside the header
+  - made horizontal scroll explicit on `.code-file-content` with `overflow-x: auto`, preserving `white-space: pre`
+- Resulting UX:
+  - opening a file no longer shifts the page to the right
+  - long code lines keep their original formatting and scroll inside the code block
+  - long file paths stay inside the viewer header
+- Local validation passed with:
+  - `pnpm --filter @doctoral/web build`
+
 ## API Coverage Push vNext - Controllers + Branch Hotspots (2026-04-06)
 - [x] Expand `DocumentsController` HTTP coverage across create/delete/version/compile/log/tree/file/update routes and upload callbacks.
 - [x] Expand `WikiController` HTTP coverage across create/tree/flush/publish/delete/backlinks/upload/update/revisions routes and upload callbacks.

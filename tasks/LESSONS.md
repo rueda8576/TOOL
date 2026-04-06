@@ -40,6 +40,7 @@
 ## Workspace-first editor UX
 - For technical document editors, avoid stacking file tree above editor on desktop; use a persistent lateral tree (VSCode-like) and reserve vertical space for the code and preview panes.
 - When adding keyboard shortcuts, include both `Ctrl` and `Cmd` variants and persist key layout preferences (e.g., tree collapsed state) so users keep a stable workspace across reloads.
+- In grid/flex workspaces that render code or file paths, make shrinkable panes explicit with `minmax(0, 1fr)` on grid tracks and `min-width: 0` on the content panel; otherwise long `pre/code` content can expand the whole page instead of staying inside a local scroller.
 
 ## Shared storage path consistency
 - Never rely on a relative `STORAGE_ROOT` interpreted from each package cwd in a monorepo: API and worker may resolve different directories and break compile/file workflows.
