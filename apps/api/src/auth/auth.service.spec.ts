@@ -58,6 +58,9 @@ describe("AuthService", () => {
       buildAuthorizationUrl: jest.fn(),
       disconnectUserConnection: jest.fn(),
       exchangeAuthorizationCode: jest.fn(),
+      listUserSshKeys: jest.fn(),
+      createUserSshKey: jest.fn(),
+      deleteUserSshKey: jest.fn(),
       syncProjectRepositoryAccess: jest.fn()
     };
 
@@ -421,6 +424,110 @@ describe("AuthService", () => {
       action: "auth.gitlab.disconnect"
     });
     expect(result).toEqual({ disconnected: true });
+  });
+
+  it("lists the current user's GitLab SSH keys", async () => {
+    const { service, gitlabService } = makeService();
+    gitlabService.listUserSshKeys.mockResolvedValue([
+      {
+        id: 12,
+        title: "Laptop",
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAexample",
+        createdAt: "2026-04-06T10:00:00.000Z",
+        expiresAt: null,
+        usageType: "auth"
+      }
+    ]);
+
+    const result = await service.listGitlabSshKeys({
+      userId: "user-1",
+      email: "user@example.com",
+      globalRole: "editor"
+    });
+
+    expect(gitlabService.listUserSshKeys).toHaveBeenCalledWith("user-1");
+    expect(result).toEqual([
+      {
+        id: 12,
+        title: "Laptop",
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAexample",
+        createdAt: "2026-04-06T10:00:00.000Z",
+        expiresAt: null,
+        usageType: "auth"
+      }
+    ]);
+  });
+
+  it("creates a GitLab SSH key and writes an audit log", async () => {
+    const { service, gitlabService, auditService } = makeService();
+    gitlabService.createUserSshKey.mockResolvedValue({
+      id: 22,
+      title: "Workstation",
+      key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAworkstation",
+      createdAt: "2026-04-06T11:00:00.000Z",
+      expiresAt: "2027-04-06",
+      usageType: "auth"
+    });
+
+    const result = await service.createGitlabSshKey(
+      {
+        userId: "user-1",
+        email: "user@example.com",
+        globalRole: "editor"
+      },
+      {
+        title: "Workstation",
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAworkstation",
+        expiresAt: "2027-04-06"
+      }
+    );
+
+    expect(gitlabService.createUserSshKey).toHaveBeenCalledWith("user-1", {
+      title: "Workstation",
+      key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAworkstation",
+      expiresAt: "2027-04-06"
+    });
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "user-1",
+      entityType: "gitlab_ssh_key",
+      entityId: "22",
+      action: "auth.gitlab.ssh_key.create",
+      metadata: {
+        title: "Workstation",
+        expiresAt: "2027-04-06"
+      }
+    });
+    expect(result).toEqual({
+      id: 22,
+      title: "Workstation",
+      key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAworkstation",
+      createdAt: "2026-04-06T11:00:00.000Z",
+      expiresAt: "2027-04-06",
+      usageType: "auth"
+    });
+  });
+
+  it("deletes a GitLab SSH key and writes an audit log", async () => {
+    const { service, gitlabService, auditService } = makeService();
+    gitlabService.deleteUserSshKey.mockResolvedValue({ deleted: true });
+
+    const result = await service.deleteGitlabSshKey(
+      {
+        userId: "user-1",
+        email: "user@example.com",
+        globalRole: "editor"
+      },
+      "31"
+    );
+
+    expect(gitlabService.deleteUserSshKey).toHaveBeenCalledWith("user-1", "31");
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "user-1",
+      entityType: "gitlab_ssh_key",
+      entityId: "31",
+      action: "auth.gitlab.ssh_key.delete"
+    });
+    expect(result).toEqual({ deleted: true });
   });
 
   it("completes GitLab OAuth callback and redirects back to account on success", async () => {

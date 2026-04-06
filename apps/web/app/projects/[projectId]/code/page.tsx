@@ -67,7 +67,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [contentLoading, setContentLoading] = useState(false);
   const [mergeRequestsLoading, setMergeRequestsLoading] = useState(false);
   const [downloadingArchive, setDownloadingArchive] = useState(false);
-  const [cloneCopied, setCloneCopied] = useState(false);
+  const [copiedCloneType, setCopiedCloneType] = useState<"ssh" | "https" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contentError, setContentError] = useState<string | null>(null);
   const [mergeRequestsError, setMergeRequestsError] = useState<string | null>(null);
@@ -274,23 +274,26 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     }
   };
 
-  const onCopyCloneUrl = async (): Promise<void> => {
-    if (!connectedRepository) {
-      return;
-    }
-
+  const onCopyCloneUrl = async (value: string, kind: "ssh" | "https"): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(connectedRepository.httpCloneUrl);
-      setCloneCopied(true);
-      window.setTimeout(() => setCloneCopied(false), 2000);
+      await navigator.clipboard.writeText(value);
+      setCopiedCloneType(kind);
+      window.setTimeout(() => setCopiedCloneType((current) => (current === kind ? null : current)), 2000);
     } catch {
       setError("Unable to copy the clone URL.");
     }
   };
 
   const onDownloadArchive = async (): Promise<void> => {
-    if (!token || !connectedRepository) {
+    if (!connectedRepository) {
+      return;
+    }
+    if (!token) {
       setError("Missing session token. Please sign in again.");
+      return;
+    }
+    if (!gitlabConnected) {
+      setError("Connect your GitLab API access from Account before downloading repository archives.");
       return;
     }
 
@@ -380,10 +383,10 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
 
   const connectStateMessage = useMemo(() => {
     if (!connection?.connected) {
-      return "Connect your Atlasium-managed GitLab account from Account before browsing code, creating branches, or opening merge requests.";
+      return "Connect your GitLab API access from Account before browsing repository content, downloading ZIP archives, or working with merge requests. SSH clone remains available once your GitLab account has an SSH key configured.";
     }
     if (connection.reconnectRequired) {
-      return "Your GitLab API session must be reconnected before Atlasium can access the managed repository.";
+      return "Your GitLab API session must be reconnected before Atlasium can browse the managed repository, download archives, or manage merge requests.";
     }
     return null;
   }, [connection]);
@@ -395,18 +398,6 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
         {error ? <p className="alert alert-error">{error}</p> : null}
         {success ? <p className="alert alert-success">{success}</p> : null}
         {contentError ? <p className="alert alert-error">{contentError}</p> : null}
-
-        {!loading && repositoryConnected && connectStateMessage ? (
-          <section className="panel stack-md">
-            <h2 className="section-heading">GitLab account required</h2>
-            <p>{connectStateMessage}</p>
-            <div className="button-row">
-              <Link className="button" href="/account">
-                Open Account
-              </Link>
-            </div>
-          </section>
-        ) : null}
 
         {!loading && !repositoryConnected ? (
           <section className="panel stack-lg">
@@ -435,7 +426,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
           </section>
         ) : null}
 
-        {!loading && connectedRepository && gitlabConnected ? (
+        {!loading && connectedRepository ? (
           <>
             <section className="panel code-overview-card">
               <div className="stack-xs">
@@ -461,245 +452,302 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                 <section className="panel panel-subtle stack-sm code-clone-panel">
                   <div className="stack-xs">
                     <h3 className="section-heading">Clone &amp; Download</h3>
-                    <p className="text-muted">Use HTTPS clone or download the current ref as a ZIP archive.</p>
+                    <p className="text-muted">
+                      GitLab web uses Atlasium SSO. CLI clone uses SSH keys.
+                    </p>
+                    <p className="text-muted">
+                      Manage your SSH keys from <Link href="/account">Account</Link>. Use HTTPS only as a fallback with a GitLab personal access token.
+                    </p>
                   </div>
-                  <label>
-                    HTTPS clone URL
-                    <input className="input code-clone-input" value={connectedRepository.httpCloneUrl} readOnly />
-                  </label>
+                  <div className="code-clone-method-grid">
+                    <section className="panel stack-sm code-clone-method code-clone-method-primary">
+                      <div className="stack-xs">
+                        <p className="eyebrow">Primary</p>
+                        <h4 className="section-heading">SSH clone</h4>
+                        <p className="text-muted">Recommended for daily `git clone`, `pull`, and `push` from your local machine.</p>
+                      </div>
+                      <label>
+                        SSH clone URL
+                        <input className="input code-clone-input" value={connectedRepository.sshCloneUrl} readOnly />
+                      </label>
+                      <button
+                        className="button"
+                        type="button"
+                        onClick={() => void onCopyCloneUrl(connectedRepository.sshCloneUrl, "ssh")}
+                      >
+                        {copiedCloneType === "ssh" ? "Copied" : "Copy SSH clone URL"}
+                      </button>
+                    </section>
+
+                    <section className="panel stack-sm code-clone-method">
+                      <div className="stack-xs">
+                        <p className="eyebrow">Fallback</p>
+                        <h4 className="section-heading">HTTPS (PAT required)</h4>
+                        <p className="text-muted">Use this only if SSH is unavailable. GitLab will ask for a personal access token, not your Atlasium password.</p>
+                      </div>
+                      <label>
+                        HTTPS clone URL
+                        <input className="input code-clone-input" value={connectedRepository.httpCloneUrl} readOnly />
+                      </label>
+                      <button
+                        className="button button-secondary"
+                        type="button"
+                        onClick={() => void onCopyCloneUrl(connectedRepository.httpCloneUrl, "https")}
+                      >
+                        {copiedCloneType === "https" ? "Copied" : "Copy HTTPS clone URL"}
+                      </button>
+                    </section>
+                  </div>
                   <div className="button-row">
-                    <button className="button button-secondary" type="button" onClick={() => void onCopyCloneUrl()}>
-                      {cloneCopied ? "Copied" : "Copy clone URL"}
-                    </button>
-                    <button className="button" type="button" onClick={() => void onDownloadArchive()} disabled={downloadingArchive}>
+                    <button
+                      className="button"
+                      type="button"
+                      onClick={() => void onDownloadArchive()}
+                      disabled={downloadingArchive || !gitlabConnected}
+                    >
                       {downloadingArchive ? "Downloading..." : "Download ZIP"}
                     </button>
+                    {!gitlabConnected ? <span className="text-muted">Connect GitLab API access to enable ZIP downloads.</span> : null}
                   </div>
                 </section>
               </div>
             </section>
 
-            <div className="code-actions-grid">
+            {!gitlabConnected ? (
               <section className="panel stack-md">
-                <div className="stack-xs">
-                  <h3 className="section-heading">Branches</h3>
-                  <p>Current branch view and branch management.</p>
+                <h2 className="section-heading">GitLab API access required</h2>
+                <p>{connectStateMessage}</p>
+                <div className="button-row">
+                  <Link className="button" href="/account">
+                    Open Account
+                  </Link>
                 </div>
-                <label>
-                  Browse ref
-                  <select className="input" value={currentBrowseRef} onChange={(event) => setBrowserRef(event.target.value)}>
-                    {branches.map((branch) => (
-                      <option key={branch.name} value={branch.name}>
-                        {branch.name}
-                        {branch.default ? " (default)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="code-branch-list">
-                  {branches.map((branch) => (
-                    <div key={branch.name} className="code-branch-row">
-                      <div className="stack-xs">
-                        <strong>{branch.name}</strong>
-                        <div className="button-row">
-                          {branch.default ? <span className="badge">Default</span> : null}
-                          {branch.protected ? <span className="badge">Protected</span> : null}
-                        </div>
-                      </div>
-                      {branch.webUrl ? (
-                        <a className="button button-secondary" href={branch.webUrl} target="_blank" rel="noreferrer">
-                          Open
-                        </a>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-                {canWrite ? (
-                  <form className="form-grid" onSubmit={(event) => void onCreateBranch(event)}>
-                    <label>
-                      New branch name
-                      <input className="input" value={newBranchName} onChange={(event) => setNewBranchName(event.target.value)} required />
-                    </label>
-                    <label>
-                      Source ref
-                      <select className="input" value={currentBranchSourceRef} onChange={(event) => setNewBranchSourceRef(event.target.value)}>
-                        {branches.map((branch) => (
-                          <option key={branch.name} value={branch.name}>
-                            {branch.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button className="button" type="submit" disabled={creatingBranch}>
-                      {creatingBranch ? "Creating..." : "Create branch"}
-                    </button>
-                  </form>
-                ) : null}
               </section>
-
-              <section className="panel stack-md">
-                <div className="stack-xs">
-                  <h3 className="section-heading">Open merge request</h3>
-                  <p>Create a merge request in GitLab from the connected project.</p>
-                </div>
-                {canWrite ? (
-                  <form className="form-grid" onSubmit={(event) => void onCreateMergeRequest(event)}>
-                    <label>
-                      Source branch
-                      <select className="input" value={currentMergeRequestSourceBranch} onChange={(event) => setMergeRequestSourceBranch(event.target.value)}>
-                        {branches.map((branch) => (
-                          <option key={branch.name} value={branch.name}>
-                            {branch.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Target branch
-                      <select className="input" value={currentMergeRequestTargetBranch} onChange={(event) => setMergeRequestTargetBranch(event.target.value)}>
-                        {branches.map((branch) => (
-                          <option key={branch.name} value={branch.name}>
-                            {branch.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Title
-                      <input className="input" value={mergeRequestTitle} onChange={(event) => setMergeRequestTitle(event.target.value)} required />
-                    </label>
-                    <label>
-                      Description
-                      <textarea className="textarea" value={mergeRequestDescription} onChange={(event) => setMergeRequestDescription(event.target.value)} rows={4} />
-                    </label>
-                    <button className="button" type="submit" disabled={creatingMergeRequest}>
-                      {creatingMergeRequest ? "Creating..." : "Open merge request"}
-                    </button>
-                  </form>
-                ) : (
-                  <p className="alert alert-info">Reader role can browse repository content but cannot create branches or merge requests.</p>
-                )}
-              </section>
-            </div>
-
-            <section className="panel stack-md">
-              <div className="toolbar-row code-section-toolbar">
-                <div className="stack-xs">
-                  <h3 className="section-heading">Merge requests</h3>
-                  <p className="text-muted">Track GitLab merge requests for this managed repository.</p>
-                </div>
-                <label className="code-filter-control">
-                  State
-                  <select className="input" value={mergeRequestFilter} onChange={(event) => setMergeRequestFilter(event.target.value as RepositoryMergeRequestState)}>
-                    <option value="opened">Opened</option>
-                    <option value="merged">Merged</option>
-                    <option value="closed">Closed</option>
-                    <option value="all">All</option>
-                  </select>
-                </label>
-              </div>
-
-              {mergeRequestsError ? <p className="alert alert-error">{mergeRequestsError}</p> : null}
-              {mergeRequestsLoading && mergeRequests.length === 0 ? <p className="alert alert-info">Loading merge requests...</p> : null}
-
-              <div className="code-results-list">
-                {mergeRequests.map((mergeRequest) => (
-                  <article key={mergeRequest.id} className="code-result-card code-merge-request-card">
+            ) : (
+              <>
+                <div className="code-actions-grid">
+                  <section className="panel stack-md">
                     <div className="stack-xs">
-                      <p className="eyebrow">!{mergeRequest.iid}</p>
-                      <strong>{mergeRequest.title}</strong>
-                      <div className="button-row">
-                        <span className="badge">{mergeRequest.state}</span>
-                        {mergeRequest.draft ? <span className="badge">Draft</span> : null}
-                      </div>
-                      <div className="stack-xs code-merge-request-meta">
-                        <p>
-                          {mergeRequest.sourceBranch} → {mergeRequest.targetBranch}
-                        </p>
-                        <p className="text-muted">
-                          {mergeRequest.author ? `${mergeRequest.author.name} (@${mergeRequest.author.username})` : "Unknown author"} · {new Date(mergeRequest.updatedAt).toLocaleString()}
-                        </p>
-                      </div>
+                      <h3 className="section-heading">Branches</h3>
+                      <p>Current branch view and branch management.</p>
                     </div>
-                    <a className="button button-secondary" href={mergeRequest.webUrl} target="_blank" rel="noreferrer">
-                      Open
-                    </a>
-                  </article>
-                ))}
-                {!mergeRequestsLoading && mergeRequests.length === 0 ? (
-                  <p className="text-muted">No merge requests available for the selected state.</p>
-                ) : null}
-              </div>
-            </section>
+                    <label>
+                      Browse ref
+                      <select className="input" value={currentBrowseRef} onChange={(event) => setBrowserRef(event.target.value)}>
+                        {branches.map((branch) => (
+                          <option key={branch.name} value={branch.name}>
+                            {branch.name}
+                            {branch.default ? " (default)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="code-branch-list">
+                      {branches.map((branch) => (
+                        <div key={branch.name} className="code-branch-row">
+                          <div className="stack-xs">
+                            <strong>{branch.name}</strong>
+                            <div className="button-row">
+                              {branch.default ? <span className="badge">Default</span> : null}
+                              {branch.protected ? <span className="badge">Protected</span> : null}
+                            </div>
+                          </div>
+                          {branch.webUrl ? (
+                            <a className="button button-secondary" href={branch.webUrl} target="_blank" rel="noreferrer">
+                              Open
+                            </a>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                    {canWrite ? (
+                      <form className="form-grid" onSubmit={(event) => void onCreateBranch(event)}>
+                        <label>
+                          New branch name
+                          <input className="input" value={newBranchName} onChange={(event) => setNewBranchName(event.target.value)} required />
+                        </label>
+                        <label>
+                          Source ref
+                          <select className="input" value={currentBranchSourceRef} onChange={(event) => setNewBranchSourceRef(event.target.value)}>
+                            {branches.map((branch) => (
+                              <option key={branch.name} value={branch.name}>
+                                {branch.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button className="button" type="submit" disabled={creatingBranch}>
+                          {creatingBranch ? "Creating..." : "Create branch"}
+                        </button>
+                      </form>
+                    ) : null}
+                  </section>
 
-            <section className="code-workspace-grid">
-              <div className="panel stack-md code-file-browser">
-                <div className="toolbar-row">
-                  <div className="stack-xs">
-                    <h3 className="section-heading">Files</h3>
-                    <p className="text-muted">{tree?.path || "/"}</p>
+                  <section className="panel stack-md">
+                    <div className="stack-xs">
+                      <h3 className="section-heading">Open merge request</h3>
+                      <p>Create a merge request in GitLab from the connected project.</p>
+                    </div>
+                    {canWrite ? (
+                      <form className="form-grid" onSubmit={(event) => void onCreateMergeRequest(event)}>
+                        <label>
+                          Source branch
+                          <select className="input" value={currentMergeRequestSourceBranch} onChange={(event) => setMergeRequestSourceBranch(event.target.value)}>
+                            {branches.map((branch) => (
+                              <option key={branch.name} value={branch.name}>
+                                {branch.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Target branch
+                          <select className="input" value={currentMergeRequestTargetBranch} onChange={(event) => setMergeRequestTargetBranch(event.target.value)}>
+                            {branches.map((branch) => (
+                              <option key={branch.name} value={branch.name}>
+                                {branch.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Title
+                          <input className="input" value={mergeRequestTitle} onChange={(event) => setMergeRequestTitle(event.target.value)} required />
+                        </label>
+                        <label>
+                          Description
+                          <textarea className="textarea" value={mergeRequestDescription} onChange={(event) => setMergeRequestDescription(event.target.value)} rows={4} />
+                        </label>
+                        <button className="button" type="submit" disabled={creatingMergeRequest}>
+                          {creatingMergeRequest ? "Creating..." : "Open merge request"}
+                        </button>
+                      </form>
+                    ) : (
+                      <p className="alert alert-info">Reader role can browse repository content but cannot create branches or merge requests.</p>
+                    )}
+                  </section>
+                </div>
+
+                <section className="panel stack-md">
+                  <div className="toolbar-row code-section-toolbar">
+                    <div className="stack-xs">
+                      <h3 className="section-heading">Merge requests</h3>
+                      <p className="text-muted">Track GitLab merge requests for this managed repository.</p>
+                    </div>
+                    <label className="code-filter-control">
+                      State
+                      <select className="input" value={mergeRequestFilter} onChange={(event) => setMergeRequestFilter(event.target.value as RepositoryMergeRequestState)}>
+                        <option value="opened">Opened</option>
+                        <option value="merged">Merged</option>
+                        <option value="closed">Closed</option>
+                        <option value="all">All</option>
+                      </select>
+                    </label>
                   </div>
-                  {tree?.path ? (
-                    <button
-                      className="button button-secondary"
-                      type="button"
-                      onClick={() => {
-                        setBrowserPath(parentPath(tree.path));
-                        setSelectedFile(null);
-                      }}
-                    >
-                      Up
-                    </button>
-                  ) : null}
-                </div>
-                {contentLoading && !tree ? <p className="alert alert-info">Loading repository tree...</p> : null}
-                <div className="code-tree-list">
-                  {tree?.entries.map((entry) => (
-                    <button key={entry.id} type="button" className="code-tree-entry" onClick={() => void onOpenEntry(entry)}>
-                      <span className="badge">{entry.type === "tree" ? "Dir" : "File"}</span>
-                      <span>{entry.name}</span>
-                    </button>
-                  ))}
-                  {tree && tree.entries.length === 0 ? <p className="text-muted">This folder is empty.</p> : null}
-                </div>
-              </div>
 
-              <div className="panel stack-md code-file-viewer">
-                <div className="stack-xs">
-                  <h3 className="section-heading">Viewer</h3>
-                  <p className="text-muted">{selectedFile?.filePath || "Select a file to inspect its contents."}</p>
-                </div>
-                {contentLoading && selectedFile === null ? <p className="alert alert-info">Loading file content...</p> : null}
-                {!selectedFile ? <p className="text-muted">No file selected.</p> : null}
-                {selectedFile?.binary ? <p className="alert alert-info">Binary file preview is not supported in Atlasium Code v1.</p> : null}
-                {selectedFile && !selectedFile.binary ? <pre className="code-file-content">{selectedFile.content}</pre> : null}
-              </div>
+                  {mergeRequestsError ? <p className="alert alert-error">{mergeRequestsError}</p> : null}
+                  {mergeRequestsLoading && mergeRequests.length === 0 ? <p className="alert alert-info">Loading merge requests...</p> : null}
 
-              <div className="panel stack-md code-commit-list">
-                <div className="stack-xs">
-                  <h3 className="section-heading">Recent commits</h3>
-                  <p className="text-muted">Latest activity for {currentBrowseRef || connectedRepository.defaultBranch}.</p>
-                </div>
-                <div className="stack-sm">
-                  {commits.map((commit) => (
-                    <article key={commit.id} className="code-commit-card">
-                      <div className="stack-xs">
-                        <p className="eyebrow">{commit.shortId}</p>
-                        <strong>{commit.title}</strong>
-                        <p>{commit.authorName}</p>
-                        <p className="text-muted">{new Date(commit.authoredDate).toLocaleString()}</p>
-                      </div>
-                      {commit.webUrl ? (
-                        <a className="button button-secondary" href={commit.webUrl} target="_blank" rel="noreferrer">
+                  <div className="code-results-list">
+                    {mergeRequests.map((mergeRequest) => (
+                      <article key={mergeRequest.id} className="code-result-card code-merge-request-card">
+                        <div className="stack-xs">
+                          <p className="eyebrow">!{mergeRequest.iid}</p>
+                          <strong>{mergeRequest.title}</strong>
+                          <div className="button-row">
+                            <span className="badge">{mergeRequest.state}</span>
+                            {mergeRequest.draft ? <span className="badge">Draft</span> : null}
+                          </div>
+                          <div className="stack-xs code-merge-request-meta">
+                            <p>
+                              {mergeRequest.sourceBranch} → {mergeRequest.targetBranch}
+                            </p>
+                            <p className="text-muted">
+                              {mergeRequest.author ? `${mergeRequest.author.name} (@${mergeRequest.author.username})` : "Unknown author"} · {new Date(mergeRequest.updatedAt).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                        <a className="button button-secondary" href={mergeRequest.webUrl} target="_blank" rel="noreferrer">
                           Open
                         </a>
+                      </article>
+                    ))}
+                    {!mergeRequestsLoading && mergeRequests.length === 0 ? (
+                      <p className="text-muted">No merge requests available for the selected state.</p>
+                    ) : null}
+                  </div>
+                </section>
+
+                <section className="code-workspace-grid">
+                  <div className="panel stack-md code-file-browser">
+                    <div className="toolbar-row">
+                      <div className="stack-xs">
+                        <h3 className="section-heading">Files</h3>
+                        <p className="text-muted">{tree?.path || "/"}</p>
+                      </div>
+                      {tree?.path ? (
+                        <button
+                          className="button button-secondary"
+                          type="button"
+                          onClick={() => {
+                            setBrowserPath(parentPath(tree.path));
+                            setSelectedFile(null);
+                          }}
+                        >
+                          Up
+                        </button>
                       ) : null}
-                    </article>
-                  ))}
-                  {commits.length === 0 ? <p className="text-muted">No commits available for this ref.</p> : null}
-                </div>
-              </div>
-            </section>
+                    </div>
+                    {contentLoading && !tree ? <p className="alert alert-info">Loading repository tree...</p> : null}
+                    <div className="code-tree-list">
+                      {tree?.entries.map((entry) => (
+                        <button key={entry.id} type="button" className="code-tree-entry" onClick={() => void onOpenEntry(entry)}>
+                          <span className="badge">{entry.type === "tree" ? "Dir" : "File"}</span>
+                          <span>{entry.name}</span>
+                        </button>
+                      ))}
+                      {tree && tree.entries.length === 0 ? <p className="text-muted">This folder is empty.</p> : null}
+                    </div>
+                  </div>
+
+                  <div className="panel stack-md code-file-viewer">
+                    <div className="stack-xs">
+                      <h3 className="section-heading">Viewer</h3>
+                      <p className="text-muted">{selectedFile?.filePath || "Select a file to inspect its contents."}</p>
+                    </div>
+                    {contentLoading && selectedFile === null ? <p className="alert alert-info">Loading file content...</p> : null}
+                    {!selectedFile ? <p className="text-muted">No file selected.</p> : null}
+                    {selectedFile?.binary ? <p className="alert alert-info">Binary file preview is not supported in Atlasium Code v1.</p> : null}
+                    {selectedFile && !selectedFile.binary ? <pre className="code-file-content">{selectedFile.content}</pre> : null}
+                  </div>
+
+                  <div className="panel stack-md code-commit-list">
+                    <div className="stack-xs">
+                      <h3 className="section-heading">Recent commits</h3>
+                      <p className="text-muted">Latest activity for {currentBrowseRef || connectedRepository.defaultBranch}.</p>
+                    </div>
+                    <div className="stack-sm">
+                      {commits.map((commit) => (
+                        <article key={commit.id} className="code-commit-card">
+                          <div className="stack-xs">
+                            <p className="eyebrow">{commit.shortId}</p>
+                            <strong>{commit.title}</strong>
+                            <p>{commit.authorName}</p>
+                            <p className="text-muted">{new Date(commit.authoredDate).toLocaleString()}</p>
+                          </div>
+                          {commit.webUrl ? (
+                            <a className="button button-secondary" href={commit.webUrl} target="_blank" rel="noreferrer">
+                              Open
+                            </a>
+                          ) : null}
+                        </article>
+                      ))}
+                      {commits.length === 0 ? <p className="text-muted">No commits available for this ref.</p> : null}
+                    </div>
+                  </div>
+                </section>
+              </>
+            )}
           </>
         ) : null}
       </div>

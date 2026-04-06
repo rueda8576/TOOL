@@ -1,4 +1,4 @@
-import { ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 
 import { GitlabService } from "./gitlab.service";
 
@@ -187,6 +187,7 @@ describe("GitlabService", () => {
         name: "Navigation",
         description: "Managed repo",
         web_url: "https://git.atlasium.info/atlasium/nav",
+        ssh_url_to_repo: "git@git.atlasium.info:atlasium/nav.git",
         http_url_to_repo: "https://git.atlasium.info/atlasium/nav.git",
         path_with_namespace: "atlasium/nav",
         default_branch: "main",
@@ -203,7 +204,167 @@ describe("GitlabService", () => {
     ).resolves.toEqual(
       expect.objectContaining({
         connected: true,
+        sshCloneUrl: "git@git.atlasium.info:atlasium/nav.git",
         httpCloneUrl: "https://git.atlasium.info/atlasium/nav.git"
+      })
+    );
+  });
+
+  it("lists the connected user's SSH keys", async () => {
+    const service = makeService();
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(200, [
+        {
+          id: 7,
+          title: "Laptop",
+          key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAexample",
+          created_at: "2026-04-06T10:00:00.000Z",
+          expires_at: null,
+          usage_type: "auth"
+        }
+      ]) as Response
+    );
+
+    await expect(service.listUserSshKeys("user-1")).resolves.toEqual([
+      {
+        id: 7,
+        title: "Laptop",
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAexample",
+        createdAt: "2026-04-06T10:00:00.000Z",
+        expiresAt: null,
+        usageType: "auth"
+      }
+    ]);
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://git.atlasium.info/api/v4/user/keys?per_page=100",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer user-token"
+        })
+      })
+    );
+  });
+
+  it("creates an SSH key for the connected user", async () => {
+    const service = makeService();
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(201, {
+        id: 9,
+        title: "Workstation",
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAworkstation",
+        created_at: "2026-04-06T11:00:00.000Z",
+        expires_at: "2027-04-06",
+        usage_type: "auth"
+      }) as Response
+    );
+
+    await expect(
+      service.createUserSshKey("user-1", {
+        title: "Workstation",
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAworkstation",
+        expiresAt: "2027-04-06"
+      })
+    ).resolves.toEqual({
+      id: 9,
+      title: "Workstation",
+      key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAworkstation",
+      createdAt: "2026-04-06T11:00:00.000Z",
+      expiresAt: "2027-04-06",
+      usageType: "auth"
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://git.atlasium.info/api/v4/user/keys",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          title: "Workstation",
+          key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAworkstation",
+          expires_at: "2027-04-06"
+        })
+      })
+    );
+  });
+
+  it("deletes an SSH key for the connected user", async () => {
+    const service = makeService();
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(jsonResponse(204) as Response);
+
+    await expect(service.deleteUserSshKey("user-1", "42")).resolves.toEqual({ deleted: true });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://git.atlasium.info/api/v4/user/keys/42",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({
+          Authorization: "Bearer user-token"
+        })
+      })
+    );
+  });
+
+  it("surfaces invalid or duplicate SSH key errors as a readable bad request", async () => {
+    const service = makeService();
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(400, {
+        message: {
+          key: ["has already been taken"]
+        }
+      }) as Response
+    );
+
+    await expect(
+      service.createUserSshKey("user-1", {
+        title: "Duplicate",
+        key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAduplicate"
+      })
+    ).rejects.toEqual(
+      expect.objectContaining({
+        constructor: BadRequestException,
+        message: "has already been taken"
+      })
+    );
+  });
+
+  it("preserves the GitLab reconnection-required error when SSH key operations run without a valid user token", async () => {
+    const service = makeService();
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockRejectedValue(new UnauthorizedException("GitLab reconnection required"));
+
+    await expect(service.listUserSshKeys("user-1")).rejects.toEqual(
+      expect.objectContaining({
+        constructor: UnauthorizedException,
+        message: "GitLab reconnection required"
       })
     );
   });

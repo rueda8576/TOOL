@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { Request, Response } from "express";
 
 import { CurrentUser } from "../common/current-user.decorator";
@@ -8,6 +8,7 @@ import { RolesGuard } from "../common/roles.guard";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { buildSessionCookie } from "../common/session-cookie";
 import { AcceptInviteDto } from "./dto/accept-invite.dto";
+import { CreateGitlabSshKeyDto } from "./dto/create-gitlab-ssh-key.dto";
 import { InviteDto } from "./dto/invite.dto";
 import { LoginDto } from "./dto/login.dto";
 import { OidcService } from "./oidc.service";
@@ -114,6 +115,44 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   disconnectGitlabConnection(@CurrentUser() user: AuthenticatedUser): Promise<{ disconnected: true }> {
     return this.authService.disconnectGitlabConnection(user);
+  }
+
+  @Get("gitlab/ssh-keys")
+  @UseGuards(JwtAuthGuard)
+  listGitlabSshKeys(@CurrentUser() user: AuthenticatedUser): Promise<Array<{
+    id: number;
+    title: string;
+    key: string;
+    createdAt: string;
+    expiresAt: string | null;
+    usageType: string | null;
+  }>> {
+    return this.authService.listGitlabSshKeys(user);
+  }
+
+  @Post("gitlab/ssh-keys")
+  @UseGuards(JwtAuthGuard)
+  createGitlabSshKey(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateGitlabSshKeyDto
+  ): Promise<{
+    id: number;
+    title: string;
+    key: string;
+    createdAt: string;
+    expiresAt: string | null;
+    usageType: string | null;
+  }> {
+    return this.authService.createGitlabSshKey(user, dto);
+  }
+
+  @Delete("gitlab/ssh-keys/:keyId")
+  @UseGuards(JwtAuthGuard)
+  deleteGitlabSshKey(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("keyId") keyId: string
+  ): Promise<{ deleted: true }> {
+    return this.authService.deleteGitlabSshKey(user, keyId);
   }
 
   @Get("gitlab/callback")

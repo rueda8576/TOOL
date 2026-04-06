@@ -144,3 +144,4 @@
 ## Managed GitLab sync
 - In GitLab projects that inherit access from a managed parent group, do not blindly add or downgrade direct project memberships for users who already have sufficient inherited access; inspect `/members/all` and treat inherited/effective access as satisfying the desired role before issuing `POST`/`PUT`.
 - When frontend API helpers surface Nest error responses, parse structured JSON `message` payloads instead of dumping the raw JSON string; otherwise operators lose the actionable GitLab error behind a generic blob.
+- For Atlasium-managed GitLab, web SSO and CLI Git authentication are different surfaces: Atlasium OIDC should own GitLab web login, but `git clone` UX should default to SSH keys, with HTTPS explicitly documented as a PAT-based fallback.

@@ -211,7 +211,7 @@ certbot renew --dry-run
 
 ## 6.1) Bootstrap GitLab managed access before the first `main` deploy
 
-1. Log in to `https://git.atlasium.info` as root.
+1. Log in to `https://git.atlasium.info/users/sign_in?auto_sign_in=false` as root.
 2. Create or confirm the single managed group that Atlasium should own.
 3. Create a personal access token for the Atlasium system user/root with scope to manage groups, projects, and memberships. Store it in `GITLAB_SYSTEM_ACCESS_TOKEN`.
 4. Record that GitLab user id in `GITLAB_SYSTEM_USER_ID` so Atlasium never revokes the system account from managed repos.
@@ -229,6 +229,11 @@ sh ./infra/scripts/validate-managed-gitlab-rollout.sh pre-main-push --env-file .
 ```
 
 At this point GitLab itself should be ready. Atlasium OIDC login flow and per-user `/account` connection are validated **after** the Atlasium `main` deploy, because the new OIDC endpoints do not exist on the currently deployed app yet.
+
+GitLab authentication model after go-live:
+- `https://git.atlasium.info/users/sign_in` auto-redirects normal users to Atlasium SSO.
+- Local GitLab admin login remains available only through `https://git.atlasium.info/users/sign_in?auto_sign_in=false`.
+- Web sign-in uses Atlasium OIDC identity; `git clone` should use SSH keys, with HTTPS+PAT only as a fallback.
 
 ## 7) Go-live validation
 
@@ -249,14 +254,20 @@ sh ./infra/scripts/validate-managed-gitlab-rollout.sh post-deploy --env-file .en
 
 Manual smoke test:
 1. Login.
-2. Open `https://git.atlasium.info/users/sign_in` and confirm the `Atlasium` SSO option is visible.
-3. Sign in once through GitLab SSO with an Atlasium admin account to trigger JIT provisioning.
-4. Create project.
-5. Verify that a managed GitLab repository was provisioned for the project.
-6. Open `Account` and connect GitLab API access.
-7. Open `Code` and browse branches/files, then create a branch or MR as an editor/admin.
-8. Open Wiki/Documents/Tasks/Meetings.
-9. In Documents: create/upload/compile/preview.
+2. Open `https://git.atlasium.info/users/sign_in` and confirm it redirects to Atlasium SSO.
+3. Open `https://git.atlasium.info/users/sign_in?auto_sign_in=false` and confirm the local GitLab root login form is still available.
+4. Sign in once through GitLab SSO with an Atlasium admin account to trigger JIT provisioning.
+5. Create project.
+6. Verify that a managed GitLab repository was provisioned for the project.
+7. Open `Account`, connect GitLab API access, and add at least one SSH public key.
+8. Open `Code` and confirm:
+   - SSH clone is primary.
+   - HTTPS clone is marked as PAT fallback.
+   - `Download ZIP` still works.
+9. Clone the managed repository through SSH from a workstation that has the uploaded private key.
+10. Browse branches/files, then create a branch or MR as an editor/admin.
+11. Open Wiki/Documents/Tasks/Meetings.
+12. In Documents: create/upload/compile/preview.
 
 Note:
 - LaTeX compilation runs inside the `worker` container image.

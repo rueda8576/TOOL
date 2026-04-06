@@ -2477,6 +2477,48 @@ body.documents-workspace-dragging * {
   gap: 1.25rem;
 }
 
+.account-ssh-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.95fr);
+  gap: 1rem;
+}
+
+.account-ssh-list {
+  min-height: 8rem;
+}
+
+.account-ssh-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--panel) 88%, white 12%);
+}
+
+.account-ssh-key-preview {
+  display: block;
+  padding: 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 78%, white 22%);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.account-ssh-key-textarea {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.account-ssh-hint {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+
 .code-setup-grid,
 .code-actions-grid {
   display: grid;
@@ -2525,6 +2567,20 @@ body.documents-workspace-dragging * {
 
 .code-clone-input {
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.code-clone-method-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.code-clone-method {
+  gap: 0.85rem;
+}
+
+.code-clone-method-primary {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border) 52%);
+  background: color-mix(in srgb, var(--panel) 76%, white 24%);
 }
 
 .code-section-toolbar {
@@ -2599,6 +2655,7 @@ body.documents-workspace-dragging * {
   }
 
   .account-connection-card,
+  .account-ssh-card,
   .code-overview-card,
   .code-result-card,
   .code-branch-row,
@@ -2613,9 +2670,14 @@ body.documents-workspace-dragging * {
   }
 
   .code-clone-panel,
+  .account-ssh-grid,
   .code-overview-side,
   .code-filter-control {
     width: 100%;
     min-width: 0;
+  }
+
+  .account-ssh-grid {
+    grid-template-columns: 1fr;
   }
 }

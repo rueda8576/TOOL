@@ -1,5 +1,24 @@
 # Implementation TODO (v1 bootstrap)
 
+## GitLab Identity + SSH-First Access (2026-04-06)
+- [x] Enable GitLab auto-SSO with Atlasium while preserving local-root bypass and disabling self-sign-up.
+- [x] Extend backend repository status with `sshCloneUrl`.
+- [x] Add backend SSH key proxy endpoints under `/auth/gitlab/ssh-keys` with DTOs and error mapping.
+- [x] Add backend tests for SSH clone URL mapping and SSH key list/create/delete flows.
+- [x] Extend frontend GitLab client helpers for SSH clone URL and SSH key management.
+- [x] Rework `/projects/:projectId/code` to make SSH clone primary and HTTPS+PAT secondary.
+- [x] Extend `/account` with GitLab SSH key management UI and guidance.
+- [x] Update runbook/docs for Atlasium SSO, SSH clone, HTTPS PAT fallback, and root bypass.
+- [x] Validate with `pnpm --filter @doctoral/api test -- --runInBand --forceExit`, `pnpm --filter @doctoral/api build`, and `pnpm --filter @doctoral/web build`.
+
+### Review - GitLab Identity + SSH-First Access
+- Enabled GitLab auto-SSO with Atlasium OIDC and disabled GitLab self-sign-up while preserving the documented local-root bypass URL.
+- Extended the backend repository status with `sshCloneUrl` and added authenticated SSH key proxy endpoints that reuse the existing GitLab OAuth connection and reconnect semantics.
+- Reworked `Code` so SSH clone is primary, HTTPS is clearly marked as PAT fallback, and ZIP downloads stay available only when GitLab API access is connected.
+- Expanded `/account` with GitLab SSH key management so users can add/remove their own public keys without leaving Atlasium.
+- Updated the go-live runbook to document the split between Atlasium web SSO, SSH clone for CLI use, HTTPS+PAT fallback, and local-root emergency access.
+- Verified with API tests, API build, web build, `docker compose -f docker-compose.gitlab.yml config`, and `git diff --check`.
+
 ## Code vNext - Clone/Download + Merge Requests (2026-04-01)
 - [x] Extend GitLab repository status/API types with `httpCloneUrl`.
 - [x] Add backend repository endpoints for merge request listing and ZIP archive download.

@@ -12,6 +12,7 @@ import { GitlabService } from "../gitlab/gitlab.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { QueueService } from "../queues/queue.service";
 import { AcceptInviteDto } from "./dto/accept-invite.dto";
+import { CreateGitlabSshKeyDto } from "./dto/create-gitlab-ssh-key.dto";
 import { InviteDto } from "./dto/invite.dto";
 import { LoginDto } from "./dto/login.dto";
 import { PasswordResetDto } from "./dto/password-reset.dto";
@@ -406,6 +407,57 @@ export class AuthService {
     }
 
     return { disconnected: true };
+  }
+
+  async listGitlabSshKeys(user: AuthenticatedUser): Promise<Array<{
+    id: number;
+    title: string;
+    key: string;
+    createdAt: string;
+    expiresAt: string | null;
+    usageType: string | null;
+  }>> {
+    return this.gitlabService.listUserSshKeys(user.userId);
+  }
+
+  async createGitlabSshKey(
+    user: AuthenticatedUser,
+    dto: CreateGitlabSshKeyDto
+  ): Promise<{
+    id: number;
+    title: string;
+    key: string;
+    createdAt: string;
+    expiresAt: string | null;
+    usageType: string | null;
+  }> {
+    const createdKey = await this.gitlabService.createUserSshKey(user.userId, dto);
+
+    await this.auditService.log({
+      userId: user.userId,
+      entityType: "gitlab_ssh_key",
+      entityId: String(createdKey.id),
+      action: "auth.gitlab.ssh_key.create",
+      metadata: {
+        title: createdKey.title,
+        expiresAt: createdKey.expiresAt
+      }
+    });
+
+    return createdKey;
+  }
+
+  async deleteGitlabSshKey(user: AuthenticatedUser, keyId: string): Promise<{ deleted: true }> {
+    const result = await this.gitlabService.deleteUserSshKey(user.userId, keyId);
+
+    await this.auditService.log({
+      userId: user.userId,
+      entityType: "gitlab_ssh_key",
+      entityId: keyId,
+      action: "auth.gitlab.ssh_key.delete"
+    });
+
+    return result;
   }
 
   async completeGitlabConnectCallback(code: string | undefined, state: string | undefined): Promise<string> {

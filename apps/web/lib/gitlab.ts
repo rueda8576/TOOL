@@ -18,6 +18,7 @@ export type ProjectRepositoryStatus =
       name: string;
       description: string | null;
       webUrl: string;
+      sshCloneUrl: string;
       httpCloneUrl: string;
       pathWithNamespace: string;
       defaultBranch: string;
@@ -86,6 +87,15 @@ export type RepositoryMergeRequest = {
 
 export type RepositoryMergeRequestState = "opened" | "merged" | "closed" | "all";
 
+export type GitlabSshKey = {
+  id: number;
+  title: string;
+  key: string;
+  createdAt: string;
+  expiresAt: string | null;
+  usageType: string | null;
+};
+
 export type CreatedRepositoryMergeRequest = {
   id: number;
   iid: number;
@@ -127,6 +137,32 @@ export async function beginGitlabConnection(token: string): Promise<{ authorizat
 
 export async function disconnectGitlabConnection(token: string): Promise<{ disconnected: true }> {
   return authFetch<{ disconnected: true }>("/auth/gitlab/connection", {
+    token,
+    init: {
+      method: "DELETE"
+    }
+  });
+}
+
+export async function listGitlabSshKeys(token: string): Promise<GitlabSshKey[]> {
+  return authFetch<GitlabSshKey[]>("/auth/gitlab/ssh-keys", { token });
+}
+
+export async function createGitlabSshKey(
+  token: string,
+  payload: { title: string; key: string; expiresAt?: string }
+): Promise<GitlabSshKey> {
+  return authFetch<GitlabSshKey>("/auth/gitlab/ssh-keys", {
+    token,
+    init: {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }
+  });
+}
+
+export async function deleteGitlabSshKey(token: string, keyId: number): Promise<{ deleted: true }> {
+  return authFetch<{ deleted: true }>(`/auth/gitlab/ssh-keys/${keyId}`, {
     token,
     init: {
       method: "DELETE"

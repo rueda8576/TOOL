@@ -44,6 +44,7 @@ type GitlabProject = {
   description: string | null;
   web_url: string;
   http_url_to_repo?: string;
+  ssh_url_to_repo?: string;
   path_with_namespace: string;
   default_branch: string | null;
   visibility: string;
@@ -144,6 +145,15 @@ type GitlabUserSearchResult = {
   state?: string;
 };
 
+type GitlabSshKey = {
+  id: number;
+  title: string;
+  key: string;
+  created_at: string;
+  expires_at?: string | null;
+  usage_type?: string | null;
+};
+
 type ConnectionStatus = {
   connected: boolean;
   reconnectRequired: boolean;
@@ -162,6 +172,7 @@ type RepositoryStatus =
       name: string;
       description: string | null;
       webUrl: string;
+      sshCloneUrl: string;
       httpCloneUrl: string;
       pathWithNamespace: string;
       defaultBranch: string;
@@ -336,6 +347,81 @@ export class GitlabService {
     };
   }
 
+  async listUserSshKeys(userId: string): Promise<Array<{
+    id: number;
+    title: string;
+    key: string;
+    createdAt: string;
+    expiresAt: string | null;
+    usageType: string | null;
+  }>> {
+    return this.withUserAccessToken(userId, async (accessToken) => {
+      try {
+        const keys = await this.executeGitlabRequest<GitlabSshKey[]>(
+          accessToken,
+          "/user/keys?per_page=100"
+        );
+
+        return keys.map((key) => this.mapUserSshKey(key));
+      } catch (error) {
+        throw this.mapUserSshKeyError(error);
+      }
+    });
+  }
+
+  async createUserSshKey(
+    userId: string,
+    payload: { title: string; key: string; expiresAt?: string }
+  ): Promise<{
+    id: number;
+    title: string;
+    key: string;
+    createdAt: string;
+    expiresAt: string | null;
+    usageType: string | null;
+  }> {
+    return this.withUserAccessToken(userId, async (accessToken) => {
+      try {
+        const createdKey = await this.executeGitlabRequest<GitlabSshKey>(
+          accessToken,
+          "/user/keys",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              title: payload.title.trim(),
+              key: payload.key.trim(),
+              ...(payload.expiresAt?.trim() ? { expires_at: payload.expiresAt.trim() } : {})
+            })
+          }
+        );
+
+        return this.mapUserSshKey(createdKey);
+      } catch (error) {
+        throw this.mapUserSshKeyError(error);
+      }
+    });
+  }
+
+  async deleteUserSshKey(userId: string, keyId: string): Promise<{ deleted: true }> {
+    const normalizedKeyId = this.normalizeUserSshKeyId(keyId);
+
+    return this.withUserAccessToken(userId, async (accessToken) => {
+      try {
+        await this.executeGitlabRequest<void>(
+          accessToken,
+          `/user/keys/${encodeURIComponent(normalizedKeyId)}`,
+          {
+            method: "DELETE"
+          }
+        );
+
+        return { deleted: true };
+      } catch (error) {
+        throw this.mapUserSshKeyError(error);
+      }
+    });
+  }
+
   async searchProjects(_user: AuthenticatedUser, _query: string): Promise<never> {
     throw new ForbiddenException("Atlasium provisions managed GitLab repositories automatically");
   }
@@ -359,6 +445,8 @@ export class GitlabService {
         name: project.name,
         description: project.description,
         webUrl: project.web_url,
+        sshCloneUrl:
+          project.ssh_url_to_repo ?? this.buildRepositorySshCloneUrl(project.path_with_namespace),
         httpCloneUrl:
           project.http_url_to_repo ?? this.buildRepositoryCloneUrl(project.path_with_namespace),
         pathWithNamespace: project.path_with_namespace,
@@ -376,6 +464,7 @@ export class GitlabService {
         name: repository.project.name,
         description: repository.project.description,
         webUrl: repository.webUrl,
+        sshCloneUrl: this.buildRepositorySshCloneUrl(repository.pathWithNamespace),
         httpCloneUrl: this.buildRepositoryCloneUrl(repository.pathWithNamespace),
         pathWithNamespace: repository.pathWithNamespace,
         defaultBranch: repository.defaultBranch,
@@ -1226,7 +1315,7 @@ export class GitlabService {
       if (error.status >= 500) {
         return new BadGatewayException("GitLab is currently unavailable");
       }
-      return new BadRequestException(error.responseBody || "GitLab request failed");
+      return new BadRequestException(this.extractGitlabErrorMessage(error.responseBody, "GitLab request failed"));
     }
 
     return error instanceof Error ? error : new BadGatewayException("GitLab request failed");
@@ -1243,10 +1332,32 @@ export class GitlabService {
       if (error.status >= 500) {
         return new BadGatewayException("GitLab is currently unavailable");
       }
-      return new BadRequestException(error.responseBody || "GitLab infrastructure request failed");
+      return new BadRequestException(
+        this.extractGitlabErrorMessage(error.responseBody, "GitLab infrastructure request failed")
+      );
     }
 
     return error instanceof Error ? error : new BadGatewayException("GitLab infrastructure request failed");
+  }
+
+  private mapUserSshKeyError(error: unknown): Error {
+    if (error instanceof GitlabApiError) {
+      if (error.status === 401) {
+        return new UnauthorizedException("GitLab reconnection required");
+      }
+      if (error.status === 403) {
+        return new ForbiddenException("Your connected GitLab account cannot manage SSH keys");
+      }
+      if (error.status === 404) {
+        return new NotFoundException("SSH key not found");
+      }
+      if (error.status >= 500) {
+        return new BadGatewayException("GitLab is currently unavailable");
+      }
+      return new BadRequestException(this.extractGitlabErrorMessage(error.responseBody, "GitLab SSH key request failed"));
+    }
+
+    return error instanceof Error ? error : new BadGatewayException("GitLab SSH key request failed");
   }
 
   private ensureGlobalAdmin(user: AuthenticatedUser): void {
@@ -1273,6 +1384,11 @@ export class GitlabService {
     return `${this.getGitlabBrowserBaseUrl()}/${pathWithNamespace.replace(/^\/+/, "")}.git`;
   }
 
+  private buildRepositorySshCloneUrl(pathWithNamespace: string): string {
+    const browserUrl = new URL(this.getGitlabBrowserBaseUrl());
+    return `git@${browserUrl.hostname}:${pathWithNamespace.replace(/^\/+/, "")}.git`;
+  }
+
   private buildRepositoryArchiveFileName(pathWithNamespace: string, ref: string): string {
     const pathFragment = pathWithNamespace
       .trim()
@@ -1292,6 +1408,68 @@ export class GitlabService {
     }
 
     return new Date(Date.now() + payload.expires_in * 1000);
+  }
+
+  private mapUserSshKey(key: GitlabSshKey): {
+    id: number;
+    title: string;
+    key: string;
+    createdAt: string;
+    expiresAt: string | null;
+    usageType: string | null;
+  } {
+    return {
+      id: key.id,
+      title: key.title,
+      key: key.key,
+      createdAt: key.created_at,
+      expiresAt: key.expires_at ?? null,
+      usageType: key.usage_type ?? null
+    };
+  }
+
+  private normalizeUserSshKeyId(keyId: string): string {
+    const normalized = keyId.trim();
+    if (!/^\d+$/.test(normalized)) {
+      throw new BadRequestException("SSH key id must be a numeric GitLab key id");
+    }
+
+    return normalized;
+  }
+
+  private extractGitlabErrorMessage(responseBody: string, fallback: string): string {
+    const normalized = responseBody.trim();
+    if (!normalized) {
+      return fallback;
+    }
+
+    try {
+      const parsed = JSON.parse(normalized) as { message?: unknown; error?: unknown };
+      const messageParts = this.collectGitlabErrorMessages(parsed.message ?? parsed.error ?? parsed);
+      if (messageParts.length > 0) {
+        return messageParts.join(". ");
+      }
+    } catch {
+      return normalized;
+    }
+
+    return normalized;
+  }
+
+  private collectGitlabErrorMessages(value: unknown): string[] {
+    if (typeof value === "string") {
+      return [value];
+    }
+
+    if (Array.isArray(value)) {
+      return value.flatMap((entry) => this.collectGitlabErrorMessages(entry));
+    }
+
+    if (value && typeof value === "object") {
+      return Object.values(value).flatMap((entry) => this.collectGitlabErrorMessages(entry));
+    }
+
+    return [];
   }
 
   private isBinaryBuffer(buffer: Buffer): boolean {
