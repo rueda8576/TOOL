@@ -1,5 +1,65 @@
 # Implementation TODO (v1 bootstrap)
 
+## API Coverage Push vNext 2 - Documents/GitLab Hotspot Tranche (2026-04-06)
+- [x] Deepen `DocumentsCollaborationServer` coverage across malformed room queries, payload normalization, awareness sync, cleanup, invalid versions, and queued persistence failures.
+- [x] Raise `DocumentsService` branch coverage across LaTeX helper validation, invalid version-source combinations, workspace/path escapes, and missing-version workspace/file access.
+- [x] Raise `GitlabService` branch coverage across config validation, managed-group resolution, GitLab identity resolution, desired-member construction, and repository access error mapping.
+- [x] Expand `GitlabController` HTTP coverage so the remaining repository/code endpoints are exercised through real routing and DTO binding.
+- [x] Exercise `search-wiki-pages-query.dto.ts` through real wiki search HTTP validation for trim/coercion/range/error paths.
+- [x] Recompute aggregated API coverage, rerun worker gate, validate full `pnpm test:ci`, and capture the measured next hotspots.
+
+### Review - API Coverage Push vNext 2 - Documents/GitLab Hotspot Tranche
+- `DocumentsCollaborationServer` coverage moved beyond the prior query/auth happy-path focus:
+  - malformed upgrade URLs now cover unknown endpoints plus missing `path` / `wikiPageId`
+  - initial sync now covers awareness payload emission
+  - websocket message handling now covers `ArrayBuffer` and `Buffer[]` payloads, read-only sync rejection, and malformed payload logging
+  - persistence now covers invalid active-version teardown and queued wiki persistence failures
+- `DocumentsService` coverage now defends helper-heavy branches that were previously untested:
+  - `normalizeLatexPath`, `workspaceAbsolutePath`, `parseLatexPaths`, and `validateLatexFolderPaths`
+  - invalid `createVersion` source combinations before upload persistence starts
+  - missing-document version creation
+  - missing LaTeX folder paths during workspace materialization
+  - invalid/missing workspace access in `getLatexTree`, `getLatexFile`, and `updateLatexFile`
+- `GitlabService` coverage now includes:
+  - missing GitLab env/config helpers for API/browser/OAuth/managed-mode settings
+  - `ensureManagedGroup` via explicit `groupId`, existing `groupPath`, and create-after-`404`
+  - GitLab user-id resolution from cached ids, persisted ids, exact email matches, and misses
+  - desired managed-member construction for admin/editor/reader mixes with unresolved identities skipped
+  - repository access error mapping on read/archive operations
+- `GitlabController` HTTP coverage was expanded to exercise routing/binding for:
+  - repository status, link, create, disconnect
+  - branches and repository tree
+  - malformed repository-link, merge-request-state, and archive-ref payload/query validation
+- Wiki search HTTP coverage now exercises the DTO through the real controller:
+  - trimmed `q`
+  - coerced numeric `limit`
+  - invalid limits (`0`, `51`, non-integer) and oversize `q`
+- Local validation passed with:
+  - `pnpm --filter @doctoral/api test:unit`
+  - `pnpm --filter @doctoral/api test:http`
+  - `pnpm --filter @doctoral/api test:coverage`
+  - `pnpm --filter @doctoral/worker test:coverage:gate`
+  - `pnpm test:ci`
+  - `git diff --check`
+- New measured API aggregated coverage after this tranche:
+  - statements `88.37%`
+  - branches `65.18%`
+  - functions `88.31%`
+  - lines `88.22%`
+- Improvement over the previous baseline:
+  - statements `+3.32`
+  - branches `+6.09`
+  - functions `+2.66`
+  - lines `+3.41`
+- Measured hotspot movement:
+  - `documents-collaboration.server.ts`: lines `75.11%`, branches `49.33%`
+  - `documents.service.ts`: lines `84.71%`, branches `69.72%`
+  - `gitlab.service.ts`: lines `89.77%`, branches `68.92%`
+  - `gitlab.controller.ts` and `search-wiki-pages-query.dto.ts` still remain branch hotspots at `50%`
+- Updated next lowest hotspots from the real merged coverage are:
+  - lowest `lines`: `documents-collaboration.server.ts` `75.11%`, `projects.controller.ts` `82.14%`, `auth.controller.ts` `83.33%`, `oidc.service.ts` `83.46%`, `admin-users.service.ts` `83.78%`
+  - lowest `branches`: `documents-collaboration.server.ts` `49.33%`, `gitlab.controller.ts` `50.00%`, `search-wiki-pages-query.dto.ts` `50.00%`, `oidc.service.ts` `58.82%`, `admin-users.service.ts` `60.00%`
+
 ## Fix Code Files Viewer Horizontal Overflow (2026-04-06)
 - [x] Contain desktop `Files` layout overflow so selecting a file does not push the whole page to the right.
 - [x] Keep code lines unwrapped and move horizontal scrolling into the file viewer only.

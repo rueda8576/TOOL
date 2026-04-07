@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 
 import { encryptValue } from "../common/crypto";
+import * as envModule from "../config/env";
 import { GitlabService } from "./gitlab.service";
 
 type FetchResponse = {
@@ -72,6 +73,7 @@ describe("GitlabService", () => {
     auditService: any;
   } => {
     const prisma: any = {
+      $transaction: jest.fn(),
       gitLabConnection: {
         upsert: jest.fn(),
         findUnique: jest.fn(),
@@ -215,6 +217,109 @@ describe("GitlabService", () => {
     await expect(service.getConnectionStatus("user-1")).resolves.toEqual({
       connected: false,
       reconnectRequired: false
+    });
+  });
+
+  it("validates GitLab config helpers when required env values are missing", () => {
+    const service = makeService();
+    const envSpy = jest.spyOn(envModule, "getEnv");
+
+    envSpy.mockReturnValueOnce({
+      APP_BASE_URL: "https://atlasium.info"
+    } as any);
+    expect(() => (service as any).getGitlabApiBaseUrl()).toThrow(ServiceUnavailableException);
+
+    envSpy.mockReturnValueOnce({
+      APP_BASE_URL: "https://atlasium.info",
+      GITLAB_BASE_URL: undefined,
+      GITLAB_EXTERNAL_URL: undefined
+    } as any);
+    expect(() => (service as any).getGitlabBrowserBaseUrl()).toThrow(ServiceUnavailableException);
+
+    envSpy.mockReturnValueOnce({
+      APP_BASE_URL: "https://atlasium.info",
+      GITLAB_BASE_URL: "https://git.atlasium.info",
+      GITLAB_EXTERNAL_URL: "https://git.atlasium.info",
+      GITLAB_OAUTH_CLIENT_ID: undefined,
+      GITLAB_OAUTH_CLIENT_SECRET: undefined
+    } as any);
+    expect(() => (service as any).getGitlabUserOauthConfig()).toThrow(ServiceUnavailableException);
+
+    envSpy.mockReturnValueOnce({
+      APP_BASE_URL: "https://atlasium.info",
+      GITLAB_BASE_URL: "https://git.atlasium.info",
+      GITLAB_EXTERNAL_URL: "https://git.atlasium.info",
+      GITLAB_SYSTEM_ACCESS_TOKEN: undefined
+    } as any);
+    expect(() => (service as any).getManagedGitlabConfig()).toThrow(ServiceUnavailableException);
+  });
+
+  it("resolves the managed GitLab group by explicit id, existing path, or on-demand creation", async () => {
+    const service = makeService();
+    const getManagedGitlabConfigSpy = jest.spyOn(service as any, "getManagedGitlabConfig");
+    const executeGitlabRequestSpy = jest.spyOn(service as any, "executeGitlabRequest");
+
+    getManagedGitlabConfigSpy.mockReturnValueOnce({
+      systemAccessToken: "system-token",
+      managedGroupId: "3"
+    });
+    executeGitlabRequestSpy.mockResolvedValueOnce({ id: 3, path: "atlasium", name: "Atlasium" });
+
+    await expect((service as any).ensureManagedGroup("system-token")).resolves.toEqual({
+      id: 3,
+      path: "atlasium",
+      name: "Atlasium"
+    });
+    expect(executeGitlabRequestSpy).toHaveBeenNthCalledWith(1, "system-token", "/groups/3");
+
+    getManagedGitlabConfigSpy.mockReturnValueOnce({
+      systemAccessToken: "system-token",
+      managedGroupPath: "atlasium",
+      managedGroupName: "Atlasium"
+    });
+    executeGitlabRequestSpy.mockResolvedValueOnce({ id: 4, path: "atlasium", name: "Atlasium" });
+
+    await expect((service as any).ensureManagedGroup("system-token")).resolves.toEqual({
+      id: 4,
+      path: "atlasium",
+      name: "Atlasium"
+    });
+    expect(executeGitlabRequestSpy).toHaveBeenNthCalledWith(2, "system-token", "/groups/atlasium");
+
+    executeGitlabRequestSpy.mockRestore();
+    fetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      text: async () => "group missing"
+    } as Response);
+    let notFoundError: unknown;
+    try {
+      await (service as any).executeGitlabRequest("token", "/failing");
+    } catch (error) {
+      notFoundError = error;
+    }
+    const ensureManagedGroupExecuteSpy = jest.spyOn(service as any, "executeGitlabRequest");
+    getManagedGitlabConfigSpy.mockReturnValueOnce({
+      systemAccessToken: "system-token",
+      managedGroupPath: "atlasium",
+      managedGroupName: "Atlasium"
+    });
+    ensureManagedGroupExecuteSpy
+      .mockRejectedValueOnce(notFoundError)
+      .mockResolvedValueOnce({ id: 5, path: "atlasium", name: "Atlasium" });
+
+    await expect((service as any).ensureManagedGroup("system-token")).resolves.toEqual({
+      id: 5,
+      path: "atlasium",
+      name: "Atlasium"
+    });
+    expect(ensureManagedGroupExecuteSpy).toHaveBeenNthCalledWith(2, "system-token", "/groups", {
+      method: "POST",
+      body: JSON.stringify({
+        path: "atlasium",
+        name: "Atlasium",
+        visibility: "private"
+      })
     });
   });
 
@@ -468,6 +573,152 @@ describe("GitlabService", () => {
         Authorization: "Bearer fresh-token"
       })
     });
+  });
+
+  it("resolves GitLab user ids from cache, persisted ids, exact email matches, and misses", async () => {
+    const service = makeService();
+    const cache = new Map<string, string | null>([["cached-user", "88"]]);
+
+    await expect(
+      (service as any).resolveGitlabUserId(
+        {
+          id: "cached-user",
+          email: "cached@example.com",
+          gitlabUserId: null
+        },
+        "system-token",
+        cache
+      )
+    ).resolves.toBe("88");
+
+    await expect(
+      (service as any).resolveGitlabUserId(
+        {
+          id: "persisted-user",
+          email: "persisted@example.com",
+          gitlabUserId: "77"
+        },
+        "system-token",
+        cache
+      )
+    ).resolves.toBe("77");
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(200, [
+        {
+          id: 7,
+          email: "editor@example.com",
+          public_email: null
+        },
+        {
+          id: 8,
+          email: "other@example.com",
+          public_email: null
+        }
+      ]) as Response
+    );
+
+    await expect(
+      (service as any).resolveGitlabUserId(
+        {
+          id: "lookup-user",
+          email: "editor@example.com",
+          gitlabUserId: null
+        },
+        "system-token",
+        cache
+      )
+    ).resolves.toBe("7");
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(200, [
+        {
+          id: 9,
+          email: "another@example.com",
+          public_email: null
+        }
+      ]) as Response
+    );
+
+    await expect(
+      (service as any).resolveGitlabUserId(
+        {
+          id: "missing-user",
+          email: "missing@example.com",
+          gitlabUserId: null
+        },
+        "system-token",
+        cache
+      )
+    ).resolves.toBeNull();
+  });
+
+  it("builds desired project members for admins, editors, readers, and unresolved GitLab identities", async () => {
+    const { service, prisma } = makeServiceWithDeps();
+    prisma.user = {
+      findMany: jest.fn().mockReturnValue("admins-query")
+    };
+    prisma.projectMember = {
+      findMany: jest.fn().mockReturnValue("members-query")
+    };
+    prisma.$transaction.mockResolvedValue([
+      [
+        {
+          id: "admin-1",
+          email: "admin@example.com",
+          gitlabConnection: {
+            gitlabUserId: "1"
+          }
+        }
+      ],
+      [
+        {
+          user: {
+            id: "editor-1",
+            email: "editor@example.com",
+            globalRole: "EDITOR",
+            gitlabConnection: {
+              gitlabUserId: null
+            }
+          },
+          role: "EDITOR"
+        },
+        {
+          user: {
+            id: "reader-1",
+            email: "reader@example.com",
+            globalRole: "READER",
+            gitlabConnection: {
+              gitlabUserId: null
+            }
+          },
+          role: "READER"
+        },
+        {
+          user: {
+            id: "admin-2",
+            email: "admin2@example.com",
+            globalRole: "ADMIN",
+            gitlabConnection: {
+              gitlabUserId: "2"
+            }
+          },
+          role: "EDITOR"
+        }
+      ]
+    ]);
+    jest
+      .spyOn(service as any, "resolveGitlabUserId")
+      .mockResolvedValueOnce("1")
+      .mockResolvedValueOnce("7")
+      .mockResolvedValueOnce(null);
+
+    await expect((service as any).buildDesiredMembers("project-1", "system-token", false)).resolves.toEqual(
+      new Map([
+        ["1", 40],
+        ["7", 30]
+      ])
+    );
   });
 
   it("marks the connection as requiring reconnection after a second 401", async () => {
@@ -903,6 +1154,43 @@ describe("GitlabService", () => {
         })
       })
     );
+  });
+
+  it("maps repository access failures from repository read and write operations", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(403, { message: "forbidden" }) as Response)
+      .mockResolvedValueOnce(jsonResponse(500, { message: "boom" }) as Response);
+
+    await expect(
+      service.listMergeRequests(
+        "project-1",
+        "opened",
+        {
+          userId: "user-1",
+          globalRole: "reader"
+        } as any
+      )
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    await expect(
+      service.getRepositoryArchive(
+        "project-1",
+        "main",
+        {
+          userId: "user-1",
+          globalRole: "reader"
+        } as any
+      )
+    ).rejects.toBeInstanceOf(BadGatewayException);
   });
 
   it("lists branches for the readable repository", async () => {

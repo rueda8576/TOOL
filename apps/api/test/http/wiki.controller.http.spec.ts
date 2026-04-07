@@ -53,6 +53,67 @@ describe("WikiController HTTP", () => {
       .expect(400);
   });
 
+  it("validates wiki search DTO trimming and limit coercion", async () => {
+    wikiService.searchPages.mockResolvedValue([
+      {
+        pageId: "page-1",
+        path: "guides/roadmap",
+        title: "Roadmap",
+        snippet: "Navigation roadmap",
+        publishedRevisionNumber: 2,
+        hasDraftChanges: false,
+        draftUpdatedAt: null,
+        draftUpdatedBy: null
+      }
+    ]);
+
+    const response = await request(app.getHttpServer())
+      .get("/projects/project-1/wiki-pages/search")
+      .query({ q: "  roadmap  ", limit: "5" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    expect(wikiService.searchPages).toHaveBeenCalledWith(
+      "project-1",
+      {
+        q: "roadmap",
+        limit: 5
+      },
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      }
+    );
+    expect(response.body[0].pageId).toBe("page-1");
+  });
+
+  it("rejects wiki search limits outside the allowed DTO range", async () => {
+    await request(app.getHttpServer())
+      .get("/projects/project-1/wiki-pages/search")
+      .query({ q: "roadmap", limit: "0" })
+      .set(authHeaders("reader"))
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/wiki-pages/search")
+      .query({ q: "roadmap", limit: "51" })
+      .set(authHeaders("reader"))
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/wiki-pages/search")
+      .query({ q: "roadmap", limit: "3.5" })
+      .set(authHeaders("reader"))
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/wiki-pages/search")
+      .query({ q: "x".repeat(201) })
+      .set(authHeaders("reader"))
+      .expect(400);
+  });
+
   it("creates pages and lists the wiki tree with bound params", async () => {
     wikiService.createPage.mockResolvedValue({
       id: "page-1",

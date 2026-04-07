@@ -218,6 +218,58 @@ describe("DocumentsService", () => {
     });
   });
 
+  it("defaults document type to OTHER and maps timeout summaries from version metadata", async () => {
+    const { service, prisma } = createService();
+    prisma.document.create.mockResolvedValue({
+      id: "d-created",
+      projectId: "p1",
+      title: "Untyped document",
+      type: DocumentType.OTHER
+    });
+    prisma.documentBranch.create.mockResolvedValue({ id: "branch-main" });
+
+    await service.createDocument(
+      "p1",
+      {
+        title: "Untyped document"
+      },
+      {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(prisma.document.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: DocumentType.OTHER
+        })
+      })
+    );
+    expect(
+      (service as any).mapVersionSummary({
+        id: "v-timeout",
+        versionNumber: 4,
+        compileStatus: CompileStatus.TIMEOUT,
+        compiledPdfFileId: null,
+        pdfFileId: null,
+        latexBundleFileId: null,
+        latexWorkspacePath: null,
+        latexEntryFile: null,
+        createdAt: new Date("2026-04-06T12:00:00.000Z")
+      })
+    ).toEqual({
+      id: "v-timeout",
+      versionNumber: 4,
+      compileStatus: "timeout",
+      hasPdf: false,
+      hasLatex: false,
+      latexEntryFile: null,
+      createdAt: "2026-04-06T12:00:00.000Z"
+    });
+  });
+
   it("creates a document branch from a valid base version", async () => {
     const { service, prisma, accessService, auditService } = createService();
     prisma.document.findFirst.mockResolvedValue({
@@ -374,6 +426,79 @@ describe("DocumentsService", () => {
         }
       )
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects invalid LaTeX helper inputs and workspace escapes", async () => {
+    const { service } = createService();
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-docs-helpers-"));
+    (service as any).storageRoot = storageRoot;
+
+    expect((service as any).normalizeLatexPath("\\chapters\\intro.tex")).toBe("chapters/intro.tex");
+    expect(() => (service as any).normalizeLatexPath("")).toThrow(BadRequestException);
+    expect(() => (service as any).normalizeLatexPath("../outside.tex")).toThrow(BadRequestException);
+    expect(() => (service as any).workspaceAbsolutePath("../outside")).toThrow(BadRequestException);
+    expect((service as any).parseLatexPaths(undefined)).toBeNull();
+    expect(() => (service as any).parseLatexPaths("{")).toThrow(BadRequestException);
+    expect(() => (service as any).parseLatexPaths(JSON.stringify({ path: "main.tex" }))).toThrow(BadRequestException);
+    expect(() => (service as any).parseLatexPaths(JSON.stringify(["main.tex", 3]))).toThrow(BadRequestException);
+    expect(() => (service as any).validateLatexFolderPaths(["main.tex", "main.tex"])).toThrow(BadRequestException);
+    expect(() => (service as any).validateLatexFolderPaths(["../escape.tex"])).toThrow(BadRequestException);
+  });
+
+  it("rejects invalid createVersion source combinations before any upload persistence", async () => {
+    const { service, storageService } = createService();
+    const user = {
+      userId: "u1",
+      email: "u1@example.com",
+      globalRole: "editor" as const
+    };
+
+    await expect(service.createVersion("d1", { latexPaths: JSON.stringify([]) }, {}, user)).rejects.toBeInstanceOf(
+      BadRequestException
+    );
+
+    await expect(
+      service.createVersion(
+        "d1",
+        {},
+        {
+          latexFiles: [{ path: "/tmp/upload-main.tex" } as Express.Multer.File]
+        },
+        user
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    await expect(
+      service.createVersion(
+        "d1",
+        { latexPaths: JSON.stringify(["main.tex"]) },
+        {
+          latexFiles: [{ path: "/tmp/upload-main.tex" } as Express.Multer.File],
+          latexBundle: [{ path: "/tmp/archive.zip" } as Express.Multer.File]
+        },
+        user
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(storageService.saveUpload).not.toHaveBeenCalled();
+  });
+
+  it("throws not found when creating a version for a missing document", async () => {
+    const { service, prisma } = createService();
+    prisma.document.findFirst.mockResolvedValueOnce(null);
+
+    await expect(
+      service.createVersion(
+        "missing-document",
+        {},
+        {},
+        {
+          userId: "u1",
+          email: "u1@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it("creates blank latex workspace when no source files are provided", async () => {
@@ -720,6 +845,96 @@ describe("DocumentsService", () => {
     await expect(readFile(resolve(storageRoot, workspacePath, "chapters", "results.tex"), "utf8")).resolves.toBe(
       "Updated results"
     );
+  });
+
+  it("rejects folder materialization when an uploaded file is missing its latex path", async () => {
+    const { service } = createService();
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-docs-folder-"));
+    const uploadPath = join(storageRoot, "upload-main.tex");
+    await writeFile(uploadPath, "\\section{Intro}", "utf8");
+    (service as any).storageRoot = storageRoot;
+
+    await expect(
+      (service as any).materializeLatexWorkspaceFromFolder({
+        documentVersionId: "v-folder",
+        latexFiles: [{ path: uploadPath } as Express.Multer.File],
+        latexPaths: [undefined] as unknown as string[]
+      })
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects LaTeX tree and file access when the version is missing, has no workspace, or uses an invalid path", async () => {
+    const { service, prisma } = createService();
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-docs-invalid-file-"));
+    const workspacePath = "latex-workspaces/version-invalid";
+    const workspaceAbsolute = resolve(storageRoot, workspacePath);
+    await mkdir(workspaceAbsolute, { recursive: true });
+    (service as any).storageRoot = storageRoot;
+
+    prisma.documentVersion.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "v-no-workspace",
+        latexWorkspacePath: null,
+        document: {
+          projectId: "p1"
+        }
+      })
+      .mockResolvedValueOnce({
+        id: "v-read",
+        latexWorkspacePath: workspacePath,
+        document: {
+          projectId: "p1"
+        }
+      })
+      .mockResolvedValueOnce({
+        id: "v-write",
+        latexWorkspacePath: workspacePath,
+        document: {
+          projectId: "p1"
+        }
+      });
+
+    await expect(
+      service.getLatexTree("missing-version", {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "reader"
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    await expect(
+      service.getLatexTree("v-no-workspace", {
+        userId: "u1",
+        email: "u1@example.com",
+        globalRole: "reader"
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    await expect(
+      service.getLatexFile(
+        "v-read",
+        "../escape.tex",
+        {
+          userId: "u1",
+          email: "u1@example.com",
+          globalRole: "reader"
+        }
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    await expect(
+      service.updateLatexFile(
+        "v-write",
+        "../escape.tex",
+        "content",
+        {
+          userId: "u1",
+          email: "u1@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it("soft-deletes document, branches, and versions and logs audit", async () => {

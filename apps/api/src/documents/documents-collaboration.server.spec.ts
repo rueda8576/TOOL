@@ -5,7 +5,9 @@ import { join } from "path";
 
 import { CompileStatus, ProjectRole } from "@prisma/client";
 import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
+import * as encoding from "lib0/encoding";
 import * as Y from "yjs";
+import * as syncProtocol from "y-protocols/sync";
 import { WebSocket } from "ws";
 
 describe("DocumentsCollaborationServer", () => {
@@ -153,6 +155,37 @@ describe("DocumentsCollaborationServer", () => {
       headers: { host: "localhost" }
     });
     expect(unsupportedKindSocket.close).toHaveBeenCalledWith(1008, "Unsupported collaboration room kind");
+    expect(sessionAuthService.authenticateToken).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown endpoints and missing file/wiki query params before authentication", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-query-extra-"));
+    const { DocumentsCollaborationServer } = await loadServer(storageRoot);
+    const sessionAuthService: any = {
+      authenticateToken: jest.fn()
+    };
+    const server = instantiateServer(DocumentsCollaborationServer, {} as any, sessionAuthService, {} as any);
+
+    const unknownPathSocket = makeSocket(WebSocket.CONNECTING);
+    await (server as any).handleConnection(unknownPathSocket, {
+      url: "/unknown?token=ok&kind=presence&documentId=doc-1",
+      headers: { host: "localhost" }
+    });
+    expect(unknownPathSocket.close).toHaveBeenCalledWith(1008, "Unknown collaboration endpoint");
+
+    const missingFilePathSocket = makeSocket(WebSocket.CONNECTING);
+    await (server as any).handleConnection(missingFilePathSocket, {
+      url: "/collab?kind=file&token=ok&documentVersionId=version-1",
+      headers: { host: "localhost" }
+    });
+    expect(missingFilePathSocket.close).toHaveBeenCalledWith(1008, "Missing documentVersionId or path");
+
+    const missingWikiPageSocket = makeSocket(WebSocket.CONNECTING);
+    await (server as any).handleConnection(missingWikiPageSocket, {
+      url: "/collab?kind=wiki-page&token=ok",
+      headers: { host: "localhost" }
+    });
+    expect(missingWikiPageSocket.close).toHaveBeenCalledWith(1008, "Missing wikiPageId");
     expect(sessionAuthService.authenticateToken).not.toHaveBeenCalled();
   });
 
@@ -568,6 +601,52 @@ describe("DocumentsCollaborationServer", () => {
     expect(socket.send).toHaveBeenCalled();
   });
 
+  it("sends awareness on initial sync and accepts ArrayBuffer and Buffer[] websocket payloads", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-payloads-"));
+    const { DocumentsCollaborationServer } = await loadServer(storageRoot);
+    const server = instantiateServer(DocumentsCollaborationServer, {} as any, {} as any, {} as any);
+    const room = (server as any).getOrCreatePresenceRoom("presence:doc-payloads");
+    const socket = makeSocket();
+
+    room.awareness.setLocalState({ user: "editor-1" });
+    (server as any).sendInitialSync(room, socket);
+    expect(socket.send).toHaveBeenCalledTimes(2);
+
+    socket.send.mockClear();
+    const queryEncoder = encoding.createEncoder();
+    encoding.writeVarUint(queryEncoder, 3);
+    const queryPayload = encoding.toUint8Array(queryEncoder);
+    const arrayBufferPayload = queryPayload.buffer.slice(
+      queryPayload.byteOffset,
+      queryPayload.byteOffset + queryPayload.byteLength
+    );
+
+    (server as any).onMessage(
+      {
+        room,
+        canWrite: true,
+        userId: "editor-1"
+      },
+      socket,
+      arrayBufferPayload
+    );
+
+    expect(socket.send).toHaveBeenCalledTimes(1);
+
+    socket.send.mockClear();
+    (server as any).onMessage(
+      {
+        room,
+        canWrite: true,
+        userId: "editor-1"
+      },
+      socket,
+      [Buffer.from(queryPayload)] as any
+    );
+
+    expect(socket.send).toHaveBeenCalledTimes(1);
+  });
+
   it("does not send initial sync payloads to closed sockets and closes sockets on send callback failures", async () => {
     const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-send-"));
     const { DocumentsCollaborationServer } = await loadServer(storageRoot);
@@ -594,6 +673,53 @@ describe("DocumentsCollaborationServer", () => {
     expect(failingSocket.close).toHaveBeenCalledWith(1011, "Send failed");
   });
 
+  it("ignores sync updates from read-only clients and logs malformed websocket payloads", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-sync-readonly-"));
+    const workspaceRootPath = join(storageRoot, "workspaces/version-readonly");
+    await mkdir(workspaceRootPath, { recursive: true });
+
+    const { DocumentsCollaborationServer } = await loadServer(storageRoot);
+    const server = instantiateServer(DocumentsCollaborationServer, {} as any, {} as any, {} as any);
+    const room = (server as any).getOrCreateFileRoom({
+      roomKey: "file:version-readonly:main.tex",
+      documentVersionId: "version-readonly",
+      projectId: "project-1",
+      workspaceRootPath,
+      filePath: "main.tex",
+      absoluteFilePath: join(workspaceRootPath, "main.tex")
+    });
+    const socket = makeSocket();
+    const updateDoc = new Y.Doc();
+    updateDoc.getText("content").insert(0, "readonly-change");
+    const encoder = encoding.createEncoder();
+    encoding.writeVarUint(encoder, 0);
+    syncProtocol.writeUpdate(encoder, Y.encodeStateAsUpdate(updateDoc));
+
+    (server as any).onMessage(
+      {
+        room,
+        canWrite: false,
+        userId: "reader-1"
+      },
+      socket,
+      Buffer.from(encoding.toUint8Array(encoder))
+    );
+
+    expect(room.doc.getText("content").toString()).toBe("");
+
+    const loggerWarnSpy = jest.spyOn((server as any).logger, "warn").mockImplementation(() => undefined);
+    (server as any).onMessage(
+      {
+        room,
+        canWrite: true,
+        userId: "editor-1"
+      },
+      socket,
+      [Buffer.from([255]), Buffer.from([255])] as any
+    );
+    expect(loggerWarnSpy).toHaveBeenCalledWith(expect.stringContaining("Collaboration message rejected"));
+  });
+
   it("marks file-room persistence as queued when another persist is already in flight", async () => {
     const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-queued-"));
     const workspaceRootPath = join(storageRoot, "workspaces/version-queued");
@@ -614,6 +740,60 @@ describe("DocumentsCollaborationServer", () => {
     await (server as any).persistRoom(room, "queued");
 
     expect(room.persistQueued).toBe(true);
+  });
+
+  it("closes invalid file rooms during autosave and logs queued wiki persistence failures", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-persist-errors-"));
+    const workspaceRootPath = join(storageRoot, "workspaces/version-invalid-persist");
+    await mkdir(workspaceRootPath, { recursive: true });
+
+    const { DocumentsCollaborationServer } = await loadServer(storageRoot);
+    const prisma: any = {
+      documentVersion: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        update: jest.fn()
+      },
+      $transaction: jest.fn().mockRejectedValue(new Error("draft save failed"))
+    };
+    const server = instantiateServer(DocumentsCollaborationServer, prisma, {} as any, {} as any);
+    const fileRoom = (server as any).getOrCreateFileRoom({
+      roomKey: "file:version-invalid-persist:main.tex",
+      documentVersionId: "version-invalid-persist",
+      projectId: "project-1",
+      workspaceRootPath,
+      filePath: "main.tex",
+      absoluteFilePath: join(workspaceRootPath, "main.tex")
+    });
+    const closeRoomSpy = jest.spyOn(server as any, "closeRoomDueToInvalidVersion").mockImplementation(() => undefined);
+
+    await (server as any).persistRoom(fileRoom, "updated");
+
+    expect(closeRoomSpy).toHaveBeenCalledWith(fileRoom, "Document version is no longer available");
+
+    const wikiRoom = (server as any).getOrCreateWikiPageRoom({
+      roomKey: "wiki-page:page-persist",
+      wikiPageId: "page-persist",
+      projectId: "project-1",
+      initialTitle: "Original",
+      initialContent: "Published",
+      initialUpdatedById: "owner-1"
+    });
+    wikiRoom.persistQueued = true;
+    const scheduleWikiPersistSpy = jest.spyOn(server as any, "scheduleWikiPageRoomPersist").mockImplementation(() => undefined);
+    const loggerErrorSpy = jest.spyOn((server as any).logger, "error").mockImplementation(() => undefined);
+
+    await (server as any).persistWikiPageRoom(
+      wikiRoom,
+      {
+        title: "Changed title",
+        contentMarkdown: "Changed content"
+      },
+      "editor-1"
+    );
+
+    expect(loggerErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Wiki collaboration autosave failed"));
+    expect(scheduleWikiPersistSpy).toHaveBeenCalledWith(wikiRoom);
+    expect(wikiRoom.persistQueued).toBe(false);
   });
 
   it("rejects invalid LaTeX file paths when joining file rooms", async () => {

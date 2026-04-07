@@ -58,6 +58,142 @@ describe("GitlabController HTTP", () => {
       .expect(400);
   });
 
+  it("returns 400 for malformed repository-link, merge-request-state, and archive-ref queries", async () => {
+    await request(app.getHttpServer())
+      .post("/projects/project-1/repository/link")
+      .set(authHeaders("admin"))
+      .send({})
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/repository/merge-requests")
+      .query({ state: "draft" })
+      .set(authHeaders("reader"))
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/repository/archive")
+      .query({ ref: "x".repeat(256) })
+      .set(authHeaders("reader"))
+      .expect(400);
+  });
+
+  it("binds repository status, link, create, disconnect, branch-list, and tree routes", async () => {
+    gitlabService.getRepositoryStatus.mockResolvedValue({
+      connected: true,
+      gitlabProjectId: "123",
+      name: "Navigation",
+      webUrl: "https://git.atlasium.info/atlasium/nav",
+      sshCloneUrl: "git@git.atlasium.info:atlasium/nav.git",
+      httpCloneUrl: "https://git.atlasium.info/atlasium/nav.git",
+      pathWithNamespace: "atlasium/nav",
+      defaultBranch: "main",
+      visibility: "private",
+      lastActivityAt: "2026-04-06T12:00:00.000Z",
+      connectedAt: "2026-04-06T12:00:00.000Z",
+      connectedByUserId: "admin-1",
+      managed: true
+    });
+    gitlabService.linkRepository.mockResolvedValue({ connected: true, gitlabProjectId: "123" });
+    gitlabService.createRepository.mockResolvedValue({ connected: true, gitlabProjectId: "124" });
+    gitlabService.disconnectRepository.mockResolvedValue({ disconnected: true });
+    gitlabService.listBranches.mockResolvedValue([{ name: "main", default: true }]);
+    gitlabService.getRepositoryTree.mockResolvedValue({
+      ref: "main",
+      path: "src",
+      entries: [{ id: "blob-1", name: "index.ts", path: "src/index.ts", type: "blob" }]
+    });
+
+    const statusResponse = await request(app.getHttpServer())
+      .get("/projects/project-1/repository")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post("/projects/project-1/repository/link")
+      .set(authHeaders("admin", { userId: "admin-1" }))
+      .send({ gitlabProjectId: "123" })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post("/projects/project-1/repository/create")
+      .set(authHeaders("admin", { userId: "admin-1" }))
+      .send({ name: "Navigation", path: "nav" })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete("/projects/project-1/repository")
+      .set(authHeaders("admin", { userId: "admin-1" }))
+      .expect(200);
+
+    const branchesResponse = await request(app.getHttpServer())
+      .get("/projects/project-1/repository/branches")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    const treeResponse = await request(app.getHttpServer())
+      .get("/projects/project-1/repository/tree")
+      .query({ path: "src", ref: "main" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    expect(gitlabService.getRepositoryStatus).toHaveBeenCalledWith(
+      "project-1",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      }
+    );
+    expect(gitlabService.linkRepository).toHaveBeenCalledWith(
+      "project-1",
+      { gitlabProjectId: "123" },
+      {
+        userId: "admin-1",
+        email: "admin@example.com",
+        globalRole: "admin"
+      }
+    );
+    expect(gitlabService.createRepository).toHaveBeenCalledWith(
+      "project-1",
+      { name: "Navigation", path: "nav" },
+      {
+        userId: "admin-1",
+        email: "admin@example.com",
+        globalRole: "admin"
+      }
+    );
+    expect(gitlabService.disconnectRepository).toHaveBeenCalledWith(
+      "project-1",
+      {
+        userId: "admin-1",
+        email: "admin@example.com",
+        globalRole: "admin"
+      }
+    );
+    expect(gitlabService.listBranches).toHaveBeenCalledWith(
+      "project-1",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      }
+    );
+    expect(gitlabService.getRepositoryTree).toHaveBeenCalledWith(
+      "project-1",
+      "src",
+      "main",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      }
+    );
+    expect(statusResponse.body.gitlabProjectId).toBe("123");
+    expect(branchesResponse.body[0].name).toBe("main");
+    expect(treeResponse.body.entries[0].path).toBe("src/index.ts");
+  });
+
   it("binds repository file query parameters and current user", async () => {
     gitlabService.getRepositoryFile.mockResolvedValue({
       filePath: "README.md",
