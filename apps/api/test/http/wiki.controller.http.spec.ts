@@ -1,4 +1,4 @@
-import { INestApplication } from "@nestjs/common";
+import { ForbiddenException, INestApplication, NotFoundException } from "@nestjs/common";
 import { rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -26,7 +26,8 @@ describe("WikiController HTTP", () => {
       uploadWikiAsset: jest.fn(),
       getWikiAssetContent: jest.fn(),
       updatePage: jest.fn(),
-      listRevisions: jest.fn()
+      listRevisions: jest.fn(),
+      getRevision: jest.fn()
     };
 
     app = await createHttpTestApp({
@@ -43,6 +44,10 @@ describe("WikiController HTTP", () => {
 
   it("returns 401 when listing the wiki tree without auth", async () => {
     await request(app.getHttpServer()).get("/projects/project-1/wiki-pages/tree").expect(401);
+  });
+
+  it("returns 401 when reading a wiki revision preview without auth", async () => {
+    await request(app.getHttpServer()).get("/wiki-pages/page-1/revisions/rev-1").expect(401);
   });
 
   it("returns 400 for invalid wiki search queries", async () => {
@@ -359,6 +364,47 @@ describe("WikiController HTTP", () => {
     expect(response.headers["content-disposition"]).toBe('inline; filename="diagram.png"');
     expect(Buffer.isBuffer(response.body)).toBe(true);
     expect(response.body.toString()).toBe("png");
+  });
+
+  it("binds wiki revision detail params and surfaces not found responses", async () => {
+    wikiService.getRevision.mockResolvedValue({
+      id: "rev-2",
+      revisionNumber: 2,
+      contentMarkdown: "# Archived roadmap",
+      publishedAt: "2026-04-06T12:30:00.000Z",
+      createdBy: {
+        id: "editor-1",
+        name: "Editor",
+        email: "editor@example.com"
+      },
+      changeNote: "Clarify scope"
+    });
+
+    const successResponse = await request(app.getHttpServer())
+      .get("/wiki-pages/page-1/revisions/rev-2")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    expect(wikiService.getRevision).toHaveBeenCalledWith("page-1", "rev-2", {
+      userId: "reader-1",
+      email: "reader@example.com",
+      globalRole: "reader"
+    });
+    expect(successResponse.body.contentMarkdown).toBe("# Archived roadmap");
+
+    wikiService.getRevision.mockRejectedValueOnce(new NotFoundException("Wiki revision not found"));
+
+    await request(app.getHttpServer())
+      .get("/wiki-pages/page-1/revisions/rev-missing")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(404);
+
+    wikiService.getRevision.mockRejectedValueOnce(new ForbiddenException("Forbidden"));
+
+    await request(app.getHttpServer())
+      .get("/wiki-pages/page-1/revisions/rev-forbidden")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(403);
   });
 
   it("uploads wiki assets through multipart storage callbacks", async () => {

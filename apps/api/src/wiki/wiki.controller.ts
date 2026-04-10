@@ -17,7 +17,7 @@ import { SaveWikiDraftDto } from "./dto/save-wiki-draft.dto";
 import { SearchWikiPagesQueryDto } from "./dto/search-wiki-pages-query.dto";
 import { UpdateWikiPageDto } from "./dto/update-wiki-page.dto";
 import { WikiService } from "./wiki.service";
-import { WikiBacklinkView, WikiPageDetail, WikiSearchResult, WikiTreeNode } from "./wiki.types";
+import { WikiBacklinkView, WikiPageDetail, WikiRevisionView, WikiSearchResult, WikiTreeNode } from "./wiki.types";
 
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -168,5 +168,14 @@ export class WikiController {
     changeNote: string | null;
   }>> {
     return this.wikiService.listRevisions(pageId, user);
+  }
+
+  @Get("wiki-pages/:pageId/revisions/:revisionId")
+  getRevision(
+    @Param("pageId") pageId: string,
+    @Param("revisionId") revisionId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WikiRevisionView> {
+    return this.wikiService.getRevision(pageId, revisionId, user);
   }
 }

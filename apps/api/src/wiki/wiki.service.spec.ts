@@ -1294,6 +1294,72 @@ describe("WikiService", () => {
     ]);
   });
 
+  it("returns a specific readable wiki revision with content and author metadata", async () => {
+    const { service, prisma, accessService } = makeService();
+    prisma.wikiPage.findFirst.mockResolvedValue({
+      id: "page-1",
+      projectId: "project-1"
+    });
+    prisma.wikiRevision.findFirst.mockResolvedValue({
+      id: "rev-2",
+      revisionNumber: 2,
+      contentMarkdown: "# Roadmap",
+      createdAt: new Date("2026-03-04T12:00:00.000Z"),
+      changeNote: "Clarify scope",
+      createdBy: {
+        id: "editor-1",
+        name: "Editor",
+        email: "editor@example.com"
+      }
+    });
+
+    await expect(
+      service.getRevision("page-1", "rev-2", {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      })
+    ).resolves.toEqual({
+      id: "rev-2",
+      revisionNumber: 2,
+      contentMarkdown: "# Roadmap",
+      publishedAt: "2026-03-04T12:00:00.000Z",
+      createdBy: {
+        id: "editor-1",
+        name: "Editor",
+        email: "editor@example.com"
+      },
+      changeNote: "Clarify scope"
+    });
+
+    expect(accessService.ensureProjectReadable).toHaveBeenCalledWith("reader-1", "reader", "project-1");
+    expect(prisma.wikiRevision.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "rev-2",
+          pageId: "page-1"
+        }
+      })
+    );
+  });
+
+  it("throws when the requested wiki revision does not belong to the page", async () => {
+    const { service, prisma } = makeService();
+    prisma.wikiPage.findFirst.mockResolvedValue({
+      id: "page-1",
+      projectId: "project-1"
+    });
+    prisma.wikiRevision.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.getRevision("page-1", "rev-missing", {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      })
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it("uploads a valid wiki image and returns stored asset metadata", async () => {
     const { service, prisma, storageService, auditService, accessService } = makeService();
     storageService.saveUpload.mockResolvedValue({ id: "file-1" });

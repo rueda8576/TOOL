@@ -41,6 +41,7 @@
 - For technical document editors, avoid stacking file tree above editor on desktop; use a persistent lateral tree (VSCode-like) and reserve vertical space for the code and preview panes.
 - When adding keyboard shortcuts, include both `Ctrl` and `Cmd` variants and persist key layout preferences (e.g., tree collapsed state) so users keep a stable workspace across reloads.
 - In grid/flex workspaces that render code or file paths, make shrinkable panes explicit with `minmax(0, 1fr)` on grid tracks and `min-width: 0` on the content panel; otherwise long `pre/code` content can expand the whole page instead of staying inside a local scroller.
+- In desktop workspaces with navigation trees (`Pages`, file trees, etc.), do not rely on horizontal scrolling to survive long labels; pair a resizable sidebar with truncation and overflow containment so navigation stays stable while the main panel remains readable.
 
 ## Shared storage path consistency
 - Never rely on a relative `STORAGE_ROOT` interpreted from each package cwd in a monorepo: API and worker may resolve different directories and break compile/file workflows.
@@ -95,6 +96,7 @@
 - For collaborative wiki editing, keep draft writes optimistic (`baseDraftVersion`) and expose explicit conflict actions (`reload`, `copy local`, `retry`) in UI rather than silently overwriting shared drafts.
 - For markdown math in a ReactMarkdown pipeline, add `remark-math` + `rehype-katex` and load KaTeX CSS globally; `remark-gfm` alone does not render `$$...$$`.
 - For wiki search at project scope, backend full-text (`websearch_to_tsquery` + `ts_rank_cd`) gives better relevance than client title/path filtering, and role checks must gate draft content visibility.
+- If immutable wiki revisions already store author and timestamp, expose a dedicated revision-detail endpoint for history preview rather than overloading the revision summary list with full markdown content.
 
 ## Branding consistency
 - Avoid demo-like descriptive copy in production headers; project headers should prioritize concise identity context (e.g., `KEY - Name`) over marketing text.

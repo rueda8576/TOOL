@@ -1179,6 +1179,44 @@ export class WikiService {
     }));
   }
 
+  async getRevision(pageId: string, revisionId: string, user: AuthenticatedUser): Promise<WikiRevisionView> {
+    const page = await this.ensurePageReadable(pageId, user);
+
+    const revision = await this.prisma.wikiRevision.findFirst({
+      where: {
+        id: revisionId,
+        pageId: page.id
+      },
+      select: {
+        id: true,
+        revisionNumber: true,
+        contentMarkdown: true,
+        createdAt: true,
+        changeNote: true,
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      }
+    });
+
+    if (!revision) {
+      throw new NotFoundException("Wiki revision not found");
+    }
+
+    return {
+      id: revision.id,
+      revisionNumber: revision.revisionNumber,
+      contentMarkdown: revision.contentMarkdown,
+      publishedAt: revision.createdAt.toISOString(),
+      createdBy: revision.createdBy,
+      changeNote: revision.changeNote
+    };
+  }
+
   async uploadWikiAsset(
     projectId: string,
     file: Express.Multer.File | undefined,

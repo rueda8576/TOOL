@@ -1,5 +1,40 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Pages Splitter + Revision History Preview (2026-04-10)
+- [x] Replace the fixed wiki `Pages` sidebar with a desktop-only resizable splitter that persists width in `localStorage`.
+- [x] Contain long page and folder names inside the wiki tree without relying on horizontal sidebar scroll.
+- [x] Add a dedicated wiki revision-detail endpoint so the frontend can preview historical published content without bloating the summary list.
+- [x] Turn the existing `History` button into a timeline + preview UI showing revision number, timestamp, author, and change note.
+- [x] Reuse the existing markdown render pipeline for historical preview, including authenticated wiki images.
+- [x] Validate backend compilation/tests and web production build for the new wiki flow.
+
+### Review - Wiki Pages Splitter + Revision History Preview
+- The wiki workspace now supports a desktop splitter between `Pages` and the main content panel:
+  - width persists in `localStorage`
+  - the handle is keyboard-accessible with arrow keys
+  - drag state uses a fullscreen scrim so pointer tracking stays stable during resize
+- Long wiki page and folder names no longer force the sidebar into horizontal scrolling:
+  - the sidebar now hides horizontal overflow
+  - folder/page labels use a shared truncating row structure
+  - the main panel remains shrinkable with `min-width: 0`
+- Added backend revision detail support without schema changes:
+  - new `GET /wiki-pages/:pageId/revisions/:revisionId`
+  - validates page readability first, then ensures the revision belongs to that page
+  - returns immutable revision content, timestamp, author, and change note
+- The `History` button now opens a real two-pane revision browser:
+  - left timeline with revision number, exact timestamp, author, note, and current badge
+  - right preview rendering the selected revision with the same markdown/Katex/image pipeline as the normal wiki read view
+  - opening history defaults to the latest revision and caches loaded previews per page
+  - changing page resets history state and stale revision caches
+- Local validation passed with:
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/wiki/wiki.service.spec.ts`
+  - `pnpm --filter @doctoral/api build`
+  - `pnpm --filter @doctoral/web build`
+  - `git diff --check`
+- Added controller HTTP coverage for the new revision-detail route in `apps/api/test/http/wiki.controller.http.spec.ts`.
+- Residual validation note:
+  - the wiki controller HTTP suite could not be cleanly completed in this environment because the local Nest/supertest harness is unstable here (`listen EPERM` inside the sandbox; escalated rerun hung without emitting results). The route itself compiles and the service-level tests for the new revision endpoint pass.
+
 ## API Coverage Push vNext 2 - Documents/GitLab Hotspot Tranche (2026-04-06)
 - [x] Deepen `DocumentsCollaborationServer` coverage across malformed room queries, payload normalization, awareness sync, cleanup, invalid versions, and queued persistence failures.
 - [x] Raise `DocumentsService` branch coverage across LaTeX helper validation, invalid version-source combinations, workspace/path escapes, and missing-version workspace/file access.

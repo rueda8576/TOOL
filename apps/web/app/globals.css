@@ -1820,11 +1820,32 @@ body.documents-workspace-dragging * {
   align-items: start;
 }
 
+.wiki-layout-resizable {
+  gap: 0.56rem;
+}
+
+.wiki-layout-resizable .wiki-sidebar,
+.wiki-layout-resizable .wiki-main {
+  min-width: 0;
+}
+
+.wiki-layout-dragging,
+.wiki-layout-dragging * {
+  user-select: none;
+}
+
+body.wiki-layout-dragging,
+body.wiki-layout-dragging * {
+  user-select: none;
+}
+
 .wiki-sidebar {
   position: sticky;
   top: 1rem;
   max-height: calc(100vh - 2rem);
-  overflow: auto;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .wiki-sidebar-toolbar {
@@ -1904,6 +1925,19 @@ body.documents-workspace-dragging * {
   transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
 }
 
+.wiki-tree-row-content {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.wiki-tree-chevron {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
 .wiki-tree-folder:hover,
 .wiki-tree-page:hover {
   border-color: var(--line);
@@ -1911,6 +1945,7 @@ body.documents-workspace-dragging * {
   background: var(--bg-surface-soft);
 }
 
+.wiki-tree-folder-name,
 .wiki-tree-page-title {
   min-width: 0;
   overflow: hidden;
@@ -1926,6 +1961,7 @@ body.documents-workspace-dragging * {
 
 .wiki-main {
   min-height: calc(100vh - 2rem);
+  min-width: 0;
 }
 
 .wiki-main-header {
@@ -2183,6 +2219,135 @@ body.documents-workspace-dragging * {
 
 .wiki-history {
   margin-top: 0.78rem;
+  display: grid;
+  gap: 0.72rem;
+}
+
+.wiki-history-layout {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.wiki-history-timeline,
+.wiki-history-preview {
+  min-width: 0;
+}
+
+.wiki-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+  max-height: 560px;
+  overflow: auto;
+}
+
+.wiki-history-item {
+  width: 100%;
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.72rem 0.78rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-soft);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.wiki-history-item:hover {
+  border-color: var(--line-strong);
+  background: #f5f8ff;
+}
+
+.wiki-history-item-active {
+  border-color: var(--brand);
+  background: #ecf3ff;
+  box-shadow: 0 0 0 3px rgba(31, 79, 143, 0.08);
+}
+
+.wiki-history-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.wiki-history-item-meta,
+.wiki-history-preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.62rem;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.wiki-history-preview {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.wiki-split-handle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: col-resize;
+  align-self: stretch;
+  justify-self: center;
+  touch-action: none;
+  position: relative;
+}
+
+.wiki-split-line {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  border-radius: 999px;
+  background: rgba(31, 79, 143, 0.25);
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.wiki-split-handle::after {
+  content: "• • •";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(90deg);
+  font-size: 0.5rem;
+  letter-spacing: 0.12em;
+  color: rgba(31, 79, 143, 0.4);
+  pointer-events: none;
+  user-select: none;
+}
+
+.wiki-split-handle:hover .wiki-split-line {
+  background: rgba(31, 79, 143, 0.55);
+  box-shadow: 0 0 0 3px rgba(31, 79, 143, 0.1);
+}
+
+.wiki-split-handle:hover::after {
+  color: rgba(31, 79, 143, 0.7);
+}
+
+.wiki-split-handle:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.wiki-drag-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  cursor: col-resize;
+  background: transparent;
 }
 
 .editor-actions {
@@ -2277,6 +2442,10 @@ body.documents-workspace-dragging * {
   }
 
   .wiki-links-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wiki-history-layout {
     grid-template-columns: 1fr;
   }
 }
@@ -2485,6 +2654,11 @@ body.documents-workspace-dragging * {
 
   .wiki-layout {
     grid-template-columns: 1fr;
+  }
+
+  .wiki-split-handle,
+  .wiki-drag-scrim {
+    display: none;
   }
 
   .wiki-sidebar {

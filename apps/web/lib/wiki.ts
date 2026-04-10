@@ -336,6 +336,10 @@ export async function listWikiRevisions(pageId: string, token: string): Promise<
   return authFetch<WikiRevisionSummary[]>(`/wiki-pages/${pageId}/revisions`, { token });
 }
 
+export async function getWikiRevision(pageId: string, revisionId: string, token: string): Promise<WikiRevisionView> {
+  return authFetch<WikiRevisionView>(`/wiki-pages/${pageId}/revisions/${revisionId}`, { token });
+}
+
 export async function listWikiBacklinks(pageId: string, token: string): Promise<WikiBacklinkView[]> {
   return authFetch<WikiBacklinkView[]>(`/wiki-pages/${pageId}/backlinks`, { token });
 }
