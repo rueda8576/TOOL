@@ -5,7 +5,14 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../components/app-shell";
-import { AdminManagedUser, deleteAdminUser, listAdminUsers, updateAdminUser } from "../../lib/admin-users";
+import {
+  AdminManagedUser,
+  AdminUserHardDeleteCheck,
+  deleteAdminUser,
+  getAdminUserHardDeleteCheck,
+  listAdminUsers,
+  updateAdminUser
+} from "../../lib/admin-users";
 import { authFetch, LoginResponse } from "../../lib/client-api";
 import { ProjectSummary } from "../../lib/api";
 
@@ -125,6 +132,9 @@ export default function ProjectsPage(): JSX.Element {
   const [editingUserProjectAccess, setEditingUserProjectAccess] = useState<ProjectRoleMap>({});
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [hardDeleteCheckByUserId, setHardDeleteCheckByUserId] = useState<Record<string, AdminUserHardDeleteCheck>>({});
+  const [hardDeleteCheckLoadingId, setHardDeleteCheckLoadingId] = useState<string | null>(null);
+  const [hardDeleteCheckError, setHardDeleteCheckError] = useState<string | null>(null);
 
   const loadProjects = useCallback(
     async (authToken: string): Promise<void> => {
@@ -150,6 +160,9 @@ export default function ProjectsPage(): JSX.Element {
     try {
       const users = await listAdminUsers(authToken);
       setAdminUsers(users);
+      setHardDeleteCheckByUserId((current) =>
+        Object.fromEntries(users.flatMap((user) => (current[user.id] ? [[user.id, current[user.id]]] : [])))
+      );
       setAdminUsersError(null);
     } catch (error) {
       setAdminUsersError((error as Error).message);
@@ -230,6 +243,10 @@ export default function ProjectsPage(): JSX.Element {
     () => adminUsers.find((managedUser) => managedUser.id === selectedManagedUserId) ?? null,
     [adminUsers, selectedManagedUserId]
   );
+  const selectedManagedUserHardDeleteCheck = useMemo(
+    () => (selectedManagedUser ? hardDeleteCheckByUserId[selectedManagedUser.id] ?? null : null),
+    [hardDeleteCheckByUserId, selectedManagedUser]
+  );
 
   useEffect(() => {
     if (workspaceMode !== "users") {
@@ -255,6 +272,43 @@ export default function ProjectsPage(): JSX.Element {
     setEditingUserRole(selectedManagedUser.globalRole);
     setEditingUserProjectAccess(buildProjectRoleMap(selectedManagedUser.projects));
   }, [selectedManagedUser]);
+
+  useEffect(() => {
+    if (!token || workspaceMode !== "users" || !selectedManagedUser) {
+      setHardDeleteCheckError(null);
+      return;
+    }
+
+    let active = true;
+    setHardDeleteCheckError(null);
+    setHardDeleteCheckLoadingId(selectedManagedUser.id);
+
+    void getAdminUserHardDeleteCheck(selectedManagedUser.id, token)
+      .then((check) => {
+        if (!active) {
+          return;
+        }
+
+        setHardDeleteCheckByUserId((current) => ({
+          ...current,
+          [check.userId]: check
+        }));
+      })
+      .catch((error) => {
+        if (active) {
+          setHardDeleteCheckError((error as Error).message);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setHardDeleteCheckLoadingId(null);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedManagedUser, token, workspaceMode]);
 
   const onCreateProject = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
@@ -491,6 +545,7 @@ export default function ProjectsPage(): JSX.Element {
 
     setAdminUsersError(null);
     setAdminUsersSuccess(null);
+    setHardDeleteCheckError(null);
     setWorkspaceMode((current) => {
       const next = current === "users" ? "projects" : "users";
       if (next === "users") {
@@ -505,6 +560,7 @@ export default function ProjectsPage(): JSX.Element {
   const onSelectManagedUser = (managedUser: AdminManagedUser): void => {
     setAdminUsersError(null);
     setAdminUsersSuccess(null);
+    setHardDeleteCheckError(null);
     setSelectedManagedUserId(managedUser.id);
   };
 
@@ -578,12 +634,16 @@ export default function ProjectsPage(): JSX.Element {
     }
   };
 
-  const onDeleteManagedUser = async (managedUser: AdminManagedUser): Promise<void> => {
+  const onDeleteManagedUser = async (managedUser: AdminManagedUser, mode: "soft" | "hard"): Promise<void> => {
     if (!token || deletingUserId) {
       return;
     }
 
-    const confirmed = window.confirm(`Delete user ${managedUser.name} (${managedUser.email})? They will lose access immediately.`);
+    const confirmed = window.confirm(
+      mode === "hard"
+        ? `Hard delete user ${managedUser.name} (${managedUser.email})? This permanently removes the account and only works when no historical records depend on it.`
+        : `Delete user ${managedUser.name} (${managedUser.email})? They will lose access immediately.`
+    );
     if (!confirmed) {
       return;
     }
@@ -591,11 +651,21 @@ export default function ProjectsPage(): JSX.Element {
     setDeletingUserId(managedUser.id);
     setAdminUsersError(null);
     setAdminUsersSuccess(null);
+    setHardDeleteCheckError(null);
 
     try {
-      await deleteAdminUser(managedUser.id, token);
+      await deleteAdminUser(managedUser.id, token, mode);
       setAdminUsers((current) => current.filter((user) => user.id !== managedUser.id));
-      setAdminUsersSuccess(`${managedUser.name} deleted successfully.`);
+      setHardDeleteCheckByUserId((current) => {
+        const next = { ...current };
+        delete next[managedUser.id];
+        return next;
+      });
+      setAdminUsersSuccess(
+        mode === "hard"
+          ? `${managedUser.name} was permanently deleted.`
+          : `${managedUser.name} was soft-deleted successfully.`
+      );
       setSelectedManagedUserId((current) => (current === managedUser.id ? null : current));
     } catch (error) {
       setAdminUsersError((error as Error).message);
@@ -673,6 +743,7 @@ export default function ProjectsPage(): JSX.Element {
         {inviteError ? <p className="alert alert-error">{inviteError}</p> : null}
         {adminUsersSuccess ? <p className="alert alert-success">{adminUsersSuccess}</p> : null}
         {adminUsersError ? <p className="alert alert-error">{adminUsersError}</p> : null}
+        {hardDeleteCheckError ? <p className="alert alert-error">{hardDeleteCheckError}</p> : null}
         {listError ? (
           <p className="alert alert-error">
             {listError}. Please <Link href="/login">sign in again</Link>.
@@ -1029,18 +1100,66 @@ export default function ProjectsPage(): JSX.Element {
                       <h3 className="section-heading">{selectedManagedUser.name}</h3>
                       <p className="projects-toolbar-helper">{selectedManagedUser.email}</p>
                     </div>
-                    <button
-                      className="button button-danger"
-                      type="button"
-                      onClick={() => {
-                        void onDeleteManagedUser(selectedManagedUser);
-                      }}
-                      disabled={selectedManagedUser.id === currentUserId || deletingUserId === selectedManagedUser.id || savingUserId !== null}
-                      title={selectedManagedUser.id === currentUserId ? "Admins cannot delete their own account." : undefined}
-                    >
-                      {deletingUserId === selectedManagedUser.id ? "Deleting..." : "Delete user"}
-                    </button>
+                    <div className="projects-users-delete-stack">
+                      <button
+                        className="button button-danger"
+                        type="button"
+                        onClick={() => {
+                          void onDeleteManagedUser(selectedManagedUser, "soft");
+                        }}
+                        disabled={selectedManagedUser.id === currentUserId || deletingUserId === selectedManagedUser.id || savingUserId !== null}
+                        title={selectedManagedUser.id === currentUserId ? "Admins cannot delete their own account." : undefined}
+                      >
+                        {deletingUserId === selectedManagedUser.id ? "Deleting..." : "Delete user"}
+                      </button>
+                    </div>
                   </div>
+
+                  <section className="projects-users-delete-panel">
+                    <div className="projects-users-delete-panel-header">
+                      <strong>Hard delete</strong>
+                      <p className="projects-toolbar-helper">
+                        Permanently remove the account only when it does not own restrictive historical records.
+                      </p>
+                    </div>
+                    {hardDeleteCheckLoadingId === selectedManagedUser.id ? (
+                      <p className="alert alert-info">Checking whether hard delete is safe...</p>
+                    ) : null}
+                    {selectedManagedUserHardDeleteCheck?.allowed ? (
+                      <p className="alert alert-success">Hard delete is available for this user.</p>
+                    ) : null}
+                    {selectedManagedUserHardDeleteCheck && !selectedManagedUserHardDeleteCheck.allowed ? (
+                      <>
+                        <p className="alert alert-info">Hard delete is blocked until these dependencies are cleared:</p>
+                        <ul className="projects-users-hard-delete-list">
+                          {selectedManagedUserHardDeleteCheck.blockers.map((blocker) => (
+                            <li key={blocker.code} className="projects-users-hard-delete-item">
+                              {blocker.label} ({blocker.count})
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : null}
+                    <div className="projects-users-delete-actions">
+                      <button
+                        className="button button-danger"
+                        type="button"
+                        onClick={() => {
+                          void onDeleteManagedUser(selectedManagedUser, "hard");
+                        }}
+                        disabled={
+                          selectedManagedUser.id === currentUserId ||
+                          deletingUserId === selectedManagedUser.id ||
+                          savingUserId !== null ||
+                          hardDeleteCheckLoadingId === selectedManagedUser.id ||
+                          !selectedManagedUserHardDeleteCheck?.allowed
+                        }
+                        title={selectedManagedUser.id === currentUserId ? "Admins cannot delete their own account." : undefined}
+                      >
+                        {deletingUserId === selectedManagedUser.id ? "Deleting..." : "Hard delete"}
+                      </button>
+                    </div>
+                  </section>
 
                   <form className="form-grid" onSubmit={onSaveManagedUser}>
                     <label>

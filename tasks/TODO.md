@@ -1,5 +1,46 @@
 # Implementation TODO (v1 bootstrap)
 
+## UX/Admin Bundle - Wiki Auto-Fit Pages + Collapsible Sidebar + Safe Hard Delete + Wiki History Diff (2026-04-14)
+- [x] Add desktop-only persistent collapse/expand behavior to `AppShell`, with the sidebar fully hidden when collapsed and a reopen control in content.
+- [x] Change the wiki `Pages` sidebar to an auto-fit + manual splitter model with persisted mode/width, including double-click reset to auto and containment for long names.
+- [x] Rework wiki history into a main-pane diff workspace using the existing revision APIs and Monaco diff against the previous revision.
+- [x] Add backend admin hard-delete preflight and mode-aware delete handling, blocking true deletion when restrictive authored/history records exist.
+- [x] Extend the Manage Users UI and frontend admin client types to show hard-delete eligibility, blocker reasons, and separate soft/hard delete actions.
+- [x] Add/update backend service + HTTP tests for the new admin hard-delete flow and verify API/web builds.
+
+### Review - UX/Admin Bundle - Wiki Auto-Fit Pages + Collapsible Sidebar + Safe Hard Delete + Wiki History Diff
+- `AppShell` now supports a desktop-only persisted collapsed state:
+  - expanded keeps the current full sidebar
+  - collapsed removes the sidebar column entirely
+  - a `Show menu` control appears in content while collapsed
+  - mobile keeps the existing always-visible nav behavior
+- The wiki `Pages` sidebar now uses an `auto` vs `manual` width model:
+  - default is `auto`
+  - visible tree/search labels are measured to widen the sidebar up to the existing safety clamp
+  - dragging or keyboard resizing switches to `manual`
+  - double-clicking the splitter resets back to `auto`
+- Wiki history no longer renders as a secondary panel at the bottom of the page:
+  - `History` now switches the main wiki pane into a dedicated history workspace
+  - the left column keeps the revision timeline
+  - the right column is now a read-only Monaco diff against the previous published revision
+  - revision `#1` diffs against an empty document and is labeled as the initial revision implicitly
+- Manage Users now distinguishes soft delete from hard delete:
+  - backend adds `GET /admin/users/:userId/hard-delete-check`
+  - backend `DELETE /admin/users/:userId?mode=soft|hard` supports explicit delete mode
+  - hard delete is blocked when the user still owns restrictive authored/history records or would remove the last active admin
+  - frontend shows blocker reasons inline and only enables `Hard delete` when the preflight allows it
+- Added backend coverage for the new admin flow:
+  - `apps/api/src/admin/admin-users.service.spec.ts`
+  - `apps/api/test/http/admin-users.controller.http.spec.ts`
+- Local verification results:
+  - `pnpm --filter @doctoral/api build` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `git diff --check` passed
+- Residual verification note:
+  - `pnpm --filter @doctoral/api exec jest ...` did not emit a terminal result in this sandbox despite repeated attempts, so the new admin specs are implemented but their local runtime execution remains unconfirmed here
+  - `pnpm --filter @doctoral/web build` reached `Creating an optimized production build ...` and then stopped returning a terminal status in this sandbox; the package type-check is green, but the full Next production build should be re-run outside this wrapper for a definitive result
+
 ## Wiki Pages Splitter + Revision History Preview (2026-04-10)
 - [x] Replace the fixed wiki `Pages` sidebar with a desktop-only resizable splitter that persists width in `localStorage`.
 - [x] Contain long page and folder names inside the wiki tree without relying on horizontal sidebar scroll.

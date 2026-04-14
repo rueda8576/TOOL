@@ -1,4 +1,4 @@
-import { ForbiddenException, NotFoundException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { GlobalRole, ProjectRole } from "@prisma/client";
 
 import * as collaborationRegistry from "../documents/collaboration-server-registry";
@@ -12,10 +12,12 @@ describe("AdminUsersService", () => {
         findFirst: jest.fn(),
         findUnique: jest.fn(),
         count: jest.fn(),
-        update: jest.fn()
+        update: jest.fn(),
+        delete: jest.fn()
       },
       project: {
-        findMany: jest.fn()
+        findMany: jest.fn(),
+        count: jest.fn()
       },
       session: {
         deleteMany: jest.fn()
@@ -31,12 +33,64 @@ describe("AdminUsersService", () => {
         deleteMany: jest.fn()
       },
       projectRepository: {
-        findMany: jest.fn()
+        findMany: jest.fn(),
+        count: jest.fn()
+      },
+      document: {
+        count: jest.fn()
+      },
+      documentBranch: {
+        count: jest.fn()
+      },
+      documentVersion: {
+        count: jest.fn()
+      },
+      wikiPage: {
+        count: jest.fn()
+      },
+      wikiRevision: {
+        count: jest.fn()
+      },
+      wikiDraft: {
+        count: jest.fn()
+      },
+      wikiAsset: {
+        count: jest.fn()
+      },
+      task: {
+        count: jest.fn()
+      },
+      taskDependency: {
+        count: jest.fn()
+      },
+      meeting: {
+        count: jest.fn()
+      },
+      invite: {
+        count: jest.fn()
       },
       $transaction: jest.fn()
     };
 
     prisma.$transaction.mockImplementation(async (callback: (tx: any) => Promise<unknown>) => callback(prisma));
+    prisma.projectRepository.findMany.mockResolvedValue([]);
+
+    [
+      prisma.user.count,
+      prisma.project.count,
+      prisma.projectRepository.count,
+      prisma.document.count,
+      prisma.documentBranch.count,
+      prisma.documentVersion.count,
+      prisma.wikiPage.count,
+      prisma.wikiRevision.count,
+      prisma.wikiDraft.count,
+      prisma.wikiAsset.count,
+      prisma.task.count,
+      prisma.taskDependency.count,
+      prisma.meeting.count,
+      prisma.invite.count
+    ].forEach((mock) => mock.mockResolvedValue(0));
 
     const auditService = {
       log: jest.fn()
@@ -267,6 +321,55 @@ describe("AdminUsersService", () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it("returns a blocked hard-delete check for authored history and the last remaining admin", async () => {
+    const { service, prisma } = makeService();
+    prisma.user.findFirst.mockResolvedValueOnce({
+      id: "admin-1",
+      globalRole: GlobalRole.ADMIN,
+      projectMemberships: []
+    });
+    prisma.user.count.mockResolvedValue(1);
+    prisma.project.count.mockResolvedValue(2);
+    prisma.wikiRevision.count.mockResolvedValue(3);
+
+    await expect(
+      service.getHardDeleteCheck("admin-1", {
+        userId: "admin-2",
+        email: "admin2@example.com",
+        globalRole: "admin"
+      })
+    ).resolves.toEqual({
+      userId: "admin-1",
+      allowed: false,
+      blockers: expect.arrayContaining([
+        expect.objectContaining({ code: "last_active_admin", count: 1 }),
+        expect.objectContaining({ code: "projects_created", count: 2 }),
+        expect.objectContaining({ code: "wiki_revisions_created", count: 3 })
+      ])
+    });
+  });
+
+  it("returns an allowed hard-delete check when the user has no restrictive records", async () => {
+    const { service, prisma } = makeService();
+    prisma.user.findFirst.mockResolvedValueOnce({
+      id: "user-3",
+      globalRole: GlobalRole.READER,
+      projectMemberships: []
+    });
+
+    await expect(
+      service.getHardDeleteCheck("user-3", {
+        userId: "admin-1",
+        email: "admin@example.com",
+        globalRole: "admin"
+      })
+    ).resolves.toEqual({
+      userId: "user-3",
+      allowed: true,
+      blockers: []
+    });
+  });
+
   it("forbids self-delete", async () => {
     const { service } = makeService();
 
@@ -297,11 +400,15 @@ describe("AdminUsersService", () => {
       deletedAt: new Date("2026-03-30T12:00:00.000Z")
     });
 
-    const result = await service.deleteUser("user-3", {
-      userId: "admin-1",
-      email: "admin@example.com",
-      globalRole: "admin"
-    });
+    const result = await service.deleteUser(
+      "user-3",
+      {
+        userId: "admin-1",
+        email: "admin@example.com",
+        globalRole: "admin"
+      },
+      "soft"
+    );
 
     expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-3" } });
     expect(prisma.projectMember.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-3" } });
@@ -317,8 +424,88 @@ describe("AdminUsersService", () => {
     expect(gitlabService.syncProjectRepositoryAccess).toHaveBeenCalledWith("project-1");
     expect(result).toEqual({
       id: "user-3",
+      mode: "soft",
       deletedAt: "2026-03-30T12:00:00.000Z"
     });
+  });
+
+  it("hard deletes a user when the preflight passes", async () => {
+    const { service, prisma, auditService, gitlabService } = makeService();
+    const disconnectUser = jest.fn();
+    jest.spyOn(collaborationRegistry, "getDocumentsCollaborationServer").mockReturnValue({
+      disconnectUser
+    } as any);
+
+    prisma.user.findFirst.mockResolvedValueOnce({
+      id: "user-4",
+      globalRole: GlobalRole.READER,
+      projectMemberships: [{ projectId: "project-2" }]
+    });
+    prisma.user.delete.mockResolvedValue({
+      id: "user-4",
+      globalRole: GlobalRole.READER
+    });
+
+    const result = await service.deleteUser(
+      "user-4",
+      {
+        userId: "admin-1",
+        email: "admin@example.com",
+        globalRole: "admin"
+      },
+      "hard"
+    );
+
+    expect(prisma.session.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-4" } });
+    expect(prisma.projectMember.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-4" } });
+    expect(prisma.userPinnedProject.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-4" } });
+    expect(prisma.gitLabConnection.deleteMany).toHaveBeenCalledWith({ where: { userId: "user-4" } });
+    expect(prisma.user.delete).toHaveBeenCalledWith({
+      where: {
+        id: "user-4"
+      },
+      select: {
+        id: true,
+        globalRole: true
+      }
+    });
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "user.hard_delete",
+        entityId: "user-4"
+      })
+    );
+    expect(disconnectUser).toHaveBeenCalledWith("user-4", "Account permanently removed by an administrator");
+    expect(gitlabService.syncProjectRepositoryAccess).toHaveBeenCalledWith("project-2");
+    expect(result).toEqual({
+      id: "user-4",
+      mode: "hard",
+      deletedAt: null
+    });
+  });
+
+  it("blocks hard delete when the user still owns restrictive records", async () => {
+    const { service, prisma } = makeService();
+    prisma.user.findFirst.mockResolvedValueOnce({
+      id: "user-5",
+      globalRole: GlobalRole.READER,
+      projectMemberships: []
+    });
+    prisma.document.count.mockResolvedValue(1);
+
+    await expect(
+      service.deleteUser(
+        "user-5",
+        {
+          userId: "admin-1",
+          email: "admin@example.com",
+          globalRole: "admin"
+        },
+        "hard"
+      )
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(prisma.user.delete).not.toHaveBeenCalled();
   });
 
   it("rejects updates for missing users", async () => {

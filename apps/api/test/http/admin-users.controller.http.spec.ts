@@ -13,6 +13,7 @@ describe("AdminUsersController HTTP", () => {
     adminUsersService = {
       listUsers: jest.fn(),
       updateUser: jest.fn(),
+      getHardDeleteCheck: jest.fn(),
       deleteUser: jest.fn()
     };
 
@@ -42,6 +43,37 @@ describe("AdminUsersController HTTP", () => {
       .set(authHeaders("admin"))
       .send({ globalRole: "owner" })
       .expect(400);
+  });
+
+  it("returns 400 for malformed delete mode", async () => {
+    await request(app.getHttpServer())
+      .delete("/admin/users/user-2?mode=purge")
+      .set(authHeaders("admin"))
+      .expect(400);
+  });
+
+  it("forwards hard-delete preflight params and current user", async () => {
+    adminUsersService.getHardDeleteCheck.mockResolvedValue({
+      userId: "user-2",
+      allowed: false,
+      blockers: [{ code: "projects_created", label: "Created projects", count: 2 }]
+    });
+
+    const response = await request(app.getHttpServer())
+      .get("/admin/users/user-2/hard-delete-check")
+      .set(authHeaders("admin", { userId: "admin-1", email: "admin@example.com" }))
+      .expect(200);
+
+    expect(adminUsersService.getHardDeleteCheck).toHaveBeenCalledWith("user-2", {
+      userId: "admin-1",
+      email: "admin@example.com",
+      globalRole: "admin"
+    });
+    expect(response.body).toEqual({
+      userId: "user-2",
+      allowed: false,
+      blockers: [{ code: "projects_created", label: "Created projects", count: 2 }]
+    });
   });
 
   it("updates an admin user and forwards params/body/current user", async () => {
@@ -74,6 +106,34 @@ describe("AdminUsersController HTTP", () => {
       name: "User Two",
       globalRole: "editor",
       projectAccess: []
+    });
+  });
+
+  it("deletes an admin user with the requested mode and forwards current user", async () => {
+    adminUsersService.deleteUser.mockResolvedValue({
+      id: "user-2",
+      mode: "hard",
+      deletedAt: null
+    });
+
+    const response = await request(app.getHttpServer())
+      .delete("/admin/users/user-2?mode=hard")
+      .set(authHeaders("admin", { userId: "admin-1", email: "admin@example.com" }))
+      .expect(200);
+
+    expect(adminUsersService.deleteUser).toHaveBeenCalledWith(
+      "user-2",
+      {
+        userId: "admin-1",
+        email: "admin@example.com",
+        globalRole: "admin"
+      },
+      "hard"
+    );
+    expect(response.body).toEqual({
+      id: "user-2",
+      mode: "hard",
+      deletedAt: null
     });
   });
 });

@@ -152,6 +152,14 @@
 - When frontend API helpers surface Nest error responses, parse structured JSON `message` payloads instead of dumping the raw JSON string; otherwise operators lose the actionable GitLab error behind a generic blob.
 - For Atlasium-managed GitLab, web SSO and CLI Git authentication are different surfaces: Atlasium OIDC should own GitLab web login, but `git clone` UX should default to SSH keys, with HTTPS explicitly documented as a PAT-based fallback.
 
+## Admin destructive actions
+- In systems with authored history and Prisma `onDelete: Restrict` relations, do not offer blind hard delete. Add a preflight endpoint that counts blockers and let the UI explain exactly why permanent deletion is blocked before the operator clicks.
+- Keep soft delete and hard delete as separate explicit modes end-to-end (`UI`, client helper, controller, service, audit) so operators cannot confuse “revoke access” with “erase the account record”.
+
+## Sidebar ergonomics
+- For dense desktop navigation panes (`Pages`, app nav, file trees), do not force a single fixed-width strategy. Prefer an `auto-fit` width for readable labels plus a persisted manual override for users who want tighter or wider panes.
+- If a desktop history/review workflow already has immutable revisions and Monaco is available, prefer a main-pane diff workspace over rendering history as a secondary panel below the primary content; the workflow stays focused and the changed lines become the primary artifact.
+
 ## Backend testing
 - In PNPM workspace scripts, avoid relying on `pnpm run <script> -- --coverage ...` for Jest in CI; forwarded args can be treated as test patterns and produce `No tests found`. Prefer dedicated coverage scripts or `pnpm exec jest ...`.
 - For Nest HTTP/controller tests that should exercise real auth/role wiring, keep the real `JwtAuthGuard` and `RolesGuard` in the module and mock `SessionAuthService.authenticateToken`; replacing the guard itself hides route metadata and role regressions.

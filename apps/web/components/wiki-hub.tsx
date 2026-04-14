@@ -11,6 +11,7 @@ import * as Y from "yjs";
 
 import { AppShell } from "./app-shell";
 import { ProjectSubtitle } from "./project-subtitle";
+import { WikiHistoryDiff } from "./wiki-history-diff";
 import { API_BASE_URL, LoginResponse } from "../lib/client-api";
 import {
   buildCollaboratorIdentity,
@@ -43,6 +44,7 @@ import {
 import { getProjectAccess, ProjectAccess } from "../lib/project-access";
 
 type SaveState = "idle" | "saving" | "saved" | "error" | "conflict";
+type WikiSidebarWidthMode = "auto" | "manual";
 
 const WIKI_PATH_SEGMENT_PATTERN = /^[a-z0-9-]+$/;
 const INDENT_SIZE = 2;
@@ -51,12 +53,14 @@ const WIKI_REALTIME_CONTENT_KEY = "content";
 const WIKI_REALTIME_AUTOSAVE_MARK_MS = 3250;
 const WIKI_FLASH_SUCCESS_KEY = "atlasium_wiki_flash_success";
 const WIKI_SIDEBAR_WIDTH_STORAGE_KEY = "atlasium_wiki_sidebar_width_px";
+const WIKI_SIDEBAR_MODE_STORAGE_KEY = "atlasium_wiki_sidebar_width_mode";
 const WIKI_SPLITTER_SIZE_PX = 10;
 const WIKI_SPLITTER_KEYBOARD_STEP_PX = 24;
 const WIKI_SPLIT_MIN_VIEWPORT_PX = 1200;
 const WIKI_SIDEBAR_MIN_PX = 260;
 const WIKI_SIDEBAR_MAX_PX = 520;
 const WIKI_MAIN_MIN_PX = 520;
+const WIKI_SIDEBAR_AUTO_FALLBACK_PX = 320;
 
 type TextTransformResult = {
   nextValue: string;
@@ -443,6 +447,28 @@ function clampWikiSidebarWidth(width: number, containerWidth: number): number {
   return Math.min(Math.max(width, WIKI_SIDEBAR_MIN_PX), effectiveMax);
 }
 
+function measureWikiSidebarAutoWidth(sidebar: HTMLElement, containerWidth: number): number {
+  const measurableNodes = Array.from(sidebar.querySelectorAll<HTMLElement>("[data-wiki-sidebar-measure]"));
+  let widestContentPx = 0;
+
+  measurableNodes.forEach((element) => {
+    const item = element.closest<HTMLElement>("[data-wiki-sidebar-item]");
+    const itemStyle = item ? window.getComputedStyle(item) : null;
+    const gapValue = itemStyle?.gap ?? itemStyle?.columnGap ?? "0";
+    const gapPx = Number.parseFloat(gapValue) || 0;
+    const paddingLeftPx = Number.parseFloat(itemStyle?.paddingLeft ?? "0") || 0;
+    const paddingRightPx = Number.parseFloat(itemStyle?.paddingRight ?? "0") || 0;
+    const badgeWidthPx = item?.querySelector<HTMLElement>(".badge")?.scrollWidth ?? 0;
+
+    widestContentPx = Math.max(
+      widestContentPx,
+      Math.ceil(element.scrollWidth + paddingLeftPx + paddingRightPx + (badgeWidthPx > 0 ? badgeWidthPx + gapPx : 0))
+    );
+  });
+
+  return clampWikiSidebarWidth(Math.max(WIKI_SIDEBAR_AUTO_FALLBACK_PX, widestContentPx), containerWidth);
+}
+
 function resolveWikiAssetPath(src: string): string | null {
   if (src.startsWith("/wiki-assets/")) {
     return src;
@@ -529,6 +555,7 @@ export function WikiHub({
   const lastSavedSnapshotRef = useRef<{ title: string; content: string } | null>(null);
   const draftVersionRef = useRef<number | null>(null);
   const wikiLayoutRef = useRef<HTMLDivElement | null>(null);
+  const wikiSidebarRef = useRef<HTMLElement | null>(null);
   const wikiSplitDragStartRef = useRef<{ clientX: number; sidebarWidth: number } | null>(null);
   const wikiPresenceProviderRef = useRef<WebsocketProvider | null>(null);
   const wikiPresenceDocRef = useRef<Y.Doc | null>(null);
@@ -582,6 +609,7 @@ export function WikiHub({
   const [isRealtimeActive, setIsRealtimeActive] = useState(false);
   const [realtimeStatusNote, setRealtimeStatusNote] = useState<string | null>(null);
   const [sidebarWidthPx, setSidebarWidthPx] = useState<number | null>(null);
+  const [sidebarWidthMode, setSidebarWidthMode] = useState<WikiSidebarWidthMode>("auto");
   const [sidebarPreferenceLoaded, setSidebarPreferenceLoaded] = useState(false);
   const [isDesktopWikiLayout, setIsDesktopWikiLayout] = useState(false);
   const [isDraggingSidebarSplitter, setIsDraggingSidebarSplitter] = useState(false);
@@ -619,17 +647,21 @@ export function WikiHub({
     [pageDetail?.published.contentMarkdown]
   );
   const renderedDraftMarkdown = useMemo(() => normalizeWikiMathMarkdown(draftContent), [draftContent]);
-  const selectedRevisionSummary = useMemo(
-    () => revisions.find((revision) => revision.id === selectedRevisionId) ?? null,
+  const selectedRevisionIndex = useMemo(
+    () => revisions.findIndex((revision) => revision.id === selectedRevisionId),
     [revisions, selectedRevisionId]
+  );
+  const baseRevisionSummary = useMemo(
+    () => (selectedRevisionIndex >= 0 ? revisions[selectedRevisionIndex + 1] ?? null : null),
+    [revisions, selectedRevisionIndex]
   );
   const selectedRevisionPreview = useMemo(
     () => (selectedRevisionId ? revisionPreviewById[selectedRevisionId] ?? null : null),
     [revisionPreviewById, selectedRevisionId]
   );
-  const renderedSelectedRevisionMarkdown = useMemo(
-    () => normalizeWikiMathMarkdown(selectedRevisionPreview?.contentMarkdown ?? ""),
-    [selectedRevisionPreview?.contentMarkdown]
+  const baseRevisionPreview = useMemo(
+    () => (baseRevisionSummary ? revisionPreviewById[baseRevisionSummary.id] ?? null : null),
+    [baseRevisionSummary, revisionPreviewById]
   );
   const showResizableWikiLayout = isDesktopWikiLayout && sidebarWidthPx !== null;
   const wikiLayoutStyle = useMemo(
@@ -673,15 +705,13 @@ export function WikiHub({
 
   useEffect(() => {
     const storedWidth = localStorage.getItem(WIKI_SIDEBAR_WIDTH_STORAGE_KEY);
+    const storedMode = localStorage.getItem(WIKI_SIDEBAR_MODE_STORAGE_KEY);
+    setSidebarWidthMode(storedMode === "manual" ? "manual" : "auto");
     if (storedWidth) {
       const parsedWidth = Number.parseInt(storedWidth, 10);
-      if (Number.isFinite(parsedWidth) && parsedWidth > 0) {
-        setSidebarWidthPx(parsedWidth);
-      } else {
-        setSidebarWidthPx(320);
-      }
+      setSidebarWidthPx(Number.isFinite(parsedWidth) && parsedWidth > 0 ? parsedWidth : WIKI_SIDEBAR_AUTO_FALLBACK_PX);
     } else {
-      setSidebarWidthPx(320);
+      setSidebarWidthPx(WIKI_SIDEBAR_AUTO_FALLBACK_PX);
     }
     setSidebarPreferenceLoaded(true);
   }, []);
@@ -691,7 +721,8 @@ export function WikiHub({
       return;
     }
     localStorage.setItem(WIKI_SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(sidebarWidthPx)));
-  }, [sidebarPreferenceLoaded, sidebarWidthPx]);
+    localStorage.setItem(WIKI_SIDEBAR_MODE_STORAGE_KEY, sidebarWidthMode);
+  }, [sidebarPreferenceLoaded, sidebarWidthMode, sidebarWidthPx]);
 
   useEffect(() => {
     const desktopMedia = window.matchMedia(`(min-width: ${WIKI_SPLIT_MIN_VIEWPORT_PX}px)`);
@@ -707,7 +738,7 @@ export function WikiHub({
   }, []);
 
   useEffect(() => {
-    if (!isDesktopWikiLayout) {
+    if (!isDesktopWikiLayout || sidebarWidthMode !== "manual") {
       return;
     }
 
@@ -725,7 +756,35 @@ export function WikiHub({
     return () => {
       window.removeEventListener("resize", syncSidebarWidth);
     };
-  }, [isDesktopWikiLayout]);
+  }, [isDesktopWikiLayout, sidebarWidthMode]);
+
+  useEffect(() => {
+    if (!isDesktopWikiLayout || !sidebarPreferenceLoaded || sidebarWidthMode !== "auto") {
+      return;
+    }
+
+    let frameId = 0;
+    const syncSidebarWidth = (): void => {
+      const sidebar = wikiSidebarRef.current;
+      const containerWidth = getWikiLayoutWidth(wikiLayoutRef.current);
+      if (!sidebar || !containerWidth) {
+        return;
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        setSidebarWidthPx(measureWikiSidebarAutoWidth(sidebar, containerWidth));
+      });
+    };
+
+    syncSidebarWidth();
+    window.addEventListener("resize", syncSidebarWidth);
+    return () => {
+      window.removeEventListener("resize", syncSidebarWidth);
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [expandedFolders, isDesktopWikiLayout, searchModeActive, searchResults, sidebarPreferenceLoaded, sidebarWidthMode, treeNodes]);
 
   const destroyWikiPageCollaboration = useCallback((): void => {
     if (wikiRealtimeAutosaveMarkerRef.current !== null) {
@@ -1749,8 +1808,12 @@ export function WikiHub({
     if (!historyOpen || !pageDetail || !token || !selectedRevisionId) {
       return;
     }
+
     void ensureRevisionPreview(pageDetail.page.id, selectedRevisionId, token);
-  }, [ensureRevisionPreview, historyOpen, pageDetail, selectedRevisionId, token]);
+    if (baseRevisionSummary) {
+      void ensureRevisionPreview(pageDetail.page.id, baseRevisionSummary.id, token);
+    }
+  }, [baseRevisionSummary, ensureRevisionPreview, historyOpen, pageDetail, selectedRevisionId, token]);
 
   const onToggleHistory = async (): Promise<void> => {
     if (!pageDetail || !token) {
@@ -1837,6 +1900,7 @@ export function WikiHub({
       return;
     }
 
+    setSidebarWidthMode("manual");
     setSidebarWidthPx((current) => clampWikiSidebarWidth((current ?? 320) + deltaPx, containerWidth));
   }, []);
 
@@ -1878,6 +1942,7 @@ export function WikiHub({
       }
 
       const deltaPx = event.clientX - dragStart.clientX;
+      setSidebarWidthMode("manual");
       setSidebarWidthPx(clampWikiSidebarWidth(dragStart.sidebarWidth + deltaPx, containerWidth));
     },
     [isDraggingSidebarSplitter]
@@ -1911,6 +1976,10 @@ export function WikiHub({
     [nudgeSidebarSplitter, showResizableWikiLayout]
   );
 
+  const onSidebarSplitterDoubleClick = useCallback((): void => {
+    setSidebarWidthMode("auto");
+  }, []);
+
   const renderTreeNode = (node: WikiTreeNode, depth = 0): JSX.Element => {
     if (node.type === "folder") {
       const isExpanded = expandedFolders.has(node.path);
@@ -1919,6 +1988,7 @@ export function WikiHub({
           <button
             type="button"
             className="wiki-tree-folder"
+            data-wiki-sidebar-item="folder"
             style={{ paddingLeft: `${0.6 + depth * 0.8}rem` }}
             onClick={() => {
               setExpandedFolders((current) => {
@@ -1933,7 +2003,7 @@ export function WikiHub({
             }}
             title={node.path || node.name || "root"}
           >
-            <span className="wiki-tree-row-content">
+            <span className="wiki-tree-row-content" data-wiki-sidebar-measure>
               <span className="wiki-tree-chevron" aria-hidden>
                 {isExpanded ? "▾" : "▸"}
               </span>
@@ -1951,11 +2021,12 @@ export function WikiHub({
         <button
           type="button"
           className={isActive ? "wiki-tree-page wiki-tree-page-active" : "wiki-tree-page"}
+          data-wiki-sidebar-item="page"
           style={{ paddingLeft: `${0.8 + depth * 0.8}rem` }}
           onClick={() => openPath(node.path)}
           title={`/${node.path}`}
         >
-          <span className="wiki-tree-row-content">
+          <span className="wiki-tree-row-content" data-wiki-sidebar-measure>
             <span className="wiki-tree-page-title">{node.title ?? node.name}</span>
           </span>
           {node.hasDraftChanges ? <span className="badge">Draft</span> : null}
@@ -1992,7 +2063,7 @@ export function WikiHub({
           .trim()}
         style={wikiLayoutStyle}
       >
-        <aside className="wiki-sidebar panel">
+        <aside ref={wikiSidebarRef} className="wiki-sidebar panel">
           <div className="wiki-sidebar-toolbar">
             <h3 className="section-heading">Pages</h3>
             {canWrite ? (
@@ -2103,8 +2174,8 @@ export function WikiHub({
               {!searching && !searchError && searchResults.length > 0 ? (
                 <ul className="list">
                   {searchResults.map((result) => (
-                    <li key={`${result.pageId}-${result.path}`} className="list-item wiki-search-item">
-                      <button type="button" className="link-button" onClick={() => openPath(result.path)}>
+                    <li key={`${result.pageId}-${result.path}`} className="list-item wiki-search-item" data-wiki-sidebar-item="search-result">
+                      <button type="button" className="link-button" onClick={() => openPath(result.path)} data-wiki-sidebar-measure>
                         <strong>{result.title}</strong>
                       </button>
                       <p className="wiki-page-path">/{result.path}</p>
@@ -2131,6 +2202,7 @@ export function WikiHub({
             aria-orientation="vertical"
             tabIndex={0}
             onPointerDown={onSidebarSplitterPointerDown}
+            onDoubleClick={onSidebarSplitterDoubleClick}
             onKeyDown={onSidebarSplitterKeyDown}
           >
             <span className="wiki-split-line" aria-hidden />
@@ -2145,7 +2217,7 @@ export function WikiHub({
             </div>
             {pageDetail ? (
               <div className="inline-actions">
-                {canWrite ? (
+                {canWrite && !historyOpen ? (
                   <button
                     type="button"
                     className="button button-secondary"
@@ -2155,7 +2227,7 @@ export function WikiHub({
                     {isEditing ? "Close editor" : "Edit"}
                   </button>
                 ) : null}
-                {canWrite ? (
+                {canWrite && !historyOpen ? (
                   <button type="button" className="button button-danger" onClick={() => void onDeletePage()} disabled={deletingPage}>
                     {deletingPage ? "Deleting..." : "Delete"}
                   </button>
@@ -2184,7 +2256,7 @@ export function WikiHub({
           ) : null}
           {loadingPage ? <p className="alert alert-info">Loading wiki page...</p> : null}
 
-          {pageDetail && !isEditing ? (
+          {pageDetail && !isEditing && !historyOpen ? (
             <div className="wiki-read-view">
               <div className="wiki-read-meta">
                 <span className="badge">Published revision #{pageDetail.published.revisionNumber}</span>
@@ -2256,7 +2328,7 @@ export function WikiHub({
             </div>
           ) : null}
 
-          {pageDetail && isEditing && canWrite ? (
+          {pageDetail && isEditing && canWrite && !historyOpen ? (
             <div className="wiki-edit-view">
               <div className="wiki-edit-toolbar">
                 <div className="inline-actions">
@@ -2402,8 +2474,23 @@ export function WikiHub({
           ) : null}
 
           {historyOpen && pageDetail ? (
-            <section className="wiki-history panel">
-              <h4 className="section-heading">Revision history</h4>
+            <section className="wiki-history-mode">
+              <div className="wiki-history-mode-header">
+                <div>
+                  <h4 className="section-heading">Revision history</h4>
+                  <p className="wiki-page-path">Read-only line diff against the previous published revision.</p>
+                </div>
+                {selectedRevisionPreview ? (
+                  <div className="wiki-history-preview-meta">
+                    <span className="badge">Revision #{selectedRevisionPreview.revisionNumber}</span>
+                    {pageDetail.published.id === selectedRevisionPreview.id ? <span className="badge">Current</span> : null}
+                    <span>{timeLabel(selectedRevisionPreview.publishedAt)}</span>
+                    <span title={selectedRevisionPreview.createdBy.email}>By {selectedRevisionPreview.createdBy.name}</span>
+                    {selectedRevisionPreview.changeNote ? <span>Note: {selectedRevisionPreview.changeNote}</span> : null}
+                  </div>
+                ) : null}
+              </div>
+
               {loadingHistory ? <p className="alert alert-info">Loading revisions...</p> : null}
               {historyError ? <p className="alert alert-error">{historyError}</p> : null}
               {!loadingHistory && revisions.length === 0 ? <p className="alert alert-info">No revisions available.</p> : null}
@@ -2438,35 +2525,27 @@ export function WikiHub({
                   </div>
 
                   <div className="wiki-history-preview">
-                    {loadingRevisionPreview && !selectedRevisionPreview ? <p className="alert alert-info">Loading revision preview...</p> : null}
-                    {!loadingRevisionPreview && !selectedRevisionPreview && selectedRevisionId ? (
-                      <p className="alert alert-info">Select a revision to preview its published content.</p>
+                    {loadingRevisionPreview && (!selectedRevisionPreview || (baseRevisionSummary && !baseRevisionPreview)) ? (
+                      <p className="alert alert-info">Loading revision diff...</p>
                     ) : null}
-                    {selectedRevisionPreview ? (
+                    {!loadingRevisionPreview && !selectedRevisionPreview && selectedRevisionId ? (
+                      <p className="alert alert-info">Select a revision to inspect its published changes.</p>
+                    ) : null}
+                    {selectedRevisionPreview && (!baseRevisionSummary || baseRevisionPreview) ? (
                       <>
-                        <div className="wiki-history-preview-meta">
-                          <span className="badge">Revision #{selectedRevisionPreview.revisionNumber}</span>
-                          {pageDetail.published.id === selectedRevisionPreview.id ? <span className="badge">Current</span> : null}
-                          <span>{timeLabel(selectedRevisionPreview.publishedAt)}</span>
-                          <span title={selectedRevisionPreview.createdBy.email}>By {selectedRevisionPreview.createdBy.name}</span>
-                          {selectedRevisionPreview.changeNote ? <span>Note: {selectedRevisionPreview.changeNote}</span> : null}
+                        <div className="wiki-history-diff-meta">
+                          <span className="badge">
+                            {baseRevisionSummary ? `Compared with revision #${baseRevisionSummary.revisionNumber}` : "Initial revision"}
+                          </span>
+                          {baseRevisionPreview ? <span>{timeLabel(baseRevisionPreview.publishedAt)}</span> : null}
+                          {baseRevisionPreview ? (
+                            <span title={baseRevisionPreview.createdBy.email}>Base by {baseRevisionPreview.createdBy.name}</span>
+                          ) : null}
                         </div>
-                        {selectedRevisionSummary && selectedRevisionSummary.id !== selectedRevisionPreview.id ? (
-                          <p className="wiki-page-path">Selected revision: #{selectedRevisionSummary.revisionNumber}</p>
-                        ) : null}
-                        <article className="wiki-markdown">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm, remarkMath]}
-                            rehypePlugins={[rehypeKatex]}
-                            components={{
-                              img: ({ src, alt }) => (
-                                <AuthenticatedWikiImage src={String(src ?? "")} alt={alt} token={token} />
-                              )
-                            }}
-                          >
-                            {renderedSelectedRevisionMarkdown}
-                          </ReactMarkdown>
-                        </article>
+                        <WikiHistoryDiff
+                          original={baseRevisionPreview?.contentMarkdown ?? ""}
+                          modified={selectedRevisionPreview.contentMarkdown}
+                        />
                       </>
                     ) : null}
                   </div>

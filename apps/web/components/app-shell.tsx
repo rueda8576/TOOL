@@ -7,6 +7,8 @@ import { useCallback, useEffect, useState } from "react";
 import { ProjectSummary } from "../lib/api";
 import { authFetch } from "../lib/client-api";
 
+const APP_SIDEBAR_COLLAPSED_STORAGE_KEY = "atlasium_shell_sidebar_collapsed";
+
 export function AppShell({
   title,
   subtitle,
@@ -28,6 +30,22 @@ export function AppShell({
   const pathname = usePathname();
   const [exitBusy, setExitBusy] = useState(false);
   const [brandTitle, setBrandTitle] = useState("Atlasium");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarPreferenceLoaded, setSidebarPreferenceLoaded] = useState(false);
+
+  useEffect(() => {
+    const storedPreference = localStorage.getItem(APP_SIDEBAR_COLLAPSED_STORAGE_KEY);
+    setSidebarCollapsed(storedPreference === "true");
+    setSidebarPreferenceLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarPreferenceLoaded) {
+      return;
+    }
+
+    localStorage.setItem(APP_SIDEBAR_COLLAPSED_STORAGE_KEY, sidebarCollapsed ? "true" : "false");
+  }, [sidebarCollapsed, sidebarPreferenceLoaded]);
 
   useEffect(() => {
     let active = true;
@@ -134,13 +152,23 @@ export function AppShell({
   }, [exitBusy, onExitProjectRequest, projectId, router]);
 
   return (
-    <div className="shell">
+    <div className={sidebarCollapsed ? "shell shell-sidebar-collapsed" : "shell"}>
       <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-dot" />
-          <div>
-            <p className="brand-title">{brandTitle}</p>
+        <div className="sidebar-topbar">
+          <div className="brand">
+            <span className="brand-dot" />
+            <div>
+              <p className="brand-title">{brandTitle}</p>
+            </div>
           </div>
+          <button
+            type="button"
+            className="sidebar-toggle-button"
+            onClick={() => setSidebarCollapsed(true)}
+            aria-label="Hide navigation menu"
+          >
+            Hide menu
+          </button>
         </div>
         <nav className="nav-links">
           {navLinks.map((item) => (
@@ -164,6 +192,18 @@ export function AppShell({
       </aside>
       <main className="content">
         <div className={fullWidth ? "content-inner content-inner-fluid" : "content-inner"}>
+          {sidebarCollapsed ? (
+            <div className="shell-sidebar-reopen-row">
+              <button
+                type="button"
+                className="button button-secondary shell-sidebar-reopen-button"
+                onClick={() => setSidebarCollapsed(false)}
+                aria-label="Show navigation menu"
+              >
+                Show menu
+              </button>
+            </div>
+          ) : null}
           {!hideHeader ? (
             <header className="content-header">
               <h1>{title}</h1>
