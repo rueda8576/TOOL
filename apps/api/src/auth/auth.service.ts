@@ -12,6 +12,7 @@ import { GitlabService } from "../gitlab/gitlab.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { QueueService } from "../queues/queue.service";
 import { AcceptInviteDto } from "./dto/accept-invite.dto";
+import { ChangePasswordDto } from "./dto/change-password.dto";
 import { CreateGitlabSshKeyDto } from "./dto/create-gitlab-ssh-key.dto";
 import { InviteDto } from "./dto/invite.dto";
 import { LoginDto } from "./dto/login.dto";
@@ -373,6 +374,108 @@ export class AuthService {
     });
 
     return { accepted: true };
+  }
+
+  async getCurrentUserProfile(user: AuthenticatedUser): Promise<{
+    id: string;
+    name: string;
+    email: string;
+    globalRole: "admin" | "editor" | "reader";
+    timezone: string;
+  }> {
+    const profile = await this.prisma.user.findFirst({
+      where: {
+        id: user.userId,
+        deletedAt: null,
+        isActive: true
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        globalRole: true,
+        timezone: true
+      }
+    });
+
+    if (!profile) {
+      throw new UnauthorizedException("Session expired");
+    }
+
+    return {
+      id: profile.id,
+      name: profile.name,
+      email: profile.email,
+      globalRole: prismaRoleToApiRole(profile.globalRole),
+      timezone: profile.timezone
+    };
+  }
+
+  async changePassword(
+    user: AuthenticatedUser,
+    currentSessionToken: string | undefined,
+    dto: ChangePasswordDto
+  ): Promise<{ changed: true }> {
+    if (!currentSessionToken?.trim()) {
+      throw new UnauthorizedException("Missing session token");
+    }
+
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException("New password confirmation does not match");
+    }
+
+    const activeUser = await this.prisma.user.findFirst({
+      where: {
+        id: user.userId,
+        deletedAt: null,
+        isActive: true
+      },
+      select: {
+        id: true,
+        passwordHash: true
+      }
+    });
+
+    if (!activeUser) {
+      throw new UnauthorizedException("Session expired");
+    }
+
+    const validCurrentPassword = await bcrypt.compare(dto.currentPassword, activeUser.passwordHash);
+    if (!validCurrentPassword) {
+      throw new BadRequestException("Current password is incorrect");
+    }
+
+    const reusesCurrentPassword = await bcrypt.compare(dto.newPassword, activeUser.passwordHash);
+    if (reusesCurrentPassword) {
+      throw new BadRequestException("New password must be different from the current password");
+    }
+
+    await this.prisma.user.update({
+      where: {
+        id: activeUser.id
+      },
+      data: {
+        passwordHash: await bcrypt.hash(dto.newPassword, 10)
+      }
+    });
+
+    await this.prisma.session.deleteMany({
+      where: {
+        userId: activeUser.id,
+        tokenHash: {
+          not: hashValue(currentSessionToken)
+        }
+      }
+    });
+
+    await this.auditService.log({
+      userId: activeUser.id,
+      entityType: "user",
+      entityId: activeUser.id,
+      action: "auth.password.change"
+    });
+
+    return { changed: true };
   }
 
   async getGitlabConnectionStatus(user: AuthenticatedUser): Promise<{

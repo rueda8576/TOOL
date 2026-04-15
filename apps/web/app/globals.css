@@ -1010,6 +1010,12 @@ textarea.input {
   color: #30527f;
 }
 
+.alert-warning {
+  border-color: #ebddc0;
+  background: #fff8ef;
+  color: var(--warning);
+}
+
 .documents-page-toolbar {
   margin-top: 1rem;
 }
@@ -2986,6 +2992,117 @@ body.wiki-layout-dragging * {
   border: 1px solid color-mix(in srgb, var(--border) 78%, white 22%);
 }
 
+.account-settings-layout {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.95fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.account-column {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.account-section-card {
+  min-width: 0;
+}
+
+.account-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.account-card-header .section-heading {
+  margin-bottom: 0.25rem;
+}
+
+.account-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.account-profile-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-surface-soft) 88%, white 12%);
+  padding: 0.9rem 0.95rem;
+}
+
+.account-profile-label {
+  margin: 0;
+  color: var(--brand);
+  font-family: var(--font-heading), sans-serif;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+.account-profile-value {
+  margin: 0.28rem 0 0;
+  color: var(--text);
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.account-password-input {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.account-password-input .input {
+  min-width: 0;
+  flex: 1;
+}
+
+.account-preference-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.account-preference-item {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-surface-soft) 88%, white 12%);
+  padding: 0.88rem 0.92rem;
+  cursor: pointer;
+}
+
+.account-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.account-toggle-row input {
+  margin-top: 0.2rem;
+}
+
+.account-toggle-copy {
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.account-preference-title {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.account-preference-description {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
 .account-connection-card {
   display: flex;
   justify-content: space-between;
@@ -3554,6 +3671,14 @@ body.wiki-layout-dragging * {
 
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 1100px) {
+  .account-settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .account-profile-grid {
+    grid-template-columns: 1fr;
+  }
+
   .account-connection-card,
   .account-ssh-card {
     flex-direction: column;

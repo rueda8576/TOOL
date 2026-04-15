@@ -35,7 +35,8 @@ describe("AuthService", () => {
         upsert: jest.fn()
       },
       session: {
-        create: jest.fn()
+        create: jest.fn(),
+        deleteMany: jest.fn()
       },
       $transaction: jest.fn(async (operations: Array<Promise<unknown>>) => Promise.all(operations))
     };
@@ -270,6 +271,162 @@ describe("AuthService", () => {
 
     expect(queueService.enqueueEmail).not.toHaveBeenCalled();
     expect(result).toEqual({ accepted: true });
+  });
+
+  it("returns the current authenticated user's profile from the database", async () => {
+    const { service, prisma } = makeService();
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-7",
+      name: "Profile User",
+      email: "profile@example.com",
+      globalRole: GlobalRole.ADMIN,
+      timezone: "Europe/Madrid"
+    });
+
+    const result = await service.getCurrentUserProfile({
+      userId: "user-7",
+      email: "stale@example.com",
+      globalRole: "reader"
+    });
+
+    expect(prisma.user.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "user-7",
+        deletedAt: null,
+        isActive: true
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        globalRole: true,
+        timezone: true
+      }
+    });
+    expect(result).toEqual({
+      id: "user-7",
+      name: "Profile User",
+      email: "profile@example.com",
+      globalRole: "admin",
+      timezone: "Europe/Madrid"
+    });
+  });
+
+  it("changes the password and revokes all other sessions", async () => {
+    const { service, prisma, auditService } = makeService();
+    const currentPassword = "password-123";
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      passwordHash: await bcrypt.hash(currentPassword, 10)
+    });
+    prisma.user.update.mockResolvedValue({ id: "user-1" });
+    prisma.session.deleteMany.mockResolvedValue({ count: 3 });
+
+    const result = await service.changePassword(
+      {
+        userId: "user-1",
+        email: "user@example.com",
+        globalRole: "editor"
+      },
+      "current-session-token",
+      {
+        currentPassword,
+        newPassword: "new-password-456",
+        confirmPassword: "new-password-456"
+      }
+    );
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: {
+        id: "user-1"
+      },
+      data: {
+        passwordHash: expect.any(String)
+      }
+    });
+    expect(prisma.session.deleteMany).toHaveBeenCalledWith({
+      where: {
+        userId: "user-1",
+        tokenHash: {
+          not: expect.any(String)
+        }
+      }
+    });
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "user-1",
+      entityType: "user",
+      entityId: "user-1",
+      action: "auth.password.change"
+    });
+    expect(result).toEqual({ changed: true });
+  });
+
+  it("rejects password change when the current password is wrong", async () => {
+    const { service, prisma } = makeService();
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      passwordHash: await bcrypt.hash("password-123", 10)
+    });
+
+    await expect(
+      service.changePassword(
+        {
+          userId: "user-1",
+          email: "user@example.com",
+          globalRole: "editor"
+        },
+        "current-session-token",
+        {
+          currentPassword: "wrong-password",
+          newPassword: "new-password-456",
+          confirmPassword: "new-password-456"
+        }
+      )
+    ).rejects.toThrow("Current password is incorrect");
+  });
+
+  it("rejects password change when confirmation does not match", async () => {
+    const { service } = makeService();
+
+    await expect(
+      service.changePassword(
+        {
+          userId: "user-1",
+          email: "user@example.com",
+          globalRole: "editor"
+        },
+        "current-session-token",
+        {
+          currentPassword: "password-123",
+          newPassword: "new-password-456",
+          confirmPassword: "mismatch-password"
+        }
+      )
+    ).rejects.toThrow("New password confirmation does not match");
+  });
+
+  it("rejects password change when the new password matches the current one", async () => {
+    const { service, prisma } = makeService();
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      passwordHash: await bcrypt.hash("password-123", 10)
+    });
+
+    await expect(
+      service.changePassword(
+        {
+          userId: "user-1",
+          email: "user@example.com",
+          globalRole: "editor"
+        },
+        "current-session-token",
+        {
+          currentPassword: "password-123",
+          newPassword: "password-123",
+          confirmPassword: "password-123"
+        }
+      )
+    ).rejects.toThrow("New password must be different from the current password");
   });
 
   it("rejects all-projects invite payload when project-specific assignments are provided", async () => {

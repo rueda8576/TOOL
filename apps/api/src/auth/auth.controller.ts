@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { Request, Response } from "express";
 
+import { CurrentSessionToken } from "../common/current-session-token.decorator";
 import { CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { Roles } from "../common/roles.decorator";
@@ -8,6 +9,7 @@ import { RolesGuard } from "../common/roles.guard";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { buildSessionCookie } from "../common/session-cookie";
 import { AcceptInviteDto } from "./dto/accept-invite.dto";
+import { ChangePasswordDto } from "./dto/change-password.dto";
 import { CreateGitlabSshKeyDto } from "./dto/create-gitlab-ssh-key.dto";
 import { InviteDto } from "./dto/invite.dto";
 import { LoginDto } from "./dto/login.dto";
@@ -56,6 +58,28 @@ export class AuthController {
   @Post("password/reset")
   passwordReset(@Body() dto: PasswordResetDto): Promise<{ accepted: true }> {
     return this.authService.requestPasswordReset(dto);
+  }
+
+  @Get("me")
+  @UseGuards(JwtAuthGuard)
+  getCurrentUserProfile(@CurrentUser() user: AuthenticatedUser): Promise<{
+    id: string;
+    name: string;
+    email: string;
+    globalRole: "admin" | "editor" | "reader";
+    timezone: string;
+  }> {
+    return this.authService.getCurrentUserProfile(user);
+  }
+
+  @Post("password/change")
+  @UseGuards(JwtAuthGuard)
+  changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentSessionToken() currentSessionToken: string | undefined,
+    @Body() dto: ChangePasswordDto
+  ): Promise<{ changed: true }> {
+    return this.authService.changePassword(user, currentSessionToken, dto);
   }
 
   @Get("oidc/.well-known/openid-configuration")

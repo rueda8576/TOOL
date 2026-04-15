@@ -16,6 +16,8 @@ describe("AuthController HTTP", () => {
       invite: jest.fn(),
       acceptInvite: jest.fn(),
       requestPasswordReset: jest.fn(),
+      getCurrentUserProfile: jest.fn(),
+      changePassword: jest.fn(),
       getGitlabConnectionStatus: jest.fn(),
       beginGitlabConnect: jest.fn(),
       disconnectGitlabConnection: jest.fn(),
@@ -137,6 +139,90 @@ describe("AuthController HTTP", () => {
     expect(authService.requestPasswordReset).toHaveBeenCalledWith({
       email: "user@example.com"
     });
+  });
+
+  it("returns 401 for authenticated profile without a bearer token", async () => {
+    await request(app.getHttpServer()).get("/auth/me").expect(401);
+  });
+
+  it("returns the authenticated user's profile", async () => {
+    authService.getCurrentUserProfile.mockResolvedValue({
+      id: "user-1",
+      name: "Account User",
+      email: "user@example.com",
+      globalRole: "editor",
+      timezone: "Europe/Madrid"
+    });
+
+    const response = await request(app.getHttpServer())
+      .get("/auth/me")
+      .set(authHeaders("editor", { userId: "user-1", email: "user@example.com" }))
+      .expect(200);
+
+    expect(authService.getCurrentUserProfile).toHaveBeenCalledWith({
+      userId: "user-1",
+      email: "user@example.com",
+      globalRole: "editor"
+    });
+    expect(response.body).toEqual({
+      id: "user-1",
+      name: "Account User",
+      email: "user@example.com",
+      globalRole: "editor",
+      timezone: "Europe/Madrid"
+    });
+  });
+
+  it("returns 401 for password change without a bearer token", async () => {
+    await request(app.getHttpServer())
+      .post("/auth/password/change")
+      .send({
+        currentPassword: "password-123",
+        newPassword: "new-password-456",
+        confirmPassword: "new-password-456"
+      })
+      .expect(401);
+  });
+
+  it("returns 400 for malformed password-change payloads", async () => {
+    await request(app.getHttpServer())
+      .post("/auth/password/change")
+      .set(authHeaders("editor"))
+      .send({
+        currentPassword: "short",
+        newPassword: "tiny",
+        confirmPassword: "tiny"
+      })
+      .expect(400);
+  });
+
+  it("changes the password for the authenticated user", async () => {
+    authService.changePassword.mockResolvedValue({ changed: true });
+
+    const response = await request(app.getHttpServer())
+      .post("/auth/password/change")
+      .set(authHeaders("editor", { userId: "editor-2", email: "editor-2@example.com" }))
+      .send({
+        currentPassword: "password-123",
+        newPassword: "new-password-456",
+        confirmPassword: "new-password-456"
+      })
+      .expect(201);
+
+    expect(authService.changePassword).toHaveBeenCalledWith(
+      {
+        userId: "editor-2",
+        email: "editor-2@example.com",
+        globalRole: "editor"
+      },
+      "editor:editor-2:editor-2@example.com",
+      {
+        currentPassword: "password-123",
+        newPassword: "new-password-456",
+        confirmPassword: "new-password-456"
+      }
+    );
+    expect(response.body).toEqual({ changed: true });
   });
 
   it("serves OIDC discovery metadata and redirects authorize requests", async () => {

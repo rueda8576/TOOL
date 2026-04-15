@@ -1,5 +1,46 @@
 # Implementation TODO (v1 bootstrap)
 
+## Account vNext - Settings Hub + Change Password (2026-04-15)
+- [x] Add authenticated backend profile and password-change endpoints, including revoking all other sessions after a successful password change.
+- [x] Add/update backend auth service and HTTP tests for profile reads, password-change validation, and session revocation behavior.
+- [x] Extract frontend account helpers for profile, password, and notification preferences, then redesign `Account` into a multi-section settings workspace.
+- [x] Surface notification preferences alongside the existing GitLab/SSH settings without regressing reconnect and SSH-key flows.
+- [x] Verify the affected backend tests, web build, and diff hygiene; then capture review notes and any new lessons.
+
+### Review - Account vNext - Settings Hub + Change Password
+- `Account` is no longer a single GitLab-only panel:
+  - desktop now uses a two-column settings workspace
+  - primary column: `Profile`, `Security`, `Notifications`
+  - secondary column: `GitLab access`, `SSH keys`
+  - mobile still collapses to a single-column stack through the responsive CSS pass
+- Added authenticated Atlasium profile support:
+  - new `GET /auth/me`
+  - frontend loads profile from the backend and refreshes the stored `doctoral_user` snapshot so downstream pages keep the latest `name` and `globalRole`
+- Added authenticated password change:
+  - new `POST /auth/password/change`
+  - requires current password, enforces confirmation match and “different from current” validation
+  - revokes all other persisted sessions while keeping the current one alive
+  - writes an audit log entry for the change
+- Surfaced existing notification preferences in `Account`:
+  - backend APIs were reused as-is
+  - frontend now supports load/edit/reset/save with explicit dirty-state handling and validation for `taskDueLeadHours`
+- Reorganized GitLab access and SSH keys without changing behavior:
+  - connection/reconnect/disconnect stays intact
+  - SSH-key management remains disabled until GitLab is connected and not marked `reconnectRequired`
+  - copy now makes the Atlasium vs GitLab vs SSH model explicit
+- Files added/extended for this tranche include:
+  - `apps/api/src/auth/auth.controller.ts`
+  - `apps/api/src/auth/auth.service.ts`
+  - `apps/api/src/auth/dto/change-password.dto.ts`
+  - `apps/api/src/common/current-session-token.decorator.ts`
+  - `apps/web/lib/account.ts`
+  - `apps/web/app/account/page.tsx`
+  - `apps/web/app/globals.css`
+- Verification:
+  - `pnpm --filter @doctoral/api build` passed
+  - `git diff --check` passed
+  - targeted Jest and web build commands were attempted, but this wrapper again left those commands hanging after the underlying child process disappeared from `ps`; no concrete failing test/build output was produced here, so they still need a clean rerun outside this wrapper for definitive runtime confirmation
+
 ## CI Wiki Regression + Actions Runtime Cleanup (2026-04-15)
 - [x] Fix the two wiki service specs that regressed after the draft-only wiki changes.
 - [x] Remove Node 20 JavaScript-action deprecation warnings from CI by modernizing the workflow runtime setup.

@@ -152,6 +152,9 @@
 - When frontend API helpers surface Nest error responses, parse structured JSON `message` payloads instead of dumping the raw JSON string; otherwise operators lose the actionable GitLab error behind a generic blob.
 - For Atlasium-managed GitLab, web SSO and CLI Git authentication are different surfaces: Atlasium OIDC should own GitLab web login, but `git clone` UX should default to SSH keys, with HTTPS explicitly documented as a PAT-based fallback.
 
+## Account security
+- For authenticated password changes that must preserve the current session, have `JwtAuthGuard` persist the validated bearer token onto the request and revoke all other sessions by comparing against that exact token hash; deleting sessions only by `userId` will accidentally sign out the user who initiated the password change.
+
 ## Admin destructive actions
 - In systems with authored history and Prisma `onDelete: Restrict` relations, do not offer blind hard delete. Add a preflight endpoint that counts blockers and let the UI explain exactly why permanent deletion is blocked before the operator clicks.
 - Keep soft delete and hard delete as separate explicit modes end-to-end (`UI`, client helper, controller, service, audit) so operators cannot confuse “revoke access” with “erase the account record”.

@@ -7,7 +7,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(private readonly sessionAuthService: SessionAuthService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<{ headers: { authorization?: string }; user?: unknown; authToken?: string }>();
     const authHeader: string | undefined = request.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -19,6 +19,7 @@ export class JwtAuthGuard implements CanActivate {
       invalidToken: "Invalid token",
       expiredSession: "Session expired"
     });
+    request.authToken = token;
     return true;
   }
 }
