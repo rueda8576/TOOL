@@ -115,6 +115,7 @@ export default function AccountPage(): JSX.Element {
   const [sshError, setSshError] = useState<string | null>(null);
   const [sshSuccess, setSshSuccess] = useState<string | null>(null);
   const [expandedSshKeyIds, setExpandedSshKeyIds] = useState<number[]>([]);
+  const [isSshFormOpen, setIsSshFormOpen] = useState(false);
 
   const handleAuthFailure = useCallback(
     (message: string): boolean => {
@@ -247,6 +248,7 @@ export default function AccountPage(): JSX.Element {
     if (!token || !canManageSshKeys) {
       setSshKeys([]);
       setExpandedSshKeyIds([]);
+      setIsSshFormOpen(false);
       setSshKeysLoading(false);
       return;
     }
@@ -432,6 +434,7 @@ export default function AccountPage(): JSX.Element {
       setSshPublicKey("");
       setSshKeyExpiresAt("");
       await loadSshKeys(token);
+      setIsSshFormOpen(false);
       setSshSuccess("GitLab SSH key added.");
     } catch (createError) {
       const message = (createError as Error).message || "Unable to add the GitLab SSH key.";
@@ -588,7 +591,7 @@ export default function AccountPage(): JSX.Element {
               {passwordValidationMessage ? (
                 <p className="alert alert-error">{passwordValidationMessage}</p>
               ) : (
-                <p className="text-muted">Use at least 8 characters. The current session stays active after the change.</p>
+                <p className="text-muted">Use at least 8 characters.</p>
               )}
 
               <div className="button-row">
@@ -782,123 +785,148 @@ export default function AccountPage(): JSX.Element {
         <div className="account-column">
           <section className="panel stack-md account-section-card">
             <div className="stack-xs">
-              <p className="eyebrow">GitLab access</p>
-              <h2 className="section-heading">Atlasium-linked GitLab identity</h2>
-              <p>GitLab web sign-in uses Atlasium SSO. Connect API access here for Code browsing, branch creation, merge requests, and SSH-key management.</p>
+              <p className="eyebrow">GitLab & SSH access</p>
+              <h2 className="section-heading">Repository access</h2>
+              <p>GitLab web sign-in uses Atlasium SSO. Connect GitLab API access here, then manage SSH keys for Atlasium `Code` browsing, branch creation, merge requests, and CLI clone.</p>
             </div>
 
-            {gitlabLoading ? <p className="alert alert-info">Loading GitLab access...</p> : null}
-            {gitlabError ? <p className="alert alert-error">{gitlabError}</p> : null}
-            {gitlabSuccess ? <p className="alert alert-success">{gitlabSuccess}</p> : null}
-            {reconnectMessage ? <p className="alert alert-warning">{reconnectMessage}</p> : null}
-
-            {!gitlabLoading && connection?.connected ? (
-              <div className="account-connection-card">
-                <div className="stack-xs">
-                  <p className="eyebrow">Connected account</p>
-                  <h3 className="section-heading">{connection.name || connection.username}</h3>
-                  <p>{connection.email || "Email not exposed by GitLab OAuth"}</p>
-                  <p className="text-muted">@{connection.username}</p>
-                </div>
-                <div className="button-row">
-                  {connection.webUrl ? (
-                    <a className="button button-secondary" href={connection.webUrl} target="_blank" rel="noreferrer">
-                      Open in GitLab
-                    </a>
-                  ) : null}
-                  <button className="button button-secondary" type="button" onClick={() => void onConnect()} disabled={gitlabConnecting}>
-                    {gitlabConnecting ? "Redirecting..." : connection.reconnectRequired ? "Reconnect GitLab" : "Reconnect"}
-                  </button>
-                  <button className="button button-danger" type="button" onClick={() => void onDisconnect()} disabled={gitlabDisconnecting}>
-                    {gitlabDisconnecting ? "Disconnecting..." : "Disconnect"}
-                  </button>
-                </div>
+            <div className="account-tech-block stack-md">
+              <div className="stack-xs">
+                <p className="eyebrow">GitLab web access</p>
+                <h3 className="section-heading">Atlasium-linked GitLab identity</h3>
+                <p>Connect API access for managed repository browsing, archive download, branch creation, merge requests, and SSH-key management.</p>
               </div>
-            ) : null}
 
-            {!gitlabLoading && !connection?.connected ? (
-              <div className="account-connection-card">
-                <div className="stack-xs">
-                  <p className="eyebrow">No GitLab API access connected</p>
-                  <h3 className="section-heading">Connect GitLab</h3>
-                  <p>Atlasium will use your GitLab identity for managed repository browsing, archive download, branch creation, and merge requests.</p>
-                </div>
-                <div className="button-row">
-                  <button className="button" type="button" onClick={() => void onConnect()} disabled={gitlabConnecting}>
-                    {gitlabConnecting ? "Redirecting..." : "Connect GitLab"}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </section>
+              {gitlabLoading ? <p className="alert alert-info">Loading GitLab access...</p> : null}
+              {gitlabError ? <p className="alert alert-error">{gitlabError}</p> : null}
+              {gitlabSuccess ? <p className="alert alert-success">{gitlabSuccess}</p> : null}
+              {reconnectMessage ? <p className="alert alert-warning">{reconnectMessage}</p> : null}
 
-          <section className="panel stack-md account-section-card">
-            <div className="stack-xs">
-              <p className="eyebrow">SSH keys</p>
-              <h2 className="section-heading">CLI Git access</h2>
-              <p>Atlasium manages GitLab SSH keys here so `Code` can use SSH as the primary clone method while HTTPS remains a PAT fallback.</p>
-              <p className="text-muted">
-                Recommended command:{" "}
-                <code className="account-ssh-hint">ssh-keygen -t ed25519 -C "{connection?.email || profile?.email || "your-email"}"</code>
-              </p>
+              {!gitlabLoading && connection?.connected ? (
+                <div className="account-connection-card">
+                  <div className="stack-xs">
+                    <p className="eyebrow">Connected account</p>
+                    <h3 className="section-heading">{connection.name || connection.username}</h3>
+                    <p>{connection.email || "Email not exposed by GitLab OAuth"}</p>
+                    <p className="text-muted">@{connection.username}</p>
+                  </div>
+                  <div className="button-row">
+                    {connection.webUrl ? (
+                      <a className="button button-secondary" href={connection.webUrl} target="_blank" rel="noreferrer">
+                        Open in GitLab
+                      </a>
+                    ) : null}
+                    <button className="button button-secondary" type="button" onClick={() => void onConnect()} disabled={gitlabConnecting}>
+                      {gitlabConnecting ? "Redirecting..." : connection.reconnectRequired ? "Reconnect GitLab" : "Reconnect"}
+                    </button>
+                    <button className="button button-danger" type="button" onClick={() => void onDisconnect()} disabled={gitlabDisconnecting}>
+                      {gitlabDisconnecting ? "Disconnecting..." : "Disconnect"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {!gitlabLoading && !connection?.connected ? (
+                <div className="account-connection-card">
+                  <div className="stack-xs">
+                    <p className="eyebrow">No GitLab API access connected</p>
+                    <h3 className="section-heading">Connect GitLab</h3>
+                    <p>Atlasium will use your GitLab identity for managed repository browsing, archive download, branch creation, merge requests, and SSH-key management.</p>
+                  </div>
+                  <div className="button-row">
+                    <button className="button" type="button" onClick={() => void onConnect()} disabled={gitlabConnecting}>
+                      {gitlabConnecting ? "Redirecting..." : "Connect GitLab"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
-            {sshError ? <p className="alert alert-error">{sshError}</p> : null}
-            {sshSuccess ? <p className="alert alert-success">{sshSuccess}</p> : null}
+            <div className="account-tech-block stack-md">
+              <div className="account-tech-header">
+                <div className="stack-xs">
+                  <p className="eyebrow">SSH keys</p>
+                  <h3 className="section-heading">CLI Git access</h3>
+                  <p>Atlasium manages GitLab SSH keys here so `Code` can use SSH as the primary clone method while HTTPS remains a PAT fallback.</p>
+                  <p className="text-muted">
+                    Recommended command:{" "}
+                    <code className="account-ssh-hint">ssh-keygen -t ed25519 -C "{connection?.email || profile?.email || "your-email"}"</code>
+                  </p>
+                </div>
 
-            {!connection?.connected ? (
-              <p className="alert alert-info">Connect your GitLab API access above before managing SSH keys.</p>
-            ) : null}
+                {canManageSshKeys ? (
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    onClick={() => {
+                      setSshError(null);
+                      setSshSuccess(null);
+                      setIsSshFormOpen((current) => !current);
+                    }}
+                  >
+                    {isSshFormOpen ? "Close" : "Add SSH key"}
+                  </button>
+                ) : null}
+              </div>
 
-            {connection?.connected && connection.reconnectRequired ? (
-              <p className="alert alert-warning">Reconnect GitLab above before listing, adding, or deleting SSH keys.</p>
-            ) : null}
+              {sshError ? <p className="alert alert-error">{sshError}</p> : null}
+              {sshSuccess ? <p className="alert alert-success">{sshSuccess}</p> : null}
 
-            {canManageSshKeys ? (
-              <div className="account-ssh-grid">
-                <section className="stack-sm account-ssh-subcard">
-                  <h3 className="section-heading">Current keys</h3>
+              {!connection?.connected ? <p className="alert alert-info">Connect your GitLab API access above before managing SSH keys.</p> : null}
+
+              {connection?.connected && connection.reconnectRequired ? (
+                <p className="alert alert-warning">Reconnect GitLab above before listing, adding, or deleting SSH keys.</p>
+              ) : null}
+
+              {canManageSshKeys ? (
+                <>
                   {sshKeysLoading ? <p className="alert alert-info">Loading SSH keys...</p> : null}
-                  <div className="stack-sm account-ssh-list">
+
+                  <div className="account-ssh-list-shell">
+                    <div className="account-ssh-section-heading">
+                      <h4 className="section-heading">Current keys</h4>
+                    </div>
+
                     {!sshKeysLoading && sshKeys.length === 0 ? (
                       <p className="text-muted">No SSH keys added yet. Add at least one key to use SSH clone from Atlasium Code.</p>
                     ) : null}
+
                     {sshKeys.map((sshKey) => {
                       const detailsExpanded = expandedSshKeyIds.includes(sshKey.id);
 
                       return (
-                        <article key={sshKey.id} className="account-ssh-card">
-                          <div className="account-ssh-card-row">
-                            <div className="account-ssh-card-summary">
-                              <div className="account-ssh-card-title-row">
-                                <strong className="account-ssh-card-title">{sshKey.title}</strong>
-                                {sshKey.usageType ? <span className="badge">{sshKey.usageType}</span> : null}
-                              </div>
-                            </div>
-
-                            <div className="account-ssh-card-actions">
-                              <button
-                                className="button button-secondary"
-                                type="button"
-                                onClick={() => toggleSshKeyDetails(sshKey.id)}
-                                disabled={deletingKeyId === sshKey.id}
-                                aria-expanded={detailsExpanded}
-                              >
-                                {detailsExpanded ? "Hide details" : "Show details"}
-                              </button>
-                              <button
-                                className="button button-danger"
-                                type="button"
-                                onClick={() => void onDeleteSshKey(sshKey.id)}
-                                disabled={deletingKeyId === sshKey.id}
-                              >
-                                {deletingKeyId === sshKey.id ? "Removing..." : "Remove"}
-                              </button>
+                        <article key={sshKey.id} className={`account-ssh-row${detailsExpanded ? " is-expanded" : ""}`}>
+                          <div className="account-ssh-row-main">
+                            <div className="account-ssh-row-heading">
+                              <strong className="account-ssh-row-title" title={sshKey.title}>
+                                {sshKey.title}
+                              </strong>
+                              {sshKey.usageType ? <span className="badge">{sshKey.usageType}</span> : null}
                             </div>
                           </div>
 
+                          <div className="account-ssh-row-actions">
+                            <button
+                              className="button button-secondary"
+                              type="button"
+                              onClick={() => toggleSshKeyDetails(sshKey.id)}
+                              disabled={deletingKeyId === sshKey.id}
+                              aria-expanded={detailsExpanded}
+                            >
+                              {detailsExpanded ? "Hide details" : "Show details"}
+                            </button>
+                            <button
+                              className="button button-danger"
+                              type="button"
+                              onClick={() => void onDeleteSshKey(sshKey.id)}
+                              disabled={deletingKeyId === sshKey.id}
+                            >
+                              {deletingKeyId === sshKey.id ? "Removing..." : "Remove"}
+                            </button>
+                          </div>
+
                           {detailsExpanded ? (
-                            <div className="account-ssh-card-details stack-sm">
+                            <div className="account-ssh-row-details stack-sm">
                               <div className="account-ssh-meta-grid">
                                 <div className="stack-xxs">
                                   <p className="account-ssh-meta-label">Added</p>
@@ -919,41 +947,43 @@ export default function AccountPage(): JSX.Element {
                       );
                     })}
                   </div>
-                </section>
 
-                <section className="stack-sm account-ssh-subcard">
-                  <h3 className="section-heading">Add SSH key</h3>
-                  <label>
-                    Title
-                    <input className="input" value={sshKeyTitle} onChange={(event) => setSshKeyTitle(event.target.value)} placeholder="Laptop" />
-                  </label>
-                  <label>
-                    Public key
-                    <textarea
-                      className="input account-ssh-key-textarea"
-                      value={sshPublicKey}
-                      onChange={(event) => setSshPublicKey(event.target.value)}
-                      rows={6}
-                      placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."
-                    />
-                  </label>
-                  <label>
-                    Expiration date
-                    <input className="input" type="date" value={sshKeyExpiresAt} onChange={(event) => setSshKeyExpiresAt(event.target.value)} />
-                  </label>
-                  <div className="button-row">
-                    <button
-                      className="button"
-                      type="button"
-                      onClick={() => void onCreateSshKey()}
-                      disabled={creatingSshKey || !sshKeyTitle.trim() || !sshPublicKey.trim()}
-                    >
-                      {creatingSshKey ? "Adding..." : "Add SSH key"}
-                    </button>
-                  </div>
-                </section>
-              </div>
-            ) : null}
+                  {isSshFormOpen ? (
+                    <div className="account-ssh-form-panel">
+                      <h4 className="section-heading">Add SSH key</h4>
+                      <label>
+                        Title
+                        <input className="input" value={sshKeyTitle} onChange={(event) => setSshKeyTitle(event.target.value)} placeholder="Laptop" />
+                      </label>
+                      <label>
+                        Public key
+                        <textarea
+                          className="input account-ssh-key-textarea"
+                          value={sshPublicKey}
+                          onChange={(event) => setSshPublicKey(event.target.value)}
+                          rows={6}
+                          placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."
+                        />
+                      </label>
+                      <label>
+                        Expiration date
+                        <input className="input" type="date" value={sshKeyExpiresAt} onChange={(event) => setSshKeyExpiresAt(event.target.value)} />
+                      </label>
+                      <div className="button-row">
+                        <button
+                          className="button"
+                          type="button"
+                          onClick={() => void onCreateSshKey()}
+                          disabled={creatingSshKey || !sshKeyTitle.trim() || !sshPublicKey.trim()}
+                        >
+                          {creatingSshKey ? "Adding..." : "Add SSH key"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
           </section>
         </div>
       </section>

@@ -14,6 +14,7 @@
 - When fixing a user-facing label issue in one project tab, apply the same fix across equivalent tabs to avoid inconsistent UX.
 - Prefer shared UI components for repeated project-context text (e.g., project header subtitle) to prevent drift.
 - Keep action button labels concise; do not append keyboard shortcut hints in the visible label unless explicitly requested.
+- Do not split a dense technical settings workflow into competing nested cards inside a narrow secondary column. If a section combines long labels, action buttons, and optional detail, merge the related controls into one coherent panel and collapse heavy forms by default.
 
 ## Collaboration preferences
 - After every implemented change, always provide the user with the exact commit message to use.

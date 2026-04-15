@@ -1,5 +1,31 @@
 # Implementation TODO (v1 bootstrap)
 
+## Account UX Cleanup - Merge GitLab + SSH (2026-04-15)
+- [x] Merge `GitLab access` and `SSH keys` into one technical panel in the secondary `Account` column.
+- [x] Rework `Current keys` into compact rows with truncating titles, trailing actions, and inline details.
+- [x] Collapse `Add SSH key` behind a toggle button, following the `Invite user` interaction pattern.
+- [x] Re-run `git diff --check` and `pnpm --filter @doctoral/web build`, then capture the verification result.
+
+### Review - Account UX Cleanup - Merge GitLab + SSH
+- The technical side of `Account` is now one coherent panel instead of two competing right-column cards:
+  - `GitLab web access` stays at the top
+  - `SSH keys` now lives in the same panel below it, separated as a technical subsection rather than a second full card
+- `Current keys` is now a compact row list instead of nested cards:
+  - the title owns the flexible width
+  - long titles truncate with ellipsis instead of wrapping vertically letter by letter
+  - actions stay in a trailing group on the right, then stack cleanly on narrow widths
+- `Add SSH key` now follows the same interaction model as `Invite user`:
+  - closed by default behind a button
+  - opens inline inside the same technical panel
+  - closes automatically after a successful key creation
+- The previous user-reported layout failure was addressed at the root:
+  - the dense GitLab/SSH workflow no longer competes inside multiple nested subcards in a narrow column
+  - the always-open add form no longer permanently consumes half of the available width
+- Verification:
+  - `git diff --check` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` again reached `next build` -> `Creating an optimized production build ...`, but this wrapper still failed to return a final exit status after the `next build` process had already disappeared from `ps`; there was no concrete build error output to act on here
+
 ## Account SSH Keys UX Cleanup (2026-04-15)
 - [x] Compact `Current keys` into summary-first cards with explicit `Show details` / `Hide details` toggles.
 - [x] Move `Added`, `Expires`, and public-key preview into a contained inline details panel per SSH key.
