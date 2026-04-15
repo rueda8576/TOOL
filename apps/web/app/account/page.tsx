@@ -31,6 +31,18 @@ function formatRoleLabel(role: "admin" | "editor" | "reader"): string {
   return role.charAt(0).toUpperCase() + role.slice(1);
 }
 
+function formatDateTimeLabel(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  });
+}
+
 function persistStoredUser(profile: AccountProfile): void {
   localStorage.setItem(
     "doctoral_user",
@@ -102,6 +114,7 @@ export default function AccountPage(): JSX.Element {
   const [sshKeyExpiresAt, setSshKeyExpiresAt] = useState("");
   const [sshError, setSshError] = useState<string | null>(null);
   const [sshSuccess, setSshSuccess] = useState<string | null>(null);
+  const [expandedSshKeyIds, setExpandedSshKeyIds] = useState<number[]>([]);
 
   const handleAuthFailure = useCallback(
     (message: string): boolean => {
@@ -233,6 +246,7 @@ export default function AccountPage(): JSX.Element {
   useEffect(() => {
     if (!token || !canManageSshKeys) {
       setSshKeys([]);
+      setExpandedSshKeyIds([]);
       setSshKeysLoading(false);
       return;
     }
@@ -247,6 +261,10 @@ export default function AccountPage(): JSX.Element {
 
     return "Your GitLab session expired or was revoked. Reconnect your account to use Code and SSH-key management again.";
   }, [connection]);
+
+  const toggleSshKeyDetails = useCallback((keyId: number): void => {
+    setExpandedSshKeyIds((current) => (current.includes(keyId) ? current.filter((id) => id !== keyId) : [...current, keyId]));
+  }, []);
 
   const passwordValidationMessage = useMemo(() => {
     if (!currentPassword && !newPassword && !confirmPassword) {
@@ -436,6 +454,7 @@ export default function AccountPage(): JSX.Element {
     setSshSuccess(null);
     try {
       await deleteGitlabSshKey(token, keyId);
+      setExpandedSshKeyIds((current) => current.filter((id) => id !== keyId));
       await loadSshKeys(token);
       setSshSuccess("GitLab SSH key removed.");
     } catch (deleteError) {
@@ -844,29 +863,61 @@ export default function AccountPage(): JSX.Element {
                     {!sshKeysLoading && sshKeys.length === 0 ? (
                       <p className="text-muted">No SSH keys added yet. Add at least one key to use SSH clone from Atlasium Code.</p>
                     ) : null}
-                    {sshKeys.map((sshKey) => (
-                      <article key={sshKey.id} className="account-ssh-card">
-                        <div className="stack-xs">
-                          <div className="button-row">
-                            <strong>{sshKey.title}</strong>
-                            {sshKey.usageType ? <span className="badge">{sshKey.usageType}</span> : null}
+                    {sshKeys.map((sshKey) => {
+                      const detailsExpanded = expandedSshKeyIds.includes(sshKey.id);
+
+                      return (
+                        <article key={sshKey.id} className="account-ssh-card">
+                          <div className="account-ssh-card-row">
+                            <div className="account-ssh-card-summary">
+                              <div className="account-ssh-card-title-row">
+                                <strong className="account-ssh-card-title">{sshKey.title}</strong>
+                                {sshKey.usageType ? <span className="badge">{sshKey.usageType}</span> : null}
+                              </div>
+                            </div>
+
+                            <div className="account-ssh-card-actions">
+                              <button
+                                className="button button-secondary"
+                                type="button"
+                                onClick={() => toggleSshKeyDetails(sshKey.id)}
+                                disabled={deletingKeyId === sshKey.id}
+                                aria-expanded={detailsExpanded}
+                              >
+                                {detailsExpanded ? "Hide details" : "Show details"}
+                              </button>
+                              <button
+                                className="button button-danger"
+                                type="button"
+                                onClick={() => void onDeleteSshKey(sshKey.id)}
+                                disabled={deletingKeyId === sshKey.id}
+                              >
+                                {deletingKeyId === sshKey.id ? "Removing..." : "Remove"}
+                              </button>
+                            </div>
                           </div>
-                          <p className="text-muted">
-                            Added {new Date(sshKey.createdAt).toLocaleDateString()}
-                            {sshKey.expiresAt ? ` · Expires ${sshKey.expiresAt}` : " · No expiration"}
-                          </p>
-                          <code className="account-ssh-key-preview">{sshKey.key}</code>
-                        </div>
-                        <button
-                          className="button button-danger"
-                          type="button"
-                          onClick={() => void onDeleteSshKey(sshKey.id)}
-                          disabled={deletingKeyId === sshKey.id}
-                        >
-                          {deletingKeyId === sshKey.id ? "Removing..." : "Remove"}
-                        </button>
-                      </article>
-                    ))}
+
+                          {detailsExpanded ? (
+                            <div className="account-ssh-card-details stack-sm">
+                              <div className="account-ssh-meta-grid">
+                                <div className="stack-xxs">
+                                  <p className="account-ssh-meta-label">Added</p>
+                                  <p className="account-ssh-meta-value">{formatDateTimeLabel(sshKey.createdAt)}</p>
+                                </div>
+                                <div className="stack-xxs">
+                                  <p className="account-ssh-meta-label">Expires</p>
+                                  <p className="account-ssh-meta-value">{sshKey.expiresAt || "No expiration"}</p>
+                                </div>
+                              </div>
+                              <div className="stack-xxs">
+                                <p className="account-ssh-meta-label">Public key</p>
+                                <code className="account-ssh-key-preview">{sshKey.key}</code>
+                              </div>
+                            </div>
+                          ) : null}
+                        </article>
+                      );
+                    })}
                   </div>
                 </section>
 

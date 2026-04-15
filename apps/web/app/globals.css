@@ -3130,29 +3130,95 @@ body.wiki-layout-dragging * {
 
 .account-ssh-list {
   min-height: 8rem;
+  min-width: 0;
 }
 
 .account-ssh-card {
+  min-width: 0;
+  padding: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, white 78%, var(--bg-surface-soft) 22%);
+}
+
+.account-ssh-card-row {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 1rem;
-  padding: 1rem;
-  border: 1px solid var(--line);
+  min-width: 0;
+}
+
+.account-ssh-card-summary {
+  flex: 1;
+  min-width: 0;
+}
+
+.account-ssh-card-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.account-ssh-card-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.account-ssh-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.account-ssh-card-details {
+  min-width: 0;
+  margin-top: 0.8rem;
+  padding: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
   border-radius: var(--radius-sm);
-  background: #ffffff;
+  background: color-mix(in srgb, var(--bg-surface-soft) 96%, white 4%);
+}
+
+.account-ssh-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  min-width: 0;
+}
+
+.account-ssh-meta-label {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.account-ssh-meta-value {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .account-ssh-key-preview {
   display: block;
+  margin: 0;
+  max-width: 100%;
   padding: 0.85rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 78%, white 22%);
+  background: color-mix(in srgb, var(--surface) 74%, white 26%);
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 0.82rem;
   line-height: 1.5;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
@@ -3692,8 +3758,17 @@ body.wiki-layout-dragging * {
   }
 
   .account-connection-card,
-  .account-ssh-card {
+  .account-ssh-card-row {
     flex-direction: column;
+  }
+
+  .account-ssh-card-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .account-ssh-meta-grid {
+    grid-template-columns: 1fr;
   }
 
   .account-ssh-grid {

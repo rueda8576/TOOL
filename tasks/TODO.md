@@ -1,5 +1,26 @@
 # Implementation TODO (v1 bootstrap)
 
+## Account SSH Keys UX Cleanup (2026-04-15)
+- [x] Compact `Current keys` into summary-first cards with explicit `Show details` / `Hide details` toggles.
+- [x] Move `Added`, `Expires`, and public-key preview into a contained inline details panel per SSH key.
+- [x] Tighten the nested SSH-card styling so the inner cards no longer visually spill outside the `Current keys` subcard.
+- [x] Re-run `git diff --check` and `pnpm --filter @doctoral/web build`, then capture the verification result.
+
+### Review - Account SSH Keys UX Cleanup
+- `Current keys` now defaults to a scan-friendly list:
+  - each SSH key shows only its title, optional usage badge, and actions
+  - `Added`, `Expires`, and the public key body moved behind an inline `Show details` / `Hide details` toggle
+- The nested card hierarchy is cleaner:
+  - the `Current keys` subcard remains the dominant container
+  - each SSH key is now a lighter item card instead of a full competing white panel
+  - the expanded details view renders inside a secondary contained surface, so long public keys no longer visually break out of the section
+- Responsive behavior was preserved:
+  - desktop keeps the two-column SSH layout
+  - narrow widths stack key actions and collapse details metadata to one column
+- Verification:
+  - `git diff --check` passed
+  - `pnpm --filter @doctoral/web build` again reached `next build` -> `Creating an optimized production build ...`, but this wrapper still failed to return a final exit status after the `next build` process had already disappeared from `ps`; there was no concrete build error output to act on here
+
 ## Account vNext - Settings Hub + Change Password (2026-04-15)
 - [x] Add authenticated backend profile and password-change endpoints, including revoking all other sessions after a successful password change.
 - [x] Add/update backend auth service and HTTP tests for profile reads, password-change validation, and session revocation behavior.
