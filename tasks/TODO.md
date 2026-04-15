@@ -14,7 +14,8 @@
   - `actions/setup-node` moved to `@v6`
   - `pnpm/action-setup` was removed entirely
   - pnpm is now enabled via `corepack prepare pnpm@9.15.4 --activate`, aligned with the repo `packageManager`
-  - added explicit `cache-dependency-path: pnpm-lock.yaml`
+  - after the follow-up CI failure, removed `setup-node`'s built-in `cache: pnpm` because that cache path tries to execute `pnpm` before Corepack has installed it
+  - this keeps the workflow deterministic; if we want cache back later, it should be restored only after pnpm is guaranteed to exist on `PATH`
 - Local verification:
   - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
   - `git diff --check` passed
