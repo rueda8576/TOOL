@@ -30,12 +30,16 @@ jobs:
       REDIS_URL: redis://localhost:6379
       STORAGE_ROOT: ./storage
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Enable pnpm via Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.4 --activate
       - name: Install dependencies
         run: pnpm install --frozen-lockfile=false --prod=false
       - name: Generate Prisma client

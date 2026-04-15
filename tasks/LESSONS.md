@@ -165,6 +165,9 @@
   - readers must be filtered away from unpublished pages in tree/search/path lookups
   - editors can open and edit them normally
   - UI that depends on published revisions (`History`, published metadata, revision badges) must degrade explicitly instead of assuming `published` is always present
+- When that wiki contract changes, update existing specs and mocks in the same tranche:
+  - tree expectations must include any new page-shape fields such as `isUnpublished`
+  - read-access tests must mock whatever the current access helper now needs (`currentRevisionId`, `getProjectAccess`, etc.), not the previous helper contract
 
 ## Backend testing
 - In PNPM workspace scripts, avoid relying on `pnpm run <script> -- --coverage ...` for Jest in CI; forwarded args can be treated as test patterns and produce `No tests found`. Prefer dedicated coverage scripts or `pnpm exec jest ...`.
@@ -180,3 +183,4 @@
 - For DTO hotspots built from `class-transformer`/`class-validator`, cover them through real controller HTTP requests under the global `ValidationPipe`; direct DTO instantiation will not exercise trim/coercion/range branches that Istanbul attributes to the DTO file.
 - When ranking Istanbul branch hotspots from `coverage-final.json`, remember `b` counters are arrays per branch arm; flatten them before computing percentages or files with nonzero branch coverage can be misread as `0%`.
 - In websocket/Yjs-heavy collaboration tests, it is acceptable to hit private helpers through `as any` for protocol-shape branches such as query parsing, payload normalization, and queued persist states; re-implementing the full wire protocol often adds noise without increasing confidence.
+- When GitHub Actions starts deprecating a JavaScript-action runtime, do not wait for every third-party action to publish a new major. Prefer replacing simple setup actions with first-party/runtime primitives (`corepack` for pnpm, shell setup, etc.) if that removes the runtime dependency cleanly.

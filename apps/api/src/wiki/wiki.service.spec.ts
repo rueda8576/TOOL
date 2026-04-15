@@ -380,6 +380,7 @@ describe("WikiService", () => {
             path: "guides/roadmap",
             pageId: "page-1",
             title: "Roadmap",
+            isUnpublished: false,
             hasDraftChanges: true,
             draftUpdatedAt: "2026-03-03T11:00:00.000Z",
             draftUpdatedBy: {
@@ -1595,7 +1596,8 @@ describe("WikiService", () => {
     const { service, prisma, accessService } = makeService();
     prisma.wikiPage.findFirst.mockResolvedValue({
       id: "page-1",
-      projectId: "project-1"
+      projectId: "project-1",
+      currentRevisionId: "rev-2"
     });
     prisma.wikiRevision.findFirst.mockResolvedValue({
       id: "rev-2",
@@ -1629,7 +1631,7 @@ describe("WikiService", () => {
       changeNote: "Clarify scope"
     });
 
-    expect(accessService.ensureProjectReadable).toHaveBeenCalledWith("reader-1", "reader", "project-1");
+    expect(accessService.getProjectAccess).toHaveBeenCalledWith("reader-1", "reader", "project-1");
     expect(prisma.wikiRevision.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {

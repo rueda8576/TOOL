@@ -1,5 +1,26 @@
 # Implementation TODO (v1 bootstrap)
 
+## CI Wiki Regression + Actions Runtime Cleanup (2026-04-15)
+- [x] Fix the two wiki service specs that regressed after the draft-only wiki changes.
+- [x] Remove Node 20 JavaScript-action deprecation warnings from CI by modernizing the workflow runtime setup.
+- [x] Re-verify the relevant API checks locally as far as this environment allows, then capture the result.
+
+### Review - CI Wiki Regression + Actions Runtime Cleanup
+- Fixed the two failing wiki specs in `apps/api/src/wiki/wiki.service.spec.ts`:
+  - the tree expectation now includes the new `isUnpublished: false` field for published pages
+  - the revision-read test now matches the current `ensurePageReadable()` contract by mocking `currentRevisionId` and asserting `getProjectAccess(...)` instead of the older `ensureProjectReadable(...)`
+- Modernized `.github/workflows/ci.yml` to remove the Node 20 JavaScript-action deprecation path:
+  - `actions/checkout` moved to `@v6`
+  - `actions/setup-node` moved to `@v6`
+  - `pnpm/action-setup` was removed entirely
+  - pnpm is now enabled via `corepack prepare pnpm@9.15.4 --activate`, aligned with the repo `packageManager`
+  - added explicit `cache-dependency-path: pnpm-lock.yaml`
+- Local verification:
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `git diff --check` passed
+- Residual verification note:
+  - focused Jest runs in this wrapper still hang without returning a stable terminal result, so the spec fix is based on the concrete CI failure and the updated test contract rather than a clean local Jest exit here
+
 ## Wiki Markdown Import - Batch `.md` Import with Draft-Only Pages (2026-04-15)
 - [x] Allow wiki pages to exist without a published revision and expose that state safely to writers/readers.
 - [x] Add backend batch markdown import with partial success reporting and draft-only page creation.
