@@ -813,7 +813,7 @@ export default function AccountPage(): JSX.Element {
             ) : null}
           </section>
 
-          <section className="panel panel-subtle stack-md account-section-card">
+          <section className="panel stack-md account-section-card">
             <div className="stack-xs">
               <p className="eyebrow">SSH keys</p>
               <h2 className="section-heading">CLI Git access</h2>
@@ -837,7 +837,7 @@ export default function AccountPage(): JSX.Element {
 
             {canManageSshKeys ? (
               <div className="account-ssh-grid">
-                <section className="stack-sm">
+                <section className="stack-sm account-ssh-subcard">
                   <h3 className="section-heading">Current keys</h3>
                   {sshKeysLoading ? <p className="alert alert-info">Loading SSH keys...</p> : null}
                   <div className="stack-sm account-ssh-list">
@@ -870,7 +870,7 @@ export default function AccountPage(): JSX.Element {
                   </div>
                 </section>
 
-                <section className="stack-sm">
+                <section className="stack-sm account-ssh-subcard">
                   <h3 className="section-heading">Add SSH key</h3>
                   <label>
                     Title

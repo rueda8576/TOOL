@@ -3116,6 +3116,18 @@ body.wiki-layout-dragging * {
   gap: 1rem;
 }
 
+.account-ssh-subcard {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-surface-soft) 92%, white 8%);
+  padding: 0.95rem;
+}
+
+.account-ssh-subcard .section-heading {
+  margin-bottom: 0.3rem;
+}
+
 .account-ssh-list {
   min-height: 8rem;
 }
@@ -3126,9 +3138,9 @@ body.wiki-layout-dragging * {
   align-items: flex-start;
   gap: 1rem;
   padding: 1rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--panel) 88%, white 12%);
+  background: #ffffff;
 }
 
 .account-ssh-key-preview {
