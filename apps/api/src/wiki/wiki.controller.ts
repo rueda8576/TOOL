@@ -12,6 +12,7 @@ import { RolesGuard } from "../common/roles.guard";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { CreateWikiPageDto } from "./dto/create-wiki-page.dto";
 import { GetWikiByPathQueryDto } from "./dto/get-wiki-by-path-query.dto";
+import { ImportWikiPagesDto } from "./dto/import-wiki-pages.dto";
 import { PublishWikiPageDto } from "./dto/publish-wiki-page.dto";
 import { SaveWikiDraftDto } from "./dto/save-wiki-draft.dto";
 import { SearchWikiPagesQueryDto } from "./dto/search-wiki-pages-query.dto";
@@ -38,6 +39,18 @@ export class WikiController {
     revisionNumber: number;
   }> {
     return this.wikiService.createPage(projectId, dto, user);
+  }
+
+  @Post("projects/:projectId/wiki-pages/import")
+  importPages(
+    @Param("projectId") projectId: string,
+    @Body() dto: ImportWikiPagesDto,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<{
+    created: Array<{ id: string; title: string; path: string; sourcePath: string }>;
+    skipped: Array<{ title: string; path: string; sourcePath: string; reason: "path_exists" }>;
+  }> {
+    return this.wikiService.importPages(projectId, dto, user);
   }
 
   @Get("projects/:projectId/wiki-pages/tree")

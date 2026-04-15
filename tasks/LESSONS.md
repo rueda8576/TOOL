@@ -160,6 +160,12 @@
 - For dense desktop navigation panes (`Pages`, app nav, file trees), do not force a single fixed-width strategy. Prefer an `auto-fit` width for readable labels plus a persisted manual override for users who want tighter or wider panes.
 - If a desktop history/review workflow already has immutable revisions and Monaco is available, prefer a main-pane diff workspace over rendering history as a secondary panel below the primary content; the workflow stays focused and the changed lines become the primary artifact.
 
+## Wiki publishing model
+- If the wiki starts supporting draft-only pages (`currentRevisionId = null`), treat that as a first-class state across backend and frontend:
+  - readers must be filtered away from unpublished pages in tree/search/path lookups
+  - editors can open and edit them normally
+  - UI that depends on published revisions (`History`, published metadata, revision badges) must degrade explicitly instead of assuming `published` is always present
+
 ## Backend testing
 - In PNPM workspace scripts, avoid relying on `pnpm run <script> -- --coverage ...` for Jest in CI; forwarded args can be treated as test patterns and produce `No tests found`. Prefer dedicated coverage scripts or `pnpm exec jest ...`.
 - For Nest HTTP/controller tests that should exercise real auth/role wiring, keep the real `JwtAuthGuard` and `RolesGuard` in the module and mock `SessionAuthService.authenticateToken`; replacing the guard itself hides route metadata and role regressions.

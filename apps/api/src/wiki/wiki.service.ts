@@ -8,6 +8,7 @@ import { getDocumentsCollaborationServer } from "../documents/collaboration-serv
 import { PrismaService } from "../prisma/prisma.service";
 import { StorageService } from "../storage/storage.service";
 import { CreateWikiPageDto } from "./dto/create-wiki-page.dto";
+import { ImportWikiPageEntryDto, ImportWikiPagesDto } from "./dto/import-wiki-pages.dto";
 import { PublishWikiPageDto } from "./dto/publish-wiki-page.dto";
 import { SaveWikiDraftDto } from "./dto/save-wiki-draft.dto";
 import { SearchWikiPagesQueryDto } from "./dto/search-wiki-pages-query.dto";
@@ -70,6 +71,12 @@ type WikiSearchRow = {
   matchPublished: boolean;
   matchDraft: boolean;
   updatedAt: Date;
+};
+
+type PreparedImportEntry = ImportWikiPageEntryDto & {
+  slug: string;
+  folderPath: string;
+  path: string;
 };
 
 @Injectable()
@@ -159,6 +166,7 @@ export class WikiService {
       id: string;
       title: string;
       path: string;
+      isUnpublished: boolean;
       updatedAt: Date;
       hasDraftChanges: boolean;
       draftUpdatedAt: Date | null;
@@ -208,6 +216,7 @@ export class WikiService {
         path: page.path,
         pageId: page.id,
         title: page.title,
+        isUnpublished: page.isUnpublished,
         hasDraftChanges: page.hasDraftChanges,
         draftUpdatedAt: page.draftUpdatedAt?.toISOString() ?? null,
         draftUpdatedBy: page.draftUpdatedBy,
@@ -239,7 +248,8 @@ export class WikiService {
       },
       select: {
         id: true,
-        projectId: true
+        projectId: true,
+        currentRevisionId: true
       }
     });
 
@@ -247,8 +257,22 @@ export class WikiService {
       throw new NotFoundException("Wiki page not found");
     }
 
-    await this.accessService.ensureProjectReadable(user.userId, user.globalRole, page.projectId);
+    const access = await this.accessService.getProjectAccess(user.userId, user.globalRole, page.projectId);
+    if (!access.canWrite && !page.currentRevisionId) {
+      throw new NotFoundException("Wiki page not found");
+    }
+
     return page;
+  }
+
+  private preparePageEntry(entry: Pick<CreateWikiPageDto, "slug" | "folderPath">): { slug: string; folderPath: string; path: string } {
+    const slug = this.normalizeSlug(entry.slug);
+    const folderPath = this.normalizeFolderPath(entry.folderPath);
+    return {
+      slug,
+      folderPath,
+      path: this.composePath(folderPath, slug)
+    };
   }
 
   private async getPageForMutation(pageId: string, tx?: DbClient): Promise<WikiPageWithDraftAndRevision> {
@@ -404,9 +428,9 @@ export class WikiService {
     };
   }
 
-  private buildPublishedRevision(page: WikiPageWithDraftAndRevision): WikiRevisionView {
+  private buildPublishedRevision(page: WikiPageWithDraftAndRevision): WikiRevisionView | null {
     if (!page.currentRevision) {
-      throw new NotFoundException("Wiki page has no published revision");
+      return null;
     }
 
     return {
@@ -417,6 +441,42 @@ export class WikiService {
       createdBy: page.currentRevision.createdBy,
       changeNote: page.currentRevision.changeNote
     };
+  }
+
+  private async createDraftOnlyPageRecord(
+    tx: DbClient,
+    projectId: string,
+    entry: PreparedImportEntry,
+    userId: string
+  ): Promise<{ id: string; title: string; path: string }> {
+    const page = await tx.wikiPage.create({
+      data: {
+        projectId,
+        title: entry.title,
+        slug: entry.slug,
+        folderPath: entry.folderPath,
+        path: entry.path,
+        templateType: entry.templateType,
+        createdById: userId
+      },
+      select: {
+        id: true,
+        title: true,
+        path: true
+      }
+    });
+
+    await tx.wikiDraft.create({
+      data: {
+        pageId: page.id,
+        title: entry.title,
+        contentMarkdown: entry.contentMarkdown,
+        draftVersion: 1,
+        updatedById: userId
+      }
+    });
+
+    return page;
   }
 
   private sanitizeSearchSnippet(rawSnippet: string | null | undefined): string {
@@ -439,9 +499,7 @@ export class WikiService {
   }> {
     await this.accessService.ensureProjectWritable(user.userId, user.globalRole, projectId);
 
-    const slug = this.normalizeSlug(dto.slug);
-    const folderPath = this.normalizeFolderPath(dto.folderPath);
-    const pagePath = this.composePath(folderPath, slug);
+    const { slug, folderPath, path: pagePath } = this.preparePageEntry(dto);
 
     const existingPath = await this.prisma.wikiPage.findFirst({
       where: {
@@ -523,6 +581,96 @@ export class WikiService {
     return created;
   }
 
+  async importPages(
+    projectId: string,
+    dto: ImportWikiPagesDto,
+    user: AuthenticatedUser
+  ): Promise<{
+    created: Array<{ id: string; title: string; path: string; sourcePath: string }>;
+    skipped: Array<{ title: string; path: string; sourcePath: string; reason: "path_exists" }>;
+  }> {
+    await this.accessService.ensureProjectWritable(user.userId, user.globalRole, projectId);
+
+    const entries = dto.entries.map((entry) => {
+      const prepared = this.preparePageEntry(entry);
+      return {
+        ...entry,
+        ...prepared
+      } satisfies PreparedImportEntry;
+    });
+
+    const created: Array<{ id: string; title: string; path: string; sourcePath: string }> = [];
+    const skipped: Array<{ title: string; path: string; sourcePath: string; reason: "path_exists" }> = [];
+
+    const existingPaths = new Set(
+      (
+        await this.prisma.wikiPage.findMany({
+          where: {
+            projectId,
+            path: {
+              in: entries.map((entry) => entry.path)
+            }
+          },
+          select: {
+            path: true
+          }
+        })
+      ).map((page) => page.path)
+    );
+
+    for (const entry of entries) {
+      if (existingPaths.has(entry.path)) {
+        skipped.push({
+          title: entry.title,
+          path: entry.path,
+          sourcePath: entry.sourcePath,
+          reason: "path_exists"
+        });
+        continue;
+      }
+
+      try {
+        const page = await this.prisma.$transaction((tx) => this.createDraftOnlyPageRecord(tx, projectId, entry, user.userId));
+        existingPaths.add(entry.path);
+        created.push({
+          id: page.id,
+          title: page.title,
+          path: page.path,
+          sourcePath: entry.sourcePath
+        });
+
+        await this.auditService.log({
+          userId: user.userId,
+          projectId,
+          entityType: "wiki_page",
+          entityId: page.id,
+          action: "wiki.page.import",
+          metadata: {
+            path: page.path,
+            sourcePath: entry.sourcePath
+          }
+        });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          existingPaths.add(entry.path);
+          skipped.push({
+            title: entry.title,
+            path: entry.path,
+            sourcePath: entry.sourcePath,
+            reason: "path_exists"
+          });
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    return {
+      created,
+      skipped
+    };
+  }
+
   async listTree(projectId: string, user: AuthenticatedUser): Promise<WikiTreeNode[]> {
     const access = await this.accessService.getProjectAccess(user.userId, user.globalRole, projectId);
     const canReadDraft = access.canWrite;
@@ -530,7 +678,8 @@ export class WikiService {
     const pages = await this.prisma.wikiPage.findMany({
       where: {
         projectId,
-        deletedAt: null
+        deletedAt: null,
+        ...(canReadDraft ? {} : { currentRevisionId: { not: null } })
       },
       orderBy: {
         path: "asc"
@@ -564,8 +713,10 @@ export class WikiService {
 
     return this.buildTreeNodes(
       pages.map((page) => {
+        const isUnpublished = !page.currentRevision;
         const hasDraftChanges =
           canReadDraft &&
+          !isUnpublished &&
           Boolean(
             page.draft &&
               (page.draft.title !== page.title || page.draft.contentMarkdown !== (page.currentRevision?.contentMarkdown ?? ""))
@@ -575,6 +726,7 @@ export class WikiService {
           id: page.id,
           title: page.title,
           path: page.path,
+          isUnpublished,
           updatedAt: page.updatedAt,
           hasDraftChanges,
           draftUpdatedAt: canReadDraft ? page.draft?.updatedAt ?? null : null,
@@ -640,6 +792,9 @@ export class WikiService {
     });
 
     if (!page) {
+      throw new NotFoundException("Wiki page not found");
+    }
+    if (!access.canWrite && !page.currentRevision) {
       throw new NotFoundException("Wiki page not found");
     }
 
@@ -731,6 +886,7 @@ export class WikiService {
 
     const limit = Math.min(Math.max(query.limit ?? 20, 1), 50);
     const includeDraft = access.canWrite;
+    const visibilityCondition = includeDraft ? Prisma.sql`TRUE` : Prisma.sql`p."currentRevisionId" IS NOT NULL`;
 
     const draftVectorPart = includeDraft
       ? Prisma.sql`COALESCE(d."contentMarkdown", '')`
@@ -776,6 +932,7 @@ export class WikiService {
       ) AS search_data
       WHERE p."projectId" = ${projectId}
         AND p."deletedAt" IS NULL
+        AND ${visibilityCondition}
         AND search_data.search_vector @@ query
       ORDER BY "score" DESC, p."updatedAt" DESC
       LIMIT ${limit}

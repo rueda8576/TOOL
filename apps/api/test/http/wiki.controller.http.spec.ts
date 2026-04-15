@@ -15,6 +15,7 @@ describe("WikiController HTTP", () => {
   beforeEach(async () => {
     wikiService = {
       createPage: jest.fn(),
+      importPages: jest.fn(),
       listTree: jest.fn(),
       getByPath: jest.fn(),
       searchPages: jest.fn(),
@@ -179,6 +180,90 @@ describe("WikiController HTTP", () => {
     });
     expect(createResponse.body.revisionNumber).toBe(1);
     expect(treeResponse.body[0].pageId).toBe("page-1");
+  });
+
+  it("imports markdown pages with bound params and body", async () => {
+    wikiService.importPages.mockResolvedValue({
+      created: [
+        {
+          id: "page-1",
+          title: "Roadmap",
+          path: "guides/roadmap",
+          sourcePath: "guides/roadmap.md"
+        }
+      ],
+      skipped: [
+        {
+          title: "Existing",
+          path: "guides/existing",
+          sourcePath: "guides/existing.md",
+          reason: "path_exists"
+        }
+      ]
+    });
+
+    const response = await request(app.getHttpServer())
+      .post("/projects/project-1/wiki-pages/import")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .send({
+        entries: [
+          {
+            title: "Roadmap",
+            slug: "roadmap",
+            folderPath: "guides",
+            contentMarkdown: "# Roadmap",
+            sourcePath: "guides/roadmap.md"
+          }
+        ]
+      })
+      .expect(201);
+
+    expect(wikiService.importPages).toHaveBeenCalledWith(
+      "project-1",
+      {
+        entries: [
+          {
+            title: "Roadmap",
+            slug: "roadmap",
+            folderPath: "guides",
+            contentMarkdown: "# Roadmap",
+            sourcePath: "guides/roadmap.md"
+          }
+        ]
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+    expect(response.body.created[0].path).toBe("guides/roadmap");
+    expect(response.body.skipped[0].reason).toBe("path_exists");
+  });
+
+  it("returns 400 for invalid wiki import payloads", async () => {
+    await request(app.getHttpServer())
+      .post("/projects/project-1/wiki-pages/import")
+      .set(authHeaders("editor"))
+      .send({
+        entries: []
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post("/projects/project-1/wiki-pages/import")
+      .set(authHeaders("editor"))
+      .send({
+        entries: [
+          {
+            title: "x",
+            slug: "Not Safe",
+            contentMarkdown: "# Invalid",
+            sourcePath: "bad.md"
+          }
+        ]
+      })
+      .expect(400);
   });
 
   it("binds get-by-path query params and current user", async () => {

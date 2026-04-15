@@ -2036,6 +2036,55 @@ body.wiki-layout-dragging * {
   background: var(--bg-surface-soft);
 }
 
+.wiki-import-panel {
+  margin-top: 0.7rem;
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-soft);
+}
+
+.wiki-import-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.wiki-import-copy {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--text-muted);
+}
+
+.wiki-import-review-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.wiki-import-entry {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--panel) 82%, white 18%);
+}
+
+.wiki-import-entry-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.wiki-import-summary {
+  display: grid;
+  gap: 0.45rem;
+}
+
 .wiki-tree-list {
   list-style: none;
   margin: 0.8rem 0 0;

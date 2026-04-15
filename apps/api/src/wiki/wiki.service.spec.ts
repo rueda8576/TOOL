@@ -238,6 +238,102 @@ describe("WikiService", () => {
     );
   });
 
+  it("imports markdown pages as draft-only pages and skips conflicting paths", async () => {
+    const { service, prisma, auditService, accessService } = makeService();
+    const tx: any = {
+      wikiPage: {
+        create: jest.fn().mockResolvedValue({
+          id: "page-2",
+          title: "New notes",
+          path: "guides/new-notes"
+        })
+      },
+      wikiDraft: {
+        create: jest.fn().mockResolvedValue(undefined)
+      }
+    };
+    prisma.wikiPage.findMany.mockResolvedValue([{ path: "guides/existing" }]);
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+
+    const result = await service.importPages(
+      "project-1",
+      {
+        entries: [
+          {
+            title: "Existing",
+            slug: "existing",
+            folderPath: "guides",
+            contentMarkdown: "# Existing",
+            sourcePath: "guides/existing.md"
+          },
+          {
+            title: "New notes",
+            slug: "new-notes",
+            folderPath: "guides",
+            contentMarkdown: "# New notes",
+            sourcePath: "guides/new-notes.md"
+          },
+          {
+            title: "Duplicate in batch",
+            slug: "new-notes",
+            folderPath: "guides",
+            contentMarkdown: "# Duplicate",
+            sourcePath: "guides/duplicate.md"
+          }
+        ]
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("editor-1", "editor", "project-1");
+    expect(tx.wikiPage.create).toHaveBeenCalledTimes(1);
+    expect(tx.wikiDraft.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          pageId: "page-2",
+          title: "New notes",
+          contentMarkdown: "# New notes",
+          draftVersion: 1,
+          updatedById: "editor-1"
+        })
+      })
+    );
+    expect(result).toEqual({
+      created: [
+        {
+          id: "page-2",
+          title: "New notes",
+          path: "guides/new-notes",
+          sourcePath: "guides/new-notes.md"
+        }
+      ],
+      skipped: [
+        {
+          title: "Existing",
+          path: "guides/existing",
+          sourcePath: "guides/existing.md",
+          reason: "path_exists"
+        },
+        {
+          title: "Duplicate in batch",
+          path: "guides/new-notes",
+          sourcePath: "guides/duplicate.md",
+          reason: "path_exists"
+        }
+      ]
+    });
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "wiki.page.import",
+        entityId: "page-2"
+      })
+    );
+  });
+
   it("builds tree with draft markers for editor users", async () => {
     const { service, prisma, accessService } = makeService();
     prisma.wikiPage.findMany.mockResolvedValue([
@@ -298,6 +394,44 @@ describe("WikiService", () => {
     ]);
   });
 
+  it("hides unpublished draft-only pages from reader trees", async () => {
+    const { service, prisma } = makeService();
+    prisma.wikiPage.findMany.mockResolvedValue([
+      {
+        id: "page-1",
+        title: "Published",
+        path: "guides/published",
+        updatedAt: new Date("2026-03-03T10:00:00.000Z"),
+        currentRevision: {
+          contentMarkdown: "published"
+        },
+        draft: null
+      }
+    ]);
+
+    const tree = await service.listTree("project-1", {
+      userId: "reader-1",
+      email: "reader@example.com",
+      globalRole: "reader"
+    });
+
+    expect(prisma.wikiPage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          projectId: "project-1",
+          deletedAt: null,
+          currentRevisionId: { not: null }
+        })
+      })
+    );
+    expect(tree[0]?.children[0]).toEqual(
+      expect.objectContaining({
+        pageId: "page-1",
+        isUnpublished: false
+      })
+    );
+  });
+
   it("hides draft content from reader users", async () => {
     const { service, prisma, accessService } = makeService();
     prisma.wikiPage.findFirst.mockResolvedValue({
@@ -350,7 +484,91 @@ describe("WikiService", () => {
     expect(accessService.getProjectAccess).toHaveBeenCalledWith("reader-1", "reader", "project-1");
     expect(detail.draft).toBeUndefined();
     expect(detail.page.path).toBe("roadmap");
-    expect(detail.published.revisionNumber).toBe(1);
+    expect(detail.published).not.toBeNull();
+    expect(detail.published?.revisionNumber).toBe(1);
+  });
+
+  it("lets editors read draft-only pages with nullable published revision", async () => {
+    const { service, prisma, accessService } = makeService();
+    prisma.wikiPage.findFirst.mockResolvedValue({
+      id: "page-1",
+      projectId: "project-1",
+      title: "Imported page",
+      slug: "imported-page",
+      folderPath: "guides",
+      path: "guides/imported-page",
+      templateType: null,
+      updatedAt: new Date("2026-03-03T10:00:00.000Z"),
+      createdById: "user-1",
+      currentRevision: null,
+      draft: {
+        id: "draft-1",
+        title: "Imported page",
+        contentMarkdown: "# Imported page",
+        draftVersion: 1,
+        updatedAt: new Date("2026-03-03T11:00:00.000Z"),
+        updatedBy: {
+          id: "user-2",
+          name: "Editor",
+          email: "editor@example.com"
+        }
+      }
+    });
+    prisma.wikiLink.findMany.mockResolvedValue([]);
+
+    const detail = await service.getByPath(
+      "project-1",
+      "guides/imported-page",
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(accessService.getProjectAccess).toHaveBeenCalledWith("editor-1", "editor", "project-1");
+    expect(detail.published).toBeNull();
+    expect(detail.draft?.draftVersion).toBe(1);
+  });
+
+  it("hides draft-only pages from reader path lookups", async () => {
+    const { service, prisma } = makeService();
+    prisma.wikiPage.findFirst.mockResolvedValue({
+      id: "page-1",
+      projectId: "project-1",
+      title: "Imported page",
+      slug: "imported-page",
+      folderPath: "guides",
+      path: "guides/imported-page",
+      templateType: null,
+      updatedAt: new Date("2026-03-03T10:00:00.000Z"),
+      createdById: "user-1",
+      currentRevision: null,
+      draft: {
+        id: "draft-1",
+        title: "Imported page",
+        contentMarkdown: "# Imported page",
+        draftVersion: 1,
+        updatedAt: new Date("2026-03-03T11:00:00.000Z"),
+        updatedBy: {
+          id: "user-2",
+          name: "Editor",
+          email: "editor@example.com"
+        }
+      }
+    });
+
+    await expect(
+      service.getByPath(
+        "project-1",
+        "guides/imported-page",
+        {
+          userId: "reader-1",
+          email: "reader@example.com",
+          globalRole: "reader"
+        }
+      )
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it("returns conflict on stale draft version", async () => {
@@ -592,6 +810,85 @@ describe("WikiService", () => {
       publishedAt: "2026-03-03T12:00:00.000Z",
       draftVersion: 4
     });
+  });
+
+  it("publishes a draft-only page as revision 1", async () => {
+    const { service, prisma } = makeService();
+    const tx: any = {
+      wikiPage: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "page-1",
+          projectId: "project-1",
+          title: "Imported page",
+          slug: "imported-page",
+          folderPath: "guides",
+          path: "guides/imported-page",
+          templateType: null,
+          updatedAt: new Date("2026-03-03T10:00:00.000Z"),
+          createdById: "user-1",
+          currentRevision: null,
+          draft: {
+            id: "draft-1",
+            title: "Imported page",
+            contentMarkdown: "# Imported page",
+            draftVersion: 1,
+            updatedAt: new Date("2026-03-03T11:00:00.000Z"),
+            updatedBy: {
+              id: "user-2",
+              name: "Editor",
+              email: "editor@example.com"
+            }
+          }
+        }),
+        findMany: jest.fn().mockResolvedValue([]),
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      wikiRevision: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({
+          id: "revision-1",
+          revisionNumber: 1,
+          createdAt: new Date("2026-03-03T12:00:00.000Z")
+        })
+      },
+      wikiDraft: {
+        update: jest.fn().mockResolvedValue({ draftVersion: 2 })
+      },
+      wikiLink: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn()
+      }
+    };
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+
+    const result = await service.publishDraft(
+      "page-1",
+      {
+        baseDraftVersion: 1
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(tx.wikiRevision.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          revisionNumber: 1
+        })
+      })
+    );
+    expect(tx.wikiPage.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          title: "Imported page",
+          currentRevisionId: "revision-1"
+        })
+      })
+    );
+    expect(result.revisionNumber).toBe(1);
   });
 
   it("flushes realtime wiki draft through collaboration server when available", async () => {

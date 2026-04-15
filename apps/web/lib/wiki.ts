@@ -12,6 +12,7 @@ export type WikiTreeNode = {
   path: string;
   pageId?: string;
   title?: string;
+  isUnpublished?: boolean;
   hasDraftChanges?: boolean;
   draftUpdatedAt?: string | null;
   draftUpdatedBy?: WikiUserSummary | null;
@@ -84,7 +85,7 @@ export type WikiSearchResult = {
 
 export type WikiPageDetail = {
   page: WikiPageSummary;
-  published: WikiRevisionView;
+  published: WikiRevisionView | null;
   draft?: WikiDraftView;
   outgoingLinks: WikiLinkView[];
   backlinks: WikiBacklinkView[];
@@ -96,6 +97,24 @@ export type CreateWikiPageInput = {
   folderPath?: string;
   templateType?: string;
   contentMarkdown: string;
+};
+
+export type ImportWikiPageEntryInput = {
+  title: string;
+  slug: string;
+  folderPath?: string;
+  templateType?: string;
+  contentMarkdown: string;
+  sourcePath: string;
+};
+
+export type ImportWikiPagesInput = {
+  entries: ImportWikiPageEntryInput[];
+};
+
+export type ImportWikiPagesResult = {
+  created: Array<{ id: string; title: string; path: string; sourcePath: string }>;
+  skipped: Array<{ title: string; path: string; sourcePath: string; reason: "path_exists" }>;
 };
 
 export type SaveWikiDraftInput = {
@@ -271,6 +290,20 @@ export async function createWikiPage(
       }
     }
   );
+}
+
+export async function importWikiPages(
+  projectId: string,
+  token: string,
+  payload: ImportWikiPagesInput
+): Promise<ImportWikiPagesResult> {
+  return authFetch<ImportWikiPagesResult>(`/projects/${projectId}/wiki-pages/import`, {
+    token,
+    init: {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }
+  });
 }
 
 export async function saveWikiDraft(

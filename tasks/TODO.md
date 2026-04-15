@@ -1,5 +1,48 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Markdown Import - Batch `.md` Import with Draft-Only Pages (2026-04-15)
+- [x] Allow wiki pages to exist without a published revision and expose that state safely to writers/readers.
+- [x] Add backend batch markdown import with partial success reporting and draft-only page creation.
+- [x] Update wiki frontend types and page/detail handling for unpublished pages and first publish from draft-only state.
+- [x] Add wiki import UX with folder/files selection, metadata review, local image upload + markdown rewrite, and conflict reporting.
+- [x] Add/update backend and HTTP tests for draft-only visibility, first publish, and batch import behavior.
+- [x] Verify API type-checks and diff hygiene; capture the remaining sandbox limitation around Jest/web build.
+
+### Review - Wiki Markdown Import - Batch `.md` Import with Draft-Only Pages
+- Wiki pages can now exist as draft-only records:
+  - backend `WikiPageDetail.published` is nullable
+  - tree nodes expose `isUnpublished`
+  - readers are filtered away from draft-only pages in tree/path lookups and search
+  - editors/admins can open those pages normally and see an `Unpublished` state instead of a fake published revision
+- Added backend batch import support with partial success:
+  - new `POST /projects/:projectId/wiki-pages/import`
+  - input is JSON `entries[]`, not multipart
+  - each created entry becomes a draft-only page with an initial draft and no published revision
+  - path conflicts are skipped and reported with reason `path_exists`
+- First publish from a draft-only page now works without a migration:
+  - `publishDraft()` already supported the core revision sequencing and now serves as the first-publication path
+  - the first publish creates revision `#1`, sets `currentRevisionId`, and rebuilds published links at that moment
+- The wiki frontend now includes a real import workflow in the `Pages` sidebar:
+  - `Import Markdown` action
+  - folder picker and multi-file picker
+  - review/edit step for `title`, `slug`, `folderPath`, and `templateType`
+  - local image detection, upload through existing `wiki-assets`, and markdown URL rewrite before import submit
+  - inline import summary for created vs skipped pages
+- Import UX details:
+  - imported pages show `Unpublished` in the tree
+  - long-running published-only features are handled safely: `History` is disabled until first publish
+  - read mode for draft-only pages renders the draft content and draft metadata instead of assuming a published revision exists
+- Added backend coverage for the new behavior:
+  - `apps/api/src/wiki/wiki.service.spec.ts`
+  - `apps/api/test/http/wiki.controller.http.spec.ts`
+- Local verification results:
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `git diff --check` passed
+- Residual verification note:
+  - repeated attempts to run the focused Wiki Jest suites in this sandbox hung without emitting a stable result, even with `--forceExit`
+  - the Next web production build was not re-run in this round because the same wrapper has previously stalled after type-check; it should be re-run outside this wrapper for a definitive production-build confirmation
+
 ## UX/Admin Bundle - Wiki Auto-Fit Pages + Collapsible Sidebar + Safe Hard Delete + Wiki History Diff (2026-04-14)
 - [x] Add desktop-only persistent collapse/expand behavior to `AppShell`, with the sidebar fully hidden when collapsed and a reopen control in content.
 - [x] Change the wiki `Pages` sidebar to an auto-fit + manual splitter model with persisted mode/width, including double-click reset to auto and containment for long names.

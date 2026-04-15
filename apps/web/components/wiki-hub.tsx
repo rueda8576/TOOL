@@ -25,6 +25,8 @@ import {
   deleteWikiPage,
   DraftConflictPayload,
   flushWikiRealtimeDraft,
+  ImportWikiPagesResult,
+  importWikiPages,
   getWikiRevision,
   getWikiPageByPath,
   listWikiRevisions,
@@ -46,6 +48,24 @@ import { getProjectAccess, ProjectAccess } from "../lib/project-access";
 type SaveState = "idle" | "saving" | "saved" | "error" | "conflict";
 type WikiSidebarWidthMode = "auto" | "manual";
 
+type WikiImportDraftEntry = {
+  id: string;
+  sourcePath: string;
+  title: string;
+  slug: string;
+  folderPath: string;
+  templateType: string;
+  contentMarkdown: string;
+  localConflict: boolean;
+  warnings: string[];
+};
+
+type WikiImportSelectionResult = {
+  entries: WikiImportDraftEntry[];
+  assetFilesByPath: Map<string, File>;
+  warnings: string[];
+};
+
 const WIKI_PATH_SEGMENT_PATTERN = /^[a-z0-9-]+$/;
 const INDENT_SIZE = 2;
 const WIKI_REALTIME_TITLE_KEY = "title";
@@ -61,6 +81,7 @@ const WIKI_SIDEBAR_MIN_PX = 260;
 const WIKI_SIDEBAR_MAX_PX = 520;
 const WIKI_MAIN_MIN_PX = 520;
 const WIKI_SIDEBAR_AUTO_FALLBACK_PX = 320;
+const WIKI_IMPORT_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".avif"]);
 
 type TextTransformResult = {
   nextValue: string;
@@ -378,6 +399,246 @@ function normalizePath(rawPath: string | null | undefined): string | null {
   return segments.join("/");
 }
 
+function humanizeFileName(input: string): string {
+  const cleaned = input.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+  return cleaned ? cleaned.replace(/\s+/g, " ") : input.replace(/\.[^.]+$/, "");
+}
+
+function getImportFilePath(file: File): string {
+  const relative = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+  const sourcePath = relative && relative.trim().length > 0 ? relative : file.name;
+  return sourcePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
+
+function splitImportPath(path: string): { dir: string; baseName: string } {
+  const normalized = path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const lastSlash = normalized.lastIndexOf("/");
+  if (lastSlash === -1) {
+    return {
+      dir: "",
+      baseName: normalized
+    };
+  }
+  return {
+    dir: normalized.slice(0, lastSlash),
+    baseName: normalized.slice(lastSlash + 1)
+  };
+}
+
+function composeWikiPath(folderPath: string, slug: string): string {
+  return folderPath ? `${folderPath}/${slug}` : slug;
+}
+
+function isMarkdownImportFile(path: string): boolean {
+  return /\.(md|markdown)$/i.test(path);
+}
+
+function isImageImportFile(path: string): boolean {
+  const lower = path.toLowerCase();
+  return [...WIKI_IMPORT_IMAGE_EXTENSIONS].some((extension) => lower.endsWith(extension));
+}
+
+function isExternalMarkdownTarget(rawTarget: string): boolean {
+  const target = rawTarget.trim();
+  return (
+    target.startsWith("http://") ||
+    target.startsWith("https://") ||
+    target.startsWith("data:") ||
+    target.startsWith("mailto:") ||
+    target.startsWith("#") ||
+    target.startsWith("/") ||
+    target.startsWith("//")
+  );
+}
+
+function resolveImportRelativePath(fromSourcePath: string, rawTarget: string): string | null {
+  if (!rawTarget.trim() || isExternalMarkdownTarget(rawTarget)) {
+    return null;
+  }
+
+  let targetPath = rawTarget.trim().replace(/^<|>$/g, "");
+  try {
+    targetPath = decodeURIComponent(targetPath);
+  } catch {
+    // Keep the raw target when it is not URI-encoded.
+  }
+  const { dir } = splitImportPath(fromSourcePath);
+  const baseSegments = dir ? dir.split("/").filter(Boolean) : [];
+  const targetSegments = targetPath.replace(/\\/g, "/").split("/");
+  const resolvedSegments = [...baseSegments];
+
+  for (const segment of targetSegments) {
+    if (!segment || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      if (resolvedSegments.length === 0) {
+        return null;
+      }
+      resolvedSegments.pop();
+      continue;
+    }
+    resolvedSegments.push(segment);
+  }
+
+  return resolvedSegments.join("/");
+}
+
+function buildImportWarningList(sourcePath: string, contentMarkdown: string, assetFilesByPath: Map<string, File>): string[] {
+  const warnings = new Set<string>();
+
+  for (const match of contentMarkdown.matchAll(/!\[[^\]]*]\(([^)]+)\)/g)) {
+    const rawTarget = (match[1] ?? "").trim();
+    if (!rawTarget || isExternalMarkdownTarget(rawTarget)) {
+      continue;
+    }
+    const resolvedPath = resolveImportRelativePath(sourcePath, rawTarget);
+    if (!resolvedPath || !assetFilesByPath.has(resolvedPath) || !isImageImportFile(resolvedPath)) {
+      warnings.add(`Image not imported: ${rawTarget}`);
+    }
+  }
+
+  for (const match of contentMarkdown.matchAll(/(?<!!)\[[^\]]+]\(([^)]+)\)/g)) {
+    const rawTarget = (match[1] ?? "").trim();
+    if (!rawTarget || isExternalMarkdownTarget(rawTarget)) {
+      continue;
+    }
+    const resolvedPath = resolveImportRelativePath(sourcePath, rawTarget);
+    if (!resolvedPath) {
+      continue;
+    }
+    if (!isImageImportFile(resolvedPath) && assetFilesByPath.has(resolvedPath)) {
+      warnings.add(`Linked local file kept as-is: ${rawTarget}`);
+    }
+  }
+
+  return [...warnings];
+}
+
+async function buildWikiImportSelection(files: File[], existingPaths: Set<string>): Promise<WikiImportSelectionResult> {
+  const assetFilesByPath = new Map<string, File>();
+  const markdownFiles: Array<{ file: File; sourcePath: string }> = [];
+
+  for (const file of files) {
+    const sourcePath = getImportFilePath(file);
+    if (!sourcePath) {
+      continue;
+    }
+    if (isMarkdownImportFile(sourcePath)) {
+      markdownFiles.push({ file, sourcePath });
+      continue;
+    }
+    assetFilesByPath.set(sourcePath, file);
+  }
+
+  const warnings: string[] = [];
+  if (markdownFiles.length === 0) {
+    return {
+      entries: [],
+      assetFilesByPath,
+      warnings: ["No `.md` or `.markdown` files found in the selection."]
+    };
+  }
+
+  const entries = await Promise.all(
+    markdownFiles.map(async ({ file, sourcePath }, index) => {
+      const { dir, baseName } = splitImportPath(sourcePath);
+      const fileStem = baseName.replace(/\.[^.]+$/, "");
+      const folderPath = normalizePath(dir) ?? "";
+      const slug = slugify(fileStem);
+      const path = composeWikiPath(folderPath, slug);
+      const contentMarkdown = await file.text();
+      const entryWarnings = buildImportWarningList(sourcePath, contentMarkdown, assetFilesByPath);
+      return {
+        id: `${sourcePath}-${index}`,
+        sourcePath,
+        title: humanizeFileName(baseName),
+        slug,
+        folderPath,
+        templateType: "",
+        contentMarkdown,
+        localConflict: existingPaths.has(path),
+        warnings: entryWarnings
+      } satisfies WikiImportDraftEntry;
+    })
+  );
+
+  const pathCounts = new Map<string, number>();
+  for (const entry of entries) {
+    const path = composeWikiPath(entry.folderPath, entry.slug);
+    pathCounts.set(path, (pathCounts.get(path) ?? 0) + 1);
+  }
+
+  const entriesWithBatchWarnings = entries.map((entry) => {
+    const path = composeWikiPath(entry.folderPath, entry.slug);
+    if ((pathCounts.get(path) ?? 0) > 1) {
+      return {
+        ...entry,
+        warnings: [...entry.warnings, "Another imported entry resolves to the same wiki path."]
+      };
+    }
+    return entry;
+  });
+
+  if (assetFilesByPath.size > 0) {
+    warnings.push(`Detected ${assetFilesByPath.size} local asset file(s) available for markdown image import.`);
+  }
+
+  return {
+    entries: entriesWithBatchWarnings,
+    assetFilesByPath,
+    warnings
+  };
+}
+
+async function rewriteImportedMarkdownAssets(
+  projectId: string,
+  token: string,
+  entry: WikiImportDraftEntry,
+  assetFilesByPath: Map<string, File>,
+  uploadedAssetUrls: Map<string, string>
+): Promise<{ contentMarkdown: string; warnings: string[] }> {
+  const warnings = new Set(entry.warnings);
+  let nextMarkdown = entry.contentMarkdown;
+  const replacements = new Map<string, string>();
+
+  for (const match of entry.contentMarkdown.matchAll(/!\[[^\]]*]\(([^)]+)\)/g)) {
+    const rawTarget = (match[1] ?? "").trim();
+    if (!rawTarget || isExternalMarkdownTarget(rawTarget) || replacements.has(rawTarget)) {
+      continue;
+    }
+
+    const resolvedPath = resolveImportRelativePath(entry.sourcePath, rawTarget);
+    if (!resolvedPath || !isImageImportFile(resolvedPath)) {
+      continue;
+    }
+
+    const assetFile = assetFilesByPath.get(resolvedPath);
+    if (!assetFile) {
+      warnings.add(`Image not imported: ${rawTarget}`);
+      continue;
+    }
+
+    let assetUrl = uploadedAssetUrls.get(resolvedPath);
+    if (!assetUrl) {
+      const uploaded = await uploadWikiAsset(projectId, token, assetFile);
+      assetUrl = uploaded.url;
+      uploadedAssetUrls.set(resolvedPath, assetUrl);
+    }
+
+    replacements.set(rawTarget, assetUrl);
+  }
+
+  for (const [rawTarget, assetUrl] of replacements) {
+    nextMarkdown = nextMarkdown.replaceAll(`(${rawTarget})`, `(${assetUrl})`);
+  }
+
+  return {
+    contentMarkdown: nextMarkdown,
+    warnings: [...warnings]
+  };
+}
+
 function encodeWikiPath(path: string): string {
   return path
     .split("/")
@@ -551,6 +812,8 @@ export function WikiHub({
 }): JSX.Element {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importFilesInputRef = useRef<HTMLInputElement>(null);
+  const importFolderInputRef = useRef<HTMLInputElement>(null);
   const markdownRef = useRef<HTMLTextAreaElement>(null);
   const lastSavedSnapshotRef = useRef<{ title: string; content: string } | null>(null);
   const draftVersionRef = useRef<number | null>(null);
@@ -577,6 +840,12 @@ export function WikiHub({
   const [pageDetail, setPageDetail] = useState<WikiPageDetail | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [creatingPage, setCreatingPage] = useState(false);
+  const [showImportPanel, setShowImportPanel] = useState(false);
+  const [importEntries, setImportEntries] = useState<WikiImportDraftEntry[]>([]);
+  const [importAssetFilesByPath, setImportAssetFilesByPath] = useState<Map<string, File>>(new Map());
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
+  const [importSummary, setImportSummary] = useState<ImportWikiPagesResult | null>(null);
+  const [importingPages, setImportingPages] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createSlug, setCreateSlug] = useState("");
   const [createFolderPath, setCreateFolderPath] = useState("");
@@ -637,14 +906,19 @@ export function WikiHub({
   const collaboratorIdentity = useMemo(() => buildCollaboratorIdentity(sessionUser), [sessionUser]);
 
   const allPagePaths = useMemo(() => flattenPagePaths(treeNodes), [treeNodes]);
+  const existingWikiPaths = useMemo(() => new Set(allPagePaths), [allPagePaths]);
   const visibleCollaborators = useMemo(() => collaborators.slice(0, 6), [collaborators]);
   const hiddenCollaboratorsCount = useMemo(
     () => Math.max(collaborators.length - visibleCollaborators.length, 0),
     [collaborators.length, visibleCollaborators.length]
   );
   const renderedPublishedMarkdown = useMemo(
-    () => normalizeWikiMathMarkdown(pageDetail?.published.contentMarkdown ?? ""),
-    [pageDetail?.published.contentMarkdown]
+    () => normalizeWikiMathMarkdown(pageDetail?.published?.contentMarkdown ?? ""),
+    [pageDetail?.published?.contentMarkdown]
+  );
+  const renderedUnpublishedMarkdown = useMemo(
+    () => normalizeWikiMathMarkdown(pageDetail?.draft?.contentMarkdown ?? ""),
+    [pageDetail?.draft?.contentMarkdown]
   );
   const renderedDraftMarkdown = useMemo(() => normalizeWikiMathMarkdown(draftContent), [draftContent]);
   const selectedRevisionIndex = useMemo(
@@ -839,13 +1113,13 @@ export function WikiHub({
 
   const hydrateDraftFromDetail = useCallback((detail: WikiPageDetail): void => {
     const sourceTitle = detail.draft?.title ?? detail.page.title;
-    const sourceContent = detail.draft?.contentMarkdown ?? detail.published.contentMarkdown;
+    const sourceContent = detail.draft?.contentMarkdown ?? detail.published?.contentMarkdown ?? "";
     const sourceVersion = detail.draft?.draftVersion ?? 1;
     setDraftTitle(sourceTitle);
     setDraftContent(sourceContent);
     setDraftVersion(sourceVersion);
     draftVersionRef.current = sourceVersion;
-    setLastSavedAt(detail.draft?.updatedAt ?? detail.published.publishedAt);
+    setLastSavedAt(detail.draft?.updatedAt ?? detail.published?.publishedAt ?? null);
     lastSavedSnapshotRef.current = {
       title: sourceTitle,
       content: sourceContent
@@ -881,9 +1155,7 @@ export function WikiHub({
       try {
         const detail = await getWikiPageByPath(projectId, path, authToken);
         setPageDetail(detail);
-        setRevisionPreviewById({
-          [detail.published.id]: detail.published
-        });
+        setRevisionPreviewById(detail.published ? { [detail.published.id]: detail.published } : {});
         hydrateDraftFromDetail(detail);
         setError(null);
       } catch (pageError) {
@@ -1518,6 +1790,164 @@ export function WikiHub({
     }
   };
 
+  const resetImportState = useCallback((): void => {
+    setImportEntries([]);
+    setImportAssetFilesByPath(new Map());
+    setImportWarnings([]);
+  }, []);
+
+  const onImportSelectionChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+      const files = event.target.files ? Array.from(event.target.files) : [];
+      event.target.value = "";
+      if (files.length === 0) {
+        return;
+      }
+
+      setError(null);
+      setSuccess(null);
+      setImportSummary(null);
+
+      try {
+        const selection = await buildWikiImportSelection(files, existingWikiPaths);
+        setImportEntries(selection.entries);
+        setImportAssetFilesByPath(selection.assetFilesByPath);
+        setImportWarnings(selection.warnings);
+        setShowImportPanel(true);
+        if (selection.entries.length === 0) {
+          setError(selection.warnings[0] ?? "No Markdown files found for import.");
+        }
+      } catch (importSelectionError) {
+        setError((importSelectionError as Error).message);
+      }
+    },
+    [existingWikiPaths]
+  );
+
+  const onImportEntryFieldChange = useCallback(
+    (entryId: string, field: "title" | "slug" | "folderPath" | "templateType", value: string): void => {
+      setImportEntries((current) =>
+        current.map((entry) => {
+          if (entry.id !== entryId) {
+            return entry;
+          }
+
+          const nextEntry = {
+            ...entry,
+            [field]: value
+          };
+          const normalizedFolder = normalizePath(nextEntry.folderPath) ?? "";
+          const nextPath = composeWikiPath(normalizedFolder, slugify(nextEntry.slug) || nextEntry.slug);
+          return {
+            ...nextEntry,
+            folderPath: normalizedFolder,
+            localConflict: existingWikiPaths.has(nextPath)
+          };
+        })
+      );
+    },
+    [existingWikiPaths]
+  );
+
+  const onRunImport = useCallback(async (): Promise<void> => {
+    if (!token) {
+      setError("Missing session token. Please sign in again.");
+      return;
+    }
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
+      return;
+    }
+    if (importEntries.length === 0) {
+      setError("Select Markdown files before importing.");
+      return;
+    }
+
+    setImportingPages(true);
+    setError(null);
+    setSuccess(null);
+    setImportSummary(null);
+
+    try {
+      const uploadedAssetUrls = new Map<string, string>();
+      const payloadEntries = [];
+      const warningSet = new Set(importWarnings);
+
+      for (const entry of importEntries) {
+        const normalizedSlug = slugify(entry.slug);
+        const normalizedFolder = normalizePath(entry.folderPath) ?? "";
+        if (!entry.title.trim()) {
+          throw new Error(`Missing title for ${entry.sourcePath}.`);
+        }
+        if (!normalizedSlug) {
+          throw new Error(`Invalid slug for ${entry.sourcePath}.`);
+        }
+
+        const rewritten = await rewriteImportedMarkdownAssets(
+          projectId,
+          token,
+          {
+            ...entry,
+            slug: normalizedSlug,
+            folderPath: normalizedFolder
+          },
+          importAssetFilesByPath,
+          uploadedAssetUrls
+        );
+
+        for (const warning of rewritten.warnings) {
+          warningSet.add(`${entry.sourcePath}: ${warning}`);
+        }
+
+        payloadEntries.push({
+          title: entry.title.trim(),
+          slug: normalizedSlug,
+          folderPath: normalizedFolder || undefined,
+          templateType: entry.templateType.trim() || undefined,
+          contentMarkdown: rewritten.contentMarkdown,
+          sourcePath: entry.sourcePath
+        });
+      }
+
+      const result = await importWikiPages(projectId, token, {
+        entries: payloadEntries
+      });
+
+      setImportSummary(result);
+      setImportWarnings([...warningSet]);
+      await loadTree(token);
+      await refreshSearchResults(token);
+
+      const firstCreatedPath = result.created[0]?.path ?? null;
+      if (firstCreatedPath) {
+        setSelectedPath(firstCreatedPath);
+        router.push(`/projects/${projectId}/wiki/${encodeWikiPath(firstCreatedPath)}`);
+        await loadPage(token, firstCreatedPath);
+      }
+
+      setSuccess(`Imported ${result.created.length} page(s); skipped ${result.skipped.length}.`);
+      if (result.created.length > 0) {
+        resetImportState();
+      }
+    } catch (importError) {
+      setError((importError as Error).message);
+    } finally {
+      setImportingPages(false);
+    }
+  }, [
+    canWrite,
+    importAssetFilesByPath,
+    importEntries,
+    importWarnings,
+    loadPage,
+    loadTree,
+    projectId,
+    refreshSearchResults,
+    resetImportState,
+    router,
+    token
+  ]);
+
   const onDeletePage = async (): Promise<void> => {
     if (!token || !pageDetail || !canWrite) {
       return;
@@ -1775,13 +2205,13 @@ export function WikiHub({
         return;
       }
 
-      if (pageDetail?.published.id === revisionId) {
+      if (pageDetail?.published?.id === revisionId) {
         setRevisionPreviewById((current) =>
           current[revisionId]
             ? current
             : {
                 ...current,
-                [revisionId]: pageDetail.published
+                [revisionId]: pageDetail.published as WikiRevisionView
               }
         );
         return;
@@ -1817,6 +2247,11 @@ export function WikiHub({
 
   const onToggleHistory = async (): Promise<void> => {
     if (!pageDetail || !token) {
+      return;
+    }
+    if (!pageDetail.published) {
+      setHistoryOpen(false);
+      setHistoryError("This page has not been published yet.");
       return;
     }
     const nextOpen = !historyOpen;
@@ -2029,7 +2464,8 @@ export function WikiHub({
           <span className="wiki-tree-row-content" data-wiki-sidebar-measure>
             <span className="wiki-tree-page-title">{node.title ?? node.name}</span>
           </span>
-          {node.hasDraftChanges ? <span className="badge">Draft</span> : null}
+          {node.isUnpublished ? <span className="badge">Unpublished</span> : null}
+          {!node.isUnpublished && node.hasDraftChanges ? <span className="badge">Draft</span> : null}
         </button>
       </li>
     );
@@ -2067,15 +2503,28 @@ export function WikiHub({
           <div className="wiki-sidebar-toolbar">
             <h3 className="section-heading">Pages</h3>
             {canWrite ? (
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => {
-                  setShowCreateForm((current) => !current);
-                }}
-              >
-                {showCreateForm ? "Close" : "New page"}
-              </button>
+              <div className="inline-actions">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => {
+                    setShowImportPanel(false);
+                    setShowCreateForm((current) => !current);
+                  }}
+                >
+                  {showCreateForm ? "Close" : "New page"}
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => {
+                    setShowCreateForm(false);
+                    setShowImportPanel((current) => !current);
+                  }}
+                >
+                  {showImportPanel ? "Close import" : "Import Markdown"}
+                </button>
+              </div>
             ) : null}
           </div>
 
@@ -2161,6 +2610,164 @@ export function WikiHub({
             </form>
           ) : null}
 
+          {showImportPanel ? (
+            <section className="wiki-import-panel">
+              <div className="wiki-import-toolbar">
+                <button type="button" className="button button-secondary" onClick={() => importFolderInputRef.current?.click()}>
+                  Import folder
+                </button>
+                <button type="button" className="button button-secondary" onClick={() => importFilesInputRef.current?.click()}>
+                  Import files
+                </button>
+              </div>
+
+              <p className="wiki-import-copy">
+                Batch import creates draft-only pages. Review title, slug, folder path, and optional template before creating them.
+              </p>
+
+              {importWarnings.length > 0 ? (
+                <div className="alert alert-info">
+                  <ul className="list">
+                    {importWarnings.map((warning) => (
+                      <li key={warning} className="list-item">
+                        {warning}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {importSummary ? (
+                <div className="wiki-import-summary">
+                  <p className="alert alert-success">
+                    Created {importSummary.created.length} page(s), skipped {importSummary.skipped.length}.
+                  </p>
+                  {importSummary.skipped.length > 0 ? (
+                    <ul className="list">
+                      {importSummary.skipped.map((entry) => (
+                        <li key={`${entry.sourcePath}-${entry.path}`} className="list-item">
+                          <strong>{entry.sourcePath}</strong>
+                          <span className="wiki-page-path">/{entry.path}</span>
+                          <span>Skipped: {entry.reason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {importEntries.length > 0 ? (
+                <div className="wiki-import-review-list">
+                  {importEntries.map((entry) => (
+                    <article key={entry.id} className="wiki-import-entry">
+                      <div className="wiki-import-entry-header">
+                        <strong>{entry.sourcePath}</strong>
+                        {entry.localConflict ? <span className="badge">Path exists</span> : <span className="badge">Draft only</span>}
+                      </div>
+                      <label>
+                        Title
+                        <input
+                          className="input"
+                          value={entry.title}
+                          maxLength={300}
+                          onChange={(event) => onImportEntryFieldChange(entry.id, "title", event.target.value)}
+                          disabled={importingPages}
+                        />
+                      </label>
+                      <label>
+                        Slug
+                        <input
+                          className="input"
+                          value={entry.slug}
+                          maxLength={120}
+                          onChange={(event) => onImportEntryFieldChange(entry.id, "slug", event.target.value)}
+                          disabled={importingPages}
+                        />
+                      </label>
+                      <label>
+                        Folder path
+                        <input
+                          className="input"
+                          value={entry.folderPath}
+                          maxLength={300}
+                          onChange={(event) => onImportEntryFieldChange(entry.id, "folderPath", event.target.value)}
+                          placeholder="research/methods"
+                          disabled={importingPages}
+                        />
+                      </label>
+                      <label>
+                        Template type
+                        <input
+                          className="input"
+                          value={entry.templateType}
+                          maxLength={120}
+                          onChange={(event) => onImportEntryFieldChange(entry.id, "templateType", event.target.value)}
+                          placeholder="paper-review"
+                          disabled={importingPages}
+                        />
+                      </label>
+                      <p className="wiki-page-path">/{composeWikiPath(entry.folderPath, slugify(entry.slug) || entry.slug)}</p>
+                      {entry.warnings.length > 0 ? (
+                        <ul className="list">
+                          {entry.warnings.map((warning) => (
+                            <li key={`${entry.id}-${warning}`} className="list-item">
+                              {warning}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="alert alert-info">Choose a folder or a group of Markdown files to prepare the import.</p>
+              )}
+
+              <div className="inline-actions">
+                <button className="button" type="button" onClick={() => void onRunImport()} disabled={importingPages || importEntries.length === 0}>
+                  {importingPages ? "Importing..." : "Create draft-only pages"}
+                </button>
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={() => {
+                    resetImportState();
+                    setImportSummary(null);
+                    setShowImportPanel(false);
+                  }}
+                  disabled={importingPages}
+                >
+                  Close
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          <input
+            ref={importFilesInputRef}
+            type="file"
+            accept=".md,.markdown,image/*"
+            className="hidden-file-input"
+            multiple
+            onChange={(event) => {
+              void onImportSelectionChange(event);
+            }}
+          />
+          <input
+            ref={importFolderInputRef}
+            type="file"
+            accept=".md,.markdown,image/*"
+            className="hidden-file-input"
+            multiple
+            {...({ webkitdirectory: "", directory: "" } as {
+              webkitdirectory: string;
+              directory: string;
+            })}
+            onChange={(event) => {
+              void onImportSelectionChange(event);
+            }}
+          />
+
           {loadingTree ? <p className="alert alert-info">Loading page tree...</p> : null}
 
           {!loadingTree && searchModeActive ? (
@@ -2214,6 +2821,7 @@ export function WikiHub({
             <div>
               <h2 className="section-heading">{pageDetail?.page.title ?? "Wiki page"}</h2>
               {selectedPath ? <p className="wiki-page-path">/{selectedPath}</p> : null}
+              {pageDetail && !pageDetail.published ? <p className="wiki-page-path">Unpublished draft-only page</p> : null}
             </div>
             {pageDetail ? (
               <div className="inline-actions">
@@ -2237,7 +2845,8 @@ export function WikiHub({
                     type="button"
                     className="button button-secondary"
                     onClick={() => void onToggleHistory()}
-                    disabled={deletingPage}
+                    disabled={deletingPage || !pageDetail.published}
+                    title={!pageDetail.published ? "History becomes available after the first publish." : undefined}
                   >
                     {historyOpen ? "Hide history" : "History"}
                   </button>
@@ -2259,9 +2868,19 @@ export function WikiHub({
           {pageDetail && !isEditing && !historyOpen ? (
             <div className="wiki-read-view">
               <div className="wiki-read-meta">
-                <span className="badge">Published revision #{pageDetail.published.revisionNumber}</span>
-                <span>Published at {timeLabel(pageDetail.published.publishedAt)}</span>
-                {pageDetail.published.changeNote ? <span>Note: {pageDetail.published.changeNote}</span> : null}
+                {pageDetail.published ? (
+                  <>
+                    <span className="badge">Published revision #{pageDetail.published.revisionNumber}</span>
+                    <span>Published at {timeLabel(pageDetail.published.publishedAt)}</span>
+                    {pageDetail.published.changeNote ? <span>Note: {pageDetail.published.changeNote}</span> : null}
+                  </>
+                ) : (
+                  <>
+                    <span className="badge">Unpublished</span>
+                    {pageDetail.draft ? <span>Draft updated at {timeLabel(pageDetail.draft.updatedAt)}</span> : null}
+                    {pageDetail.draft ? <span title={pageDetail.draft.updatedBy.email}>By {pageDetail.draft.updatedBy.name}</span> : null}
+                  </>
+                )}
               </div>
               <article className="wiki-markdown">
                 <ReactMarkdown
@@ -2273,7 +2892,7 @@ export function WikiHub({
                     )
                   }}
                 >
-                  {renderedPublishedMarkdown}
+                  {pageDetail.published ? renderedPublishedMarkdown : renderedUnpublishedMarkdown}
                 </ReactMarkdown>
               </article>
 
@@ -2483,7 +3102,7 @@ export function WikiHub({
                 {selectedRevisionPreview ? (
                   <div className="wiki-history-preview-meta">
                     <span className="badge">Revision #{selectedRevisionPreview.revisionNumber}</span>
-                    {pageDetail.published.id === selectedRevisionPreview.id ? <span className="badge">Current</span> : null}
+                    {pageDetail.published?.id === selectedRevisionPreview.id ? <span className="badge">Current</span> : null}
                     <span>{timeLabel(selectedRevisionPreview.publishedAt)}</span>
                     <span title={selectedRevisionPreview.createdBy.email}>By {selectedRevisionPreview.createdBy.name}</span>
                     {selectedRevisionPreview.changeNote ? <span>Note: {selectedRevisionPreview.changeNote}</span> : null}
@@ -2500,7 +3119,7 @@ export function WikiHub({
                     <ul className="wiki-history-list">
                       {revisions.map((revision) => {
                         const isActiveRevision = selectedRevisionId === revision.id;
-                        const isCurrentRevision = pageDetail.published.id === revision.id;
+                        const isCurrentRevision = pageDetail.published?.id === revision.id;
                         return (
                           <li key={revision.id}>
                             <button

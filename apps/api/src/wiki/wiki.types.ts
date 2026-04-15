@@ -10,6 +10,7 @@ export type WikiTreeNode = {
   path: string;
   pageId?: string;
   title?: string;
+  isUnpublished?: boolean;
   hasDraftChanges?: boolean;
   draftUpdatedAt?: string | null;
   draftUpdatedBy?: WikiUserSummary | null;
@@ -74,7 +75,7 @@ export type WikiSearchResult = {
 
 export type WikiPageDetail = {
   page: WikiPageSummary;
-  published: WikiRevisionView;
+  published: WikiRevisionView | null;
   draft?: WikiDraftView;
   outgoingLinks: WikiLinkView[];
   backlinks: WikiBacklinkView[];
