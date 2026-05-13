@@ -1,5 +1,20 @@
 # Implementation TODO (v1 bootstrap)
 
+## Code Tab GitLab Token Refresh Race (2026-05-13)
+- [x] Add per-user single-flight handling for GitLab OAuth refreshes in the API.
+- [x] Reuse the shared refresh path for proactive expiry refresh and retry-after-401 refresh.
+- [x] Add focused GitLab service tests for concurrent refresh and sanitized reconnect errors.
+- [x] Re-run focused Jest, API type-check, and diff hygiene; capture the verification result.
+
+### Review - Code Tab GitLab Token Refresh Race
+- Added a per-user shared refresh promise in `GitlabService` so concurrent repository calls reuse one GitLab OAuth refresh instead of racing the same `refresh_token`.
+- Routed both proactive expiry refresh and retry-after-`401` refresh through the shared path.
+- Sanitized failed OAuth refreshes to `GitLab reconnection required` and mark the connection for reconnection, preventing raw `invalid_grant` from reaching the Code tab.
+- Verification:
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/gitlab/gitlab.service.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `git diff --check` passed
+
 ## Account UX Cleanup - Merge GitLab + SSH (2026-04-15)
 - [x] Merge `GitLab access` and `SSH keys` into one technical panel in the secondary `Account` column.
 - [x] Rework `Current keys` into compact rows with truncating titles, trailing actions, and inline details.

@@ -223,6 +223,8 @@ class GitlabApiError extends Error {
 
 @Injectable()
 export class GitlabService {
+  private readonly refreshConnectionByUserId = new Map<string, Promise<GitLabConnection>>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessService: ProjectAccessService,
@@ -1136,7 +1138,7 @@ export class GitlabService {
           }
 
           hasRetried = true;
-          connection = await this.refreshConnection(connection);
+          connection = await this.refreshConnectionSingleFlight(connection);
           continue;
         }
 
@@ -1176,7 +1178,30 @@ export class GitlabService {
       return connection;
     }
 
-    return this.refreshConnection(connection);
+    return this.refreshConnectionSingleFlight(connection);
+  }
+
+  private async refreshConnectionSingleFlight(connection: GitLabConnection): Promise<GitLabConnection> {
+    const existingRefresh = this.refreshConnectionByUserId.get(connection.userId);
+    if (existingRefresh) {
+      return existingRefresh;
+    }
+
+    const refreshPromise = this.refreshConnection(connection)
+      .catch(async (error) => {
+        if (error instanceof UnauthorizedException) {
+          await this.markReconnectRequired(connection.userId);
+          throw new UnauthorizedException("GitLab reconnection required");
+        }
+
+        throw error;
+      })
+      .finally(() => {
+        this.refreshConnectionByUserId.delete(connection.userId);
+      });
+
+    this.refreshConnectionByUserId.set(connection.userId, refreshPromise);
+    return refreshPromise;
   }
 
   private async refreshConnection(connection: GitLabConnection): Promise<GitLabConnection> {

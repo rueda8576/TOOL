@@ -18,6 +18,7 @@
 
 ## Collaboration preferences
 - After every implemented change, always provide the user with the exact commit message to use.
+- Commit messages must use the conventional `type(scope): subject` format, not a free-form sentence.
 
 ## Tasks UX defaults
 - Task boards should prioritize reading state first: keep create/edit forms collapsed by default and open them explicitly via actions like `New task` or `Edit`.

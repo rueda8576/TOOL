@@ -575,6 +575,111 @@ describe("GitlabService", () => {
     });
   });
 
+  it("shares proactive token refreshes across concurrent user requests", async () => {
+    const service = makeService();
+    const staleConnection = {
+      userId: "user-1",
+      accessTokenEncrypted: encryptValue("expiring-token", process.env.JWT_SECRET!),
+      refreshTokenEncrypted: encryptValue("refresh-token", process.env.JWT_SECRET!),
+      tokenExpiresAt: new Date(Date.now() + 10_000),
+      reconnectRequired: false
+    };
+    const refreshedConnection = {
+      ...staleConnection,
+      accessTokenEncrypted: encryptValue("fresh-token", process.env.JWT_SECRET!),
+      tokenExpiresAt: new Date(Date.now() + 3_600_000)
+    };
+    jest.spyOn(service as any, "requireConnectionRecord").mockResolvedValue(staleConnection);
+    const refreshConnectionSpy = jest.spyOn(service as any, "refreshConnection").mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return refreshedConnection;
+    });
+
+    await expect(
+      Promise.all([
+        (service as any).withUserAccessToken("user-1", async (accessToken: string) => accessToken),
+        (service as any).withUserAccessToken("user-1", async (accessToken: string) => accessToken),
+        (service as any).withUserAccessToken("user-1", async (accessToken: string) => accessToken)
+      ])
+    ).resolves.toEqual(["fresh-token", "fresh-token", "fresh-token"]);
+
+    expect(refreshConnectionSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares retry token refreshes across concurrent GitLab 401 responses", async () => {
+    const service = makeService();
+    const staleConnection = {
+      userId: "user-1",
+      accessTokenEncrypted: encryptValue("expired-token", process.env.JWT_SECRET!),
+      refreshTokenEncrypted: encryptValue("refresh-token", process.env.JWT_SECRET!),
+      tokenExpiresAt: null,
+      reconnectRequired: false
+    };
+    const refreshedConnection = {
+      ...staleConnection,
+      accessTokenEncrypted: encryptValue("fresh-token", process.env.JWT_SECRET!)
+    };
+    jest.spyOn(service as any, "requireConnectionRecord").mockResolvedValue(staleConnection);
+    const refreshConnectionSpy = jest.spyOn(service as any, "refreshConnection").mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return refreshedConnection;
+    });
+    let gitlabRequestCount = 0;
+    fetchSpy.mockImplementation(async () => {
+      gitlabRequestCount += 1;
+      if (gitlabRequestCount <= 3) {
+        return jsonResponse(401, { message: "expired" }) as Response;
+      }
+
+      return jsonResponse(200, [] as unknown[]) as Response;
+    });
+
+    await expect(
+      Promise.all([
+        (service as any).withUserAccessToken("user-1", async (accessToken: string) =>
+          (service as any).executeGitlabRequest(accessToken, "/user/keys?per_page=100")
+        ),
+        (service as any).withUserAccessToken("user-1", async (accessToken: string) =>
+          (service as any).executeGitlabRequest(accessToken, "/user/keys?per_page=100")
+        ),
+        (service as any).withUserAccessToken("user-1", async (accessToken: string) =>
+          (service as any).executeGitlabRequest(accessToken, "/user/keys?per_page=100")
+        )
+      ])
+    ).resolves.toEqual([[], [], []]);
+
+    expect(refreshConnectionSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(6);
+    expect(fetchSpy.mock.calls.slice(0, 3).map((call) => (call[1]?.headers as Record<string, string>).Authorization))
+      .toEqual(["Bearer expired-token", "Bearer expired-token", "Bearer expired-token"]);
+    expect(fetchSpy.mock.calls.slice(3).map((call) => (call[1]?.headers as Record<string, string>).Authorization))
+      .toEqual(["Bearer fresh-token", "Bearer fresh-token", "Bearer fresh-token"]);
+  });
+
+  it("marks reconnect required and hides raw OAuth refresh errors", async () => {
+    const service = makeService();
+    const staleConnection = {
+      userId: "user-1",
+      accessTokenEncrypted: encryptValue("expired-token", process.env.JWT_SECRET!),
+      refreshTokenEncrypted: encryptValue("bad-refresh-token", process.env.JWT_SECRET!),
+      tokenExpiresAt: new Date(Date.now() + 10_000),
+      reconnectRequired: false
+    };
+    const markReconnectRequiredSpy = jest.spyOn(service as any, "markReconnectRequired").mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, "exchangeUserOAuthToken")
+      .mockRejectedValue(new UnauthorizedException("invalid_grant"));
+
+    await expect((service as any).refreshConnectionSingleFlight(staleConnection)).rejects.toEqual(
+      expect.objectContaining({
+        constructor: UnauthorizedException,
+        message: "GitLab reconnection required"
+      })
+    );
+
+    expect(markReconnectRequiredSpy).toHaveBeenCalledWith("user-1");
+  });
+
   it("resolves GitLab user ids from cache, persisted ids, exact email matches, and misses", async () => {
     const service = makeService();
     const cache = new Map<string, string | null>([["cached-user", "88"]]);
