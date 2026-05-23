@@ -417,7 +417,7 @@ export class OidcService {
     const { privateKey, keyId } = this.getOidcKeyPair();
     return this.jwtService.sign(payload, {
       algorithm: "RS256",
-      privateKey,
+      secret: privateKey,
       keyid: keyId,
       issuer: options.issuer,
       audience: options.audience,
@@ -429,7 +429,7 @@ export class OidcService {
     const { publicKey } = this.getOidcKeyPair();
     return this.jwtService.verify<OidcAccessTokenPayload>(token, {
       algorithms: ["RS256"],
-      publicKey: publicKey.export({ type: "spki", format: "pem" }),
+      secret: publicKey.export({ type: "spki", format: "pem" }),
       issuer: this.getIssuerUrl(),
       audience: getEnv().ATLASIUM_OIDC_CLIENT_ID
     });

@@ -154,6 +154,7 @@
 - When frontend API helpers surface Nest error responses, parse structured JSON `message` payloads instead of dumping the raw JSON string; otherwise operators lose the actionable GitLab error behind a generic blob.
 - For Atlasium-managed GitLab, web SSO and CLI Git authentication are different surfaces: Atlasium OIDC should own GitLab web login, but `git clone` UX should default to SSH keys, with HTTPS explicitly documented as a PAT-based fallback.
 - When validating GitLab Omniauth with `omniauth_auto_sign_in_with_provider`, do not require the visible provider label on `/users/sign_in`; GitLab can return a minimal auto-submit page that only references `/users/auth/openid_connect`.
+- When signing RS256 OIDC tokens with Nest `JwtService` in a module that has a global `JWT_SECRET`, pass the RSA key as explicit `secret`; `privateKey` can be shadowed by the module-level secret and fail at runtime.
 
 ## Account security
 - For authenticated password changes that must preserve the current session, have `JwtAuthGuard` persist the validated bearer token onto the request and revoke all other sessions by comparing against that exact token hash; deleting sessions only by `userId` will accidentally sign out the user who initiated the password change.

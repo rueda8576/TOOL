@@ -1,5 +1,19 @@
 # Implementation TODO (v1 bootstrap)
 
+## Production GitLab SSO Token Signing Fix (2026-05-23)
+- [x] Bypass the shared Nest JWT secret when signing/verifying Atlasium OIDC RS256 tokens.
+- [x] Reproduce production by constructing `OidcService` tests with a configured global `JwtService` secret.
+- [x] Assert exchanged OIDC tokens are valid RS256 JWTs with expected issuer/audience and key id.
+- [x] Run focused OIDC tests, API type-check, and diff hygiene; capture verification results.
+
+### Review - Production GitLab SSO Token Signing Fix
+- `OidcService` now passes the OIDC RSA private/public key as explicit `secret` for RS256 sign/verify calls, so the global session `JWT_SECRET` no longer shadows the OIDC key.
+- The OIDC spec now constructs the service with a configured `JwtService({ secret: ... })`, reproducing production module wiring.
+- The token exchange test verifies both `access_token` and `id_token` are RS256 JWTs with the expected `kid`, issuer, audience, and user claims.
+- Verification:
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/auth/oidc.service.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+
 ## Production GitLab SSO Repair (2026-05-22)
 - [x] Diagnose deployed Atlasium/GitLab OIDC configuration on the VPS without printing secrets.
 - [x] Reconcile GitLab Omniauth/OIDC configuration if the running container does not expose Atlasium SSO.

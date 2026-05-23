@@ -3,12 +3,15 @@ import { createHash, generateKeyPairSync } from "crypto";
 
 describe("OidcService", () => {
   const originalEnv = { ...process.env };
-  const { privateKey } = generateKeyPairSync("rsa", {
+  const { privateKey, publicKey } = generateKeyPairSync("rsa", {
     modulusLength: 2048,
     privateKeyEncoding: { type: "pkcs8", format: "pem" },
     publicKeyEncoding: { type: "spki", format: "pem" }
   });
   const redirectUri = "https://git.atlasium.info/users/auth/openid_connect/callback";
+  const decodeJwtHeader = (token: string): Record<string, unknown> => {
+    return JSON.parse(Buffer.from(token.split(".")[0], "base64url").toString("utf8")) as Record<string, unknown>;
+  };
 
   afterEach(() => {
     jest.resetModules();
@@ -46,7 +49,7 @@ describe("OidcService", () => {
     const { OidcService } = await import("./oidc.service");
 
     return {
-      service: new OidcService(prisma, sessionAuthService, new JwtService()),
+      service: new OidcService(prisma, sessionAuthService, new JwtService({ secret: "integration-secret-123" })),
       prisma,
       sessionAuthService
     };
@@ -190,6 +193,29 @@ describe("OidcService", () => {
         id_token: expect.any(String)
       })
     );
+
+    const jwk = service.getJwks().keys[0];
+    const accessToken = tokenResponse.access_token as string;
+    const idToken = tokenResponse.id_token as string;
+    const verifierService = new JwtService();
+    expect(decodeJwtHeader(accessToken)).toEqual(expect.objectContaining({ alg: "RS256", kid: jwk.kid }));
+    expect(decodeJwtHeader(idToken)).toEqual(expect.objectContaining({ alg: "RS256", kid: jwk.kid }));
+    expect(
+      verifierService.verify(accessToken, {
+        algorithms: ["RS256"],
+        secret: publicKey,
+        issuer: "https://atlasium.info/api/auth/oidc",
+        audience: "atlasium-oidc"
+      })
+    ).toEqual(expect.objectContaining({ sub: "user-1", token_use: "userinfo" }));
+    expect(
+      verifierService.verify(idToken, {
+        algorithms: ["RS256"],
+        secret: publicKey,
+        issuer: "https://atlasium.info/api/auth/oidc",
+        audience: "atlasium-oidc"
+      })
+    ).toEqual(expect.objectContaining({ sub: "user-1", nonce: "nonce-1" }));
 
     await expect(
       service.getUserInfo({
