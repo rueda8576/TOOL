@@ -37,6 +37,11 @@ export class GitlabController {
     return this.gitlabService.getRepositoryStatus(projectId, user);
   }
 
+  @Post("projects/:projectId/repository/access/ensure")
+  ensureRepositoryAccess(@Param("projectId") projectId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.gitlabService.ensureCurrentUserRepositoryAccess(projectId, user);
+  }
+
   @Post("projects/:projectId/repository/link")
   @Roles("admin")
   linkRepository(

@@ -1,5 +1,23 @@
 # Implementation TODO (v1 bootstrap)
 
+## Code GitLab OIDC Access Auto-Sync (2026-05-23)
+- [x] Resolve managed GitLab repository members by Atlasium OIDC identity instead of optional GitLab API OAuth connection.
+- [x] Add backend ensure-access action for the Code tab before opening GitLab.
+- [x] Update Code UI to ensure GitLab membership before opening the repository web URL.
+- [x] Reject GitLab API OAuth connections that do not belong to the current Atlasium OIDC identity.
+- [x] Add focused backend/frontend coverage and run verification checks.
+
+### Review - Code GitLab OIDC Access Auto-Sync
+- Managed GitLab repository access now resolves users through `provider=openid_connect` and `extern_uid=<Atlasium user id>` before membership sync.
+- If no OIDC GitLab user exists, Atlasium creates a managed GitLab account with the Atlasium OIDC identity instead of reusing stale OAuth connection metadata.
+- The Code tab now calls `POST /projects/:projectId/repository/access/ensure` before opening GitLab, so the current Atlasium user is added to the managed repository first.
+- GitLab OAuth reconnect now rejects accounts whose OIDC identity does not match the Atlasium user, preventing accidental reconnection to `root`.
+- Verification:
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/gitlab/gitlab.service.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/gitlab.controller.http.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+
 ## Production GitLab SSO Token Signing Fix (2026-05-23)
 - [x] Bypass the shared Nest JWT secret when signing/verifying Atlasium OIDC RS256 tokens.
 - [x] Reproduce production by constructing `OidcService` tests with a configured global `JwtService` secret.

@@ -11,6 +11,7 @@ import {
   createRepositoryBranch,
   createRepositoryMergeRequest,
   downloadRepositoryArchive,
+  ensureProjectRepositoryAccess,
   getGitlabConnectionStatus,
   getProjectRepositoryStatus,
   getRepositoryFile,
@@ -103,6 +104,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [contentLoading, setContentLoading] = useState(false);
   const [mergeRequestsLoading, setMergeRequestsLoading] = useState(false);
   const [downloadingArchive, setDownloadingArchive] = useState(false);
+  const [openingGitlab, setOpeningGitlab] = useState(false);
   const [copiedCloneType, setCopiedCloneType] = useState<"ssh" | "https" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contentError, setContentError] = useState<string | null>(null);
@@ -327,6 +329,27 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     }
   };
 
+  const onOpenInGitlab = async (): Promise<void> => {
+    if (!connectedRepository) return;
+    if (!token) { setError("Missing session token. Please sign in again."); return; }
+
+    setOpeningGitlab(true);
+    setError(null);
+    try {
+      const nextRepository = await ensureProjectRepositoryAccess(params.projectId, token);
+      setRepository(nextRepository);
+      if (!nextRepository.connected) {
+        setError("This project repository is not provisioned yet.");
+        return;
+      }
+      window.open(nextRepository.webUrl, "_blank", "noopener,noreferrer");
+    } catch (openError) {
+      setError((openError as Error).message || "Unable to prepare GitLab repository access.");
+    } finally {
+      setOpeningGitlab(false);
+    }
+  };
+
   const onCreateBranch = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     if (!token) { setError("Missing session token. Please sign in again."); return; }
@@ -491,14 +514,14 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                   </p>
                 </div>
                 <div className="button-row">
-                  <a
+                  <button
                     className="button button-secondary"
-                    href={connectedRepository.webUrl}
-                    target="_blank"
-                    rel="noreferrer"
+                    type="button"
+                    onClick={() => void onOpenInGitlab()}
+                    disabled={openingGitlab}
                   >
-                    Open in GitLab
-                  </a>
+                    {openingGitlab ? "Opening..." : "Open in GitLab"}
+                  </button>
                   <button
                     className="button button-secondary"
                     type="button"

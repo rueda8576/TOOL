@@ -36,6 +36,7 @@ type GitlabCurrentUser = {
   email?: string;
   avatar_url?: string;
   web_url?: string;
+  identities?: GitlabIdentity[];
 };
 
 type GitlabProject = {
@@ -143,6 +144,14 @@ type GitlabUserSearchResult = {
   email?: string;
   public_email?: string | null;
   state?: string;
+  avatar_url?: string;
+  web_url?: string;
+  identities?: GitlabIdentity[];
+};
+
+type GitlabIdentity = {
+  provider: string;
+  extern_uid: string;
 };
 
 type GitlabSshKey = {
@@ -254,6 +263,7 @@ export class GitlabService {
       }
     });
     const gitlabUser = await this.fetchGitlabUser(tokenPayload.access_token);
+    await this.assertGitlabUserMatchesAtlasiumIdentity(userId, gitlabUser);
     const tokenExpiresAt = this.resolveTokenExpiry(tokenPayload);
     const secret = getEnv().JWT_SECRET;
 
@@ -477,6 +487,18 @@ export class GitlabService {
         managed: true
       };
     }
+  }
+
+  async ensureCurrentUserRepositoryAccess(projectId: string, user: AuthenticatedUser): Promise<RepositoryStatus> {
+    await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
+
+    const repository = await this.findRepositoryRecord(projectId);
+    if (!repository) {
+      return { connected: false };
+    }
+
+    await this.syncProjectRepositoryAccess(projectId);
+    return this.getRepositoryStatus(projectId, user);
   }
 
   async provisionManagedRemoteRepository(projectKey: string, projectName: string): Promise<ManagedRepositoryProvision> {
@@ -1661,11 +1683,7 @@ export class GitlabService {
         select: {
           id: true,
           email: true,
-          gitlabConnection: {
-            select: {
-              gitlabUserId: true
-            }
-          }
+          name: true
         }
       }),
       projectDeleted
@@ -1678,12 +1696,8 @@ export class GitlabService {
                 select: {
                   id: true,
                   email: true,
-                  globalRole: true,
-                  gitlabConnection: {
-                    select: {
-                      gitlabUserId: true
-                    }
-                  }
+                  name: true,
+                  globalRole: true
                 }
               },
               role: true
@@ -1702,12 +1716,8 @@ export class GitlabService {
                 select: {
                   id: true,
                   email: true,
-                  globalRole: true,
-                  gitlabConnection: {
-                    select: {
-                      gitlabUserId: true
-                    }
-                  }
+                  name: true,
+                  globalRole: true
                 }
               },
               role: true
@@ -1717,7 +1727,7 @@ export class GitlabService {
 
     for (const admin of admins) {
       const gitlabUserId = await this.resolveGitlabUserId(
-        { id: admin.id, email: admin.email, gitlabUserId: admin.gitlabConnection?.gitlabUserId ?? null },
+        { id: admin.id, email: admin.email, name: admin.name },
         accessToken,
         gitlabUserCache
       );
@@ -1735,7 +1745,7 @@ export class GitlabService {
         {
           id: membership.user.id,
           email: membership.user.email,
-          gitlabUserId: membership.user.gitlabConnection?.gitlabUserId ?? null
+          name: membership.user.name
         },
         accessToken,
         gitlabUserCache
@@ -1755,7 +1765,7 @@ export class GitlabService {
   }
 
   private async resolveGitlabUserId(
-    user: { id: string; email: string; gitlabUserId: string | null },
+    user: { id: string; email: string; name: string },
     accessToken: string,
     cache: Map<string, string | null>
   ): Promise<string | null> {
@@ -1763,9 +1773,11 @@ export class GitlabService {
       return cache.get(user.id) ?? null;
     }
 
-    if (user.gitlabUserId) {
-      cache.set(user.id, user.gitlabUserId);
-      return user.gitlabUserId;
+    const oidcUser = await this.findGitlabUserByAtlasiumIdentity(user.id, accessToken);
+    if (oidcUser) {
+      const gitlabUserId = String(oidcUser.id);
+      cache.set(user.id, gitlabUserId);
+      return gitlabUserId;
     }
 
     const search = new URLSearchParams({
@@ -1779,11 +1791,107 @@ export class GitlabService {
 
     const exact = matches.find((candidate) => {
       const candidateEmail = (candidate.email ?? candidate.public_email ?? "").toLowerCase();
-      return candidateEmail === user.email.toLowerCase();
+      return candidateEmail === user.email.toLowerCase() && this.hasAtlasiumOidcIdentity(candidate, user.id);
     });
 
-    const gitlabUserId = exact ? String(exact.id) : null;
+    const created = exact ?? await this.createManagedOidcUser(user, accessToken);
+    const gitlabUserId = String(created.id);
     cache.set(user.id, gitlabUserId);
     return gitlabUserId;
+  }
+
+  private async assertGitlabUserMatchesAtlasiumIdentity(userId: string, gitlabUser: GitlabCurrentUser): Promise<void> {
+    if (this.hasAtlasiumOidcIdentity(gitlabUser, userId)) {
+      return;
+    }
+
+    const matchedUser = await this.withSystemAccessToken((accessToken) =>
+      this.findGitlabUserByAtlasiumIdentity(userId, accessToken)
+    );
+    if (matchedUser && String(matchedUser.id) === String(gitlabUser.id)) {
+      return;
+    }
+
+    throw new BadRequestException(
+      "Connected GitLab account does not match this Atlasium user. Sign in to GitLab through Atlasium SSO, then reconnect."
+    );
+  }
+
+  private hasAtlasiumOidcIdentity(
+    user: { identities?: GitlabIdentity[] },
+    atlasiumUserId: string
+  ): boolean {
+    return user.identities?.some((identity) =>
+      identity.provider === "openid_connect" && identity.extern_uid === atlasiumUserId
+    ) ?? false;
+  }
+
+  private async findGitlabUserByAtlasiumIdentity(
+    atlasiumUserId: string,
+    accessToken: string
+  ): Promise<GitlabUserSearchResult | null> {
+    const search = new URLSearchParams({
+      extern_uid: atlasiumUserId,
+      provider: "openid_connect"
+    });
+    const matches = await this.executeGitlabRequest<GitlabUserSearchResult[]>(
+      accessToken,
+      `/users?${search.toString()}`
+    );
+
+    return matches.find((candidate) => this.hasAtlasiumOidcIdentity(candidate, atlasiumUserId)) ?? matches[0] ?? null;
+  }
+
+  private async createManagedOidcUser(
+    user: { id: string; email: string; name: string },
+    accessToken: string
+  ): Promise<GitlabUserSearchResult> {
+    const baseUsername = this.buildManagedGitlabUsername(user);
+    const candidateUsernames = [
+      baseUsername,
+      `${baseUsername}-${user.id.slice(0, 8).toLowerCase()}`
+    ];
+
+    let lastError: unknown = null;
+    for (const username of candidateUsernames) {
+      try {
+        return await this.executeGitlabRequest<GitlabUserSearchResult>(
+          accessToken,
+          "/users",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              username,
+              name: user.name,
+              email: user.email,
+              provider: "openid_connect",
+              extern_uid: user.id,
+              skip_confirmation: true,
+              force_random_password: true,
+              can_create_group: false,
+              projects_limit: 0
+            })
+          }
+        );
+      } catch (error) {
+        lastError = error;
+        if (!(error instanceof GitlabApiError) || ![400, 409].includes(error.status)) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new BadGatewayException("Unable to create GitLab user");
+  }
+
+  private buildManagedGitlabUsername(user: { id: string; email: string }): string {
+    const localPart = user.email.split("@")[0] || user.id;
+    const normalized = localPart
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "");
+
+    return normalized || `atlasium-${user.id.slice(0, 8).toLowerCase()}`;
   }
 }

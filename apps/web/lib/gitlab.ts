@@ -174,6 +174,15 @@ export async function getProjectRepositoryStatus(projectId: string, token: strin
   return authFetch<ProjectRepositoryStatus>(`/projects/${projectId}/repository`, { token });
 }
 
+export async function ensureProjectRepositoryAccess(projectId: string, token: string): Promise<ProjectRepositoryStatus> {
+  return authFetch<ProjectRepositoryStatus>(`/projects/${projectId}/repository/access/ensure`, {
+    token,
+    init: {
+      method: "POST"
+    }
+  });
+}
+
 export async function createProjectRepository(
   projectId: string,
   token: string,

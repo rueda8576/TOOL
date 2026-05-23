@@ -13,6 +13,7 @@ describe("GitlabController HTTP", () => {
     gitlabService = {
       searchProjects: jest.fn(),
       getRepositoryStatus: jest.fn(),
+      ensureCurrentUserRepositoryAccess: jest.fn(),
       linkRepository: jest.fn(),
       createRepository: jest.fn(),
       disconnectRepository: jest.fn(),
@@ -78,8 +79,23 @@ describe("GitlabController HTTP", () => {
       .expect(400);
   });
 
-  it("binds repository status, link, create, disconnect, branch-list, and tree routes", async () => {
+  it("binds repository status, ensure-access, link, create, disconnect, branch-list, and tree routes", async () => {
     gitlabService.getRepositoryStatus.mockResolvedValue({
+      connected: true,
+      gitlabProjectId: "123",
+      name: "Navigation",
+      webUrl: "https://git.atlasium.info/atlasium/nav",
+      sshCloneUrl: "git@git.atlasium.info:atlasium/nav.git",
+      httpCloneUrl: "https://git.atlasium.info/atlasium/nav.git",
+      pathWithNamespace: "atlasium/nav",
+      defaultBranch: "main",
+      visibility: "private",
+      lastActivityAt: "2026-04-06T12:00:00.000Z",
+      connectedAt: "2026-04-06T12:00:00.000Z",
+      connectedByUserId: "admin-1",
+      managed: true
+    });
+    gitlabService.ensureCurrentUserRepositoryAccess.mockResolvedValue({
       connected: true,
       gitlabProjectId: "123",
       name: "Navigation",
@@ -108,6 +124,11 @@ describe("GitlabController HTTP", () => {
       .get("/projects/project-1/repository")
       .set(authHeaders("reader", { userId: "reader-1" }))
       .expect(200);
+
+    const ensureAccessResponse = await request(app.getHttpServer())
+      .post("/projects/project-1/repository/access/ensure")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(201);
 
     await request(app.getHttpServer())
       .post("/projects/project-1/repository/link")
@@ -138,6 +159,14 @@ describe("GitlabController HTTP", () => {
       .expect(200);
 
     expect(gitlabService.getRepositoryStatus).toHaveBeenCalledWith(
+      "project-1",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      }
+    );
+    expect(gitlabService.ensureCurrentUserRepositoryAccess).toHaveBeenCalledWith(
       "project-1",
       {
         userId: "reader-1",
@@ -190,6 +219,7 @@ describe("GitlabController HTTP", () => {
       }
     );
     expect(statusResponse.body.gitlabProjectId).toBe("123");
+    expect(ensureAccessResponse.body.gitlabProjectId).toBe("123");
     expect(branchesResponse.body[0].name).toBe("main");
     expect(treeResponse.body.entries[0].path).toBe("src/index.ts");
   });

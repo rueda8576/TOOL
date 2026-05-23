@@ -155,7 +155,8 @@ describe("GitlabService", () => {
       name: "Luis",
       email: "luis@example.com",
       avatar_url: "https://git.atlasium.info/avatar.png",
-      web_url: "https://git.atlasium.info/luis"
+      web_url: "https://git.atlasium.info/luis",
+      identities: [{ provider: "openid_connect", extern_uid: "user-1" }]
     });
     prisma.gitLabConnection.findUnique.mockResolvedValue({
       username: "luis",
@@ -191,6 +192,33 @@ describe("GitlabService", () => {
           reconnectRequired: false
         })
       })
+    );
+  });
+
+  it("rejects GitLab OAuth connections that do not match the Atlasium OIDC identity", async () => {
+    const { service } = makeServiceWithDeps();
+    jest.spyOn(service as any, "exchangeUserOAuthToken").mockResolvedValue({
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      expires_in: 3600,
+      scope: "api read_user"
+    });
+    jest.spyOn(service as any, "fetchGitlabUser").mockResolvedValue({
+      id: 1,
+      username: "root",
+      name: "Root",
+      email: "root@git.atlasium.info",
+      identities: []
+    });
+    fetchSpy.mockResolvedValueOnce(jsonResponse(200, []) as Response);
+
+    await expect(service.exchangeAuthorizationCode("user-1", "code-123")).rejects.toMatchObject({
+      constructor: BadRequestException,
+      message: "Connected GitLab account does not match this Atlasium user. Sign in to GitLab through Atlasium SSO, then reconnect."
+    });
+
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      "https://git.atlasium.info/api/v4/users?extern_uid=user-1&provider=openid_connect"
     );
   });
 
@@ -680,7 +708,7 @@ describe("GitlabService", () => {
     expect(markReconnectRequiredSpy).toHaveBeenCalledWith("user-1");
   });
 
-  it("resolves GitLab user ids from cache, persisted ids, exact email matches, and misses", async () => {
+  it("resolves GitLab user ids from OIDC identity, linked email fallback, creation, and cache", async () => {
     const service = makeService();
     const cache = new Map<string, string | null>([["cached-user", "88"]]);
 
@@ -689,36 +717,49 @@ describe("GitlabService", () => {
         {
           id: "cached-user",
           email: "cached@example.com",
-          gitlabUserId: null
+          name: "Cached User"
         },
         "system-token",
         cache
       )
     ).resolves.toBe("88");
 
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(200, [
+        {
+          id: 77,
+          email: "persisted@example.com",
+          identities: [{ provider: "openid_connect", extern_uid: "persisted-user" }]
+        }
+      ]) as Response
+    );
+
     await expect(
       (service as any).resolveGitlabUserId(
         {
           id: "persisted-user",
           email: "persisted@example.com",
-          gitlabUserId: "77"
+          name: "Persisted User"
         },
         "system-token",
         cache
       )
     ).resolves.toBe("77");
 
+    fetchSpy.mockResolvedValueOnce(jsonResponse(200, []) as Response);
     fetchSpy.mockResolvedValueOnce(
       jsonResponse(200, [
         {
           id: 7,
           email: "editor@example.com",
-          public_email: null
+          public_email: null,
+          identities: [{ provider: "openid_connect", extern_uid: "lookup-user" }]
         },
         {
           id: 8,
           email: "other@example.com",
-          public_email: null
+          public_email: null,
+          identities: [{ provider: "openid_connect", extern_uid: "other-user" }]
         }
       ]) as Response
     );
@@ -728,21 +769,30 @@ describe("GitlabService", () => {
         {
           id: "lookup-user",
           email: "editor@example.com",
-          gitlabUserId: null
+          name: "Editor User"
         },
         "system-token",
         cache
       )
     ).resolves.toBe("7");
 
+    fetchSpy.mockResolvedValueOnce(jsonResponse(200, []) as Response);
     fetchSpy.mockResolvedValueOnce(
       jsonResponse(200, [
         {
           id: 9,
-          email: "another@example.com",
-          public_email: null
+          email: "missing@example.com",
+          public_email: null,
+          identities: []
         }
       ]) as Response
+    );
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(201, {
+        id: 10,
+        username: "missing",
+        email: "missing@example.com"
+      }) as Response
     );
 
     await expect(
@@ -750,12 +800,31 @@ describe("GitlabService", () => {
         {
           id: "missing-user",
           email: "missing@example.com",
-          gitlabUserId: null
+          name: "Missing User"
         },
         "system-token",
         cache
       )
-    ).resolves.toBeNull();
+    ).resolves.toBe("10");
+
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      "https://git.atlasium.info/api/v4/users?extern_uid=persisted-user&provider=openid_connect"
+    );
+    expect(fetchSpy.mock.calls[5]?.[0]).toBe("https://git.atlasium.info/api/v4/users");
+    expect(fetchSpy.mock.calls[5]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        username: "missing",
+        name: "Missing User",
+        email: "missing@example.com",
+        provider: "openid_connect",
+        extern_uid: "missing-user",
+        skip_confirmation: true,
+        force_random_password: true,
+        can_create_group: false,
+        projects_limit: 0
+      })
+    });
   });
 
   it("builds desired project members for admins, editors, readers, and unresolved GitLab identities", async () => {
@@ -771,9 +840,7 @@ describe("GitlabService", () => {
         {
           id: "admin-1",
           email: "admin@example.com",
-          gitlabConnection: {
-            gitlabUserId: "1"
-          }
+          name: "Admin One"
         }
       ],
       [
@@ -781,10 +848,8 @@ describe("GitlabService", () => {
           user: {
             id: "editor-1",
             email: "editor@example.com",
-            globalRole: "EDITOR",
-            gitlabConnection: {
-              gitlabUserId: null
-            }
+            name: "Editor One",
+            globalRole: "EDITOR"
           },
           role: "EDITOR"
         },
@@ -792,10 +857,8 @@ describe("GitlabService", () => {
           user: {
             id: "reader-1",
             email: "reader@example.com",
-            globalRole: "READER",
-            gitlabConnection: {
-              gitlabUserId: null
-            }
+            name: "Reader One",
+            globalRole: "READER"
           },
           role: "READER"
         },
@@ -803,10 +866,8 @@ describe("GitlabService", () => {
           user: {
             id: "admin-2",
             email: "admin2@example.com",
-            globalRole: "ADMIN",
-            gitlabConnection: {
-              gitlabUserId: "2"
-            }
+            name: "Admin Two",
+            globalRole: "ADMIN"
           },
           role: "EDITOR"
         }
@@ -906,6 +967,37 @@ describe("GitlabService", () => {
         access_level: 40
       })
     });
+  });
+
+  it("ensures the current user's repository access before returning status", async () => {
+    const service = makeService();
+    const syncSpy = jest.spyOn(service, "syncProjectRepositoryAccess").mockResolvedValue(undefined);
+    const statusSpy = jest.spyOn(service, "getRepositoryStatus").mockResolvedValue({
+      connected: true,
+      gitlabProjectId: "123",
+      name: "Navigation",
+      description: null,
+      webUrl: "https://git.atlasium.info/atlasium/nav",
+      sshCloneUrl: "git@git.atlasium.info:atlasium/nav.git",
+      httpCloneUrl: "https://git.atlasium.info/atlasium/nav.git",
+      pathWithNamespace: "atlasium/nav",
+      defaultBranch: "main",
+      visibility: "private",
+      lastActivityAt: "2026-04-06T12:00:00.000Z",
+      connectedAt: "2026-04-06T12:00:00.000Z",
+      connectedByUserId: "admin-1",
+      managed: true
+    });
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+
+    const user = { userId: "reader-1", email: "reader@example.com", globalRole: "reader" as const };
+    await expect(service.ensureCurrentUserRepositoryAccess("project-1", user)).resolves.toMatchObject({
+      connected: true,
+      gitlabProjectId: "123"
+    });
+
+    expect(syncSpy).toHaveBeenCalledWith("project-1");
+    expect(statusSpy).toHaveBeenCalledWith("project-1", user);
   });
 
   it("updates an existing direct project member when the direct access is too low", async () => {
