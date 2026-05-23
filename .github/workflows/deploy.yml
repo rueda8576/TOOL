@@ -29,16 +29,29 @@ concurrency:
 
 jobs:
   build-and-push:
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.vars.outputs.image_tag }}
       deploy_sha: ${{ steps.vars.outputs.deploy_sha }}
     steps:
       - name: Checkout commit from successful CI run
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
+          repository: ${{ github.event.workflow_run.head_repository.full_name }}
           ref: ${{ github.event.workflow_run.head_sha }}
+          token: ${{ github.token }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate checked out CI commit
+        run: |
+          set -euo pipefail
+          EXPECTED_SHA="${{ github.event.workflow_run.head_sha }}"
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          echo "Expected CI SHA: ${EXPECTED_SHA}"
+          echo "Checked out SHA: ${ACTUAL_SHA}"
+          test "${ACTUAL_SHA}" = "${EXPECTED_SHA}"
 
       - name: Compute deploy metadata
         id: vars
@@ -114,7 +127,7 @@ jobs:
           docker run --rm "${WEB_IMAGE}:${IMAGE_TAG}" node -e "require('./apps/web/node_modules/next/package.json')"
 
   deploy-auto:
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:

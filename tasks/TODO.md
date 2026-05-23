@@ -1,5 +1,21 @@
 # Implementation TODO (v1 bootstrap)
 
+## Deploy Checkout Auth Fix (2026-05-23)
+- [x] Align deploy checkout with CI checkout runtime and explicit workflow-run SHA authentication.
+- [x] Restrict automatic deploy promotion to successful CI runs from the same repository on `main`.
+- [x] Validate the checked-out commit matches the successful CI run SHA before building/pushing images.
+- [x] Run workflow lint and diff hygiene checks.
+
+### Review - Deploy Checkout Auth Fix
+- `build-and-push` now uses `actions/checkout@v6` with explicit workflow-run repository, SHA, token, shallow fetch, and non-persisted credentials.
+- Automatic deploy jobs now require the successful CI run to come from the same repository on `main`, avoiding fork/cross-repo promotion.
+- The workflow validates `git rev-parse HEAD` against the successful CI SHA before publishing images.
+- Verification:
+  - `npx --yes github-actionlint@latest .github/workflows/deploy.yml` passed
+  - `npx --yes node-actionlint@latest .github/workflows/deploy.yml` passed
+  - `git diff --check` passed
+  - `npx --yes actionlint@latest .github/workflows/deploy.yml` could not run because the npm package does not expose an executable binary
+
 ## Code GitLab OIDC Access Auto-Sync (2026-05-23)
 - [x] Resolve managed GitLab repository members by Atlasium OIDC identity instead of optional GitLab API OAuth connection.
 - [x] Add backend ensure-access action for the Code tab before opening GitLab.

@@ -113,6 +113,7 @@
 ## CI/CD deployment model
 - Prefer registry-based deploys (GHCR images + immutable `sha-*` tags) over SCP-ing source code and rebuilding on VPS; it is more deterministic and avoids server-specific build drift.
 - For automatic promotion to production, trigger deploy from successful CI completion (`workflow_run`) on `main` so CD cannot bypass failed tests/builds.
+- For `workflow_run` promotion checkouts, make the checkout explicit (`repository`, `ref`, `token`) and validate `HEAD` against `workflow_run.head_sha` before publishing images; implicit checkout defaults can fail authentication or fetch the wrong source.
 - In containerized deploy pipelines, run migrations from a container that contains the Prisma schema/migrations artifacts, not from ad-hoc host state.
 - In GitHub Actions, do not pin `pnpm/action-setup` version if `package.json` already defines `packageManager`; duplicate version sources can fail CI with `ERR_PNPM_BAD_PM_VERSION`.
 - In CI, force install of dev dependencies (`pnpm install --prod=false`) before running tests to avoid hidden `NODE_ENV=production` behavior that drops tools like `jest`.
