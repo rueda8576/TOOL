@@ -10,6 +10,7 @@ import {
   getCurrentAccountProfile,
   getNotificationPreferences,
   NotificationPreferences,
+  syncGitlabHttpsPassword,
   updateAccountNotificationPreferences
 } from "../../lib/account";
 import {
@@ -116,6 +117,11 @@ export default function AccountPage(): JSX.Element {
   const [sshSuccess, setSshSuccess] = useState<string | null>(null);
   const [expandedSshKeyIds, setExpandedSshKeyIds] = useState<number[]>([]);
   const [isSshFormOpen, setIsSshFormOpen] = useState(false);
+  const [httpsClonePassword, setHttpsClonePassword] = useState("");
+  const [httpsCloneSubmitting, setHttpsCloneSubmitting] = useState(false);
+  const [httpsCloneUsername, setHttpsCloneUsername] = useState<string | null>(null);
+  const [httpsCloneError, setHttpsCloneError] = useState<string | null>(null);
+  const [httpsCloneSuccess, setHttpsCloneSuccess] = useState<string | null>(null);
 
   const handleAuthFailure = useCallback(
     (message: string): boolean => {
@@ -443,6 +449,32 @@ export default function AccountPage(): JSX.Element {
       }
     } finally {
       setCreatingSshKey(false);
+    }
+  };
+
+  const onSyncGitlabHttpsPassword = async (): Promise<void> => {
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+
+    setHttpsCloneSubmitting(true);
+    setHttpsCloneError(null);
+    setHttpsCloneSuccess(null);
+    try {
+      const result = await syncGitlabHttpsPassword(token, {
+        currentPassword: httpsClonePassword
+      });
+      setHttpsClonePassword("");
+      setHttpsCloneUsername(result.username);
+      setHttpsCloneSuccess(`HTTPS clone password enabled. Use username ${result.username} and your Atlasium password.`);
+    } catch (syncError) {
+      const message = (syncError as Error).message || "Unable to enable HTTPS clone password.";
+      if (!handleAuthFailure(message)) {
+        setHttpsCloneError(message);
+      }
+    } finally {
+      setHttpsCloneSubmitting(false);
     }
   };
 
@@ -787,7 +819,7 @@ export default function AccountPage(): JSX.Element {
             <div className="stack-xs">
               <p className="eyebrow">GitLab & SSH access</p>
               <h2 className="section-heading">Repository access</h2>
-              <p>GitLab web sign-in uses Atlasium SSO. Connect GitLab API access here, then manage SSH keys for Atlasium `Code` browsing, branch creation, merge requests, and CLI clone.</p>
+              <p>GitLab web sign-in uses Atlasium SSO. Connect GitLab API access here, then manage SSH keys and HTTPS clone access for Atlasium Code.</p>
             </div>
 
             <div className="account-tech-block stack-md">
@@ -847,16 +879,11 @@ export default function AccountPage(): JSX.Element {
                 <div className="stack-xs">
                   <p className="eyebrow">SSH keys</p>
                   <h3 className="section-heading">CLI Git access</h3>
-                  <p>Atlasium manages GitLab SSH keys here so `Code` can use SSH as the primary clone method. HTTPS can use Git Credential Manager browser login with Atlasium SSO; PAT remains the fallback.</p>
+                  <p>Atlasium manages GitLab SSH keys here so Code can use SSH as the primary clone method. HTTPS can use your GitLab username and Atlasium password after enablement below; PAT remains the fallback.</p>
                   <p className="text-muted">
                     Recommended command:{" "}
                     <code className="account-ssh-hint">ssh-keygen -t ed25519 -C "{connection?.email || profile?.email || "your-email"}"</code>
                   </p>
-                  <div className="account-gcm-hint stack-xxs">
-                    <p className="account-ssh-meta-label">Windows HTTPS setup</p>
-                    <code className="account-ssh-hint">git config --global credential.git.atlasium.info.provider gitlab</code>
-                    <code className="account-ssh-hint">git config --global credential.gitLabAuthModes browser</code>
-                  </div>
                 </div>
 
                 {canManageSshKeys ? (
@@ -988,6 +1015,50 @@ export default function AccountPage(): JSX.Element {
                   ) : null}
                 </>
               ) : null}
+            </div>
+
+            <div className="account-tech-block stack-md">
+              <div className="stack-xs">
+                <p className="eyebrow">HTTPS clone</p>
+                <h3 className="section-heading">Enable Atlasium password for Git</h3>
+                <p>Enter your current Atlasium password once to sync it to your linked GitLab account for Git over HTTPS. Web sign-in still uses Atlasium SSO.</p>
+              </div>
+
+              {httpsCloneError ? <p className="alert alert-error">{httpsCloneError}</p> : null}
+              {httpsCloneSuccess ? <p className="alert alert-success">{httpsCloneSuccess}</p> : null}
+
+              <form
+                className="stack-sm"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void onSyncGitlabHttpsPassword();
+                }}
+              >
+                <label>
+                  Current Atlasium password
+                  <input
+                    className="input"
+                    type="password"
+                    value={httpsClonePassword}
+                    onChange={(event) => setHttpsClonePassword(event.target.value)}
+                    autoComplete="current-password"
+                  />
+                </label>
+                <div className="button-row">
+                  <button className="button" type="submit" disabled={httpsCloneSubmitting || httpsClonePassword.length < 8}>
+                    {httpsCloneSubmitting ? "Enabling..." : "Enable HTTPS password"}
+                  </button>
+                </div>
+              </form>
+
+              <div className="account-git-https-hint stack-xxs">
+                <p className="account-ssh-meta-label">Windows HTTPS clone</p>
+                <p className="text-muted">
+                  Username: <strong>{httpsCloneUsername || connection?.username || "your GitLab username"}</strong>
+                </p>
+                <code className="account-ssh-hint">{`@"\nprotocol=https\nhost=git.atlasium.info\n\n"@ | git credential-manager erase`}</code>
+                <code className="account-ssh-hint">git clone https://{httpsCloneUsername || connection?.username || "username"}@git.atlasium.info/atlasium/nav.git</code>
+              </div>
             </div>
           </section>
         </div>

@@ -21,6 +21,7 @@ describe("AuthController HTTP", () => {
       getGitlabConnectionStatus: jest.fn(),
       beginGitlabConnect: jest.fn(),
       disconnectGitlabConnection: jest.fn(),
+      syncGitlabHttpsPassword: jest.fn(),
       listGitlabSshKeys: jest.fn(),
       createGitlabSshKey: jest.fn(),
       deleteGitlabSshKey: jest.fn(),
@@ -223,6 +224,49 @@ describe("AuthController HTTP", () => {
       }
     );
     expect(response.body).toEqual({ changed: true });
+  });
+
+  it("returns 401 when GitLab HTTPS password sync is called without authentication", async () => {
+    await request(app.getHttpServer())
+      .post("/auth/gitlab/https-password")
+      .send({ currentPassword: "password-123" })
+      .expect(401);
+  });
+
+  it("returns 400 for malformed GitLab HTTPS password sync payloads", async () => {
+    await request(app.getHttpServer())
+      .post("/auth/gitlab/https-password")
+      .set(authHeaders("editor"))
+      .send({ currentPassword: "short" })
+      .expect(400);
+  });
+
+  it("syncs the current user's GitLab HTTPS password", async () => {
+    authService.syncGitlabHttpsPassword.mockResolvedValue({
+      enabled: true,
+      username: "luisjrc"
+    });
+
+    const response = await request(app.getHttpServer())
+      .post("/auth/gitlab/https-password")
+      .set(authHeaders("editor", { userId: "user-1", email: "luis@example.com" }))
+      .send({ currentPassword: "password-123" })
+      .expect(201);
+
+    expect(authService.syncGitlabHttpsPassword).toHaveBeenCalledWith(
+      {
+        userId: "user-1",
+        email: "luis@example.com",
+        globalRole: "editor"
+      },
+      {
+        currentPassword: "password-123"
+      }
+    );
+    expect(response.body).toEqual({
+      enabled: true,
+      username: "luisjrc"
+    });
   });
 
   it("serves OIDC discovery metadata and redirects authorize requests", async () => {

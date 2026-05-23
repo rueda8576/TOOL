@@ -63,7 +63,8 @@ describe("AuthService", () => {
       listUserSshKeys: jest.fn(),
       createUserSshKey: jest.fn(),
       deleteUserSshKey: jest.fn(),
-      syncProjectRepositoryAccess: jest.fn()
+      syncProjectRepositoryAccess: jest.fn(),
+      syncUserHttpsPassword: jest.fn()
     };
 
     return {
@@ -313,12 +314,15 @@ describe("AuthService", () => {
   });
 
   it("changes the password and revokes all other sessions", async () => {
-    const { service, prisma, auditService } = makeService();
+    const { service, prisma, auditService, gitlabService } = makeService();
     const currentPassword = "password-123";
     prisma.user.findFirst.mockResolvedValue({
       id: "user-1",
+      email: "user@example.com",
+      name: "User One",
       passwordHash: await bcrypt.hash(currentPassword, 10)
     });
+    gitlabService.syncUserHttpsPassword.mockResolvedValue({ username: "user" });
     prisma.user.update.mockResolvedValue({ id: "user-1" });
     prisma.session.deleteMany.mockResolvedValue({ count: 3 });
 
@@ -336,6 +340,14 @@ describe("AuthService", () => {
       }
     );
 
+    expect(gitlabService.syncUserHttpsPassword).toHaveBeenCalledWith(
+      {
+        id: "user-1",
+        email: "user@example.com",
+        name: "User One"
+      },
+      "new-password-456"
+    );
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: {
         id: "user-1"
@@ -362,9 +374,11 @@ describe("AuthService", () => {
   });
 
   it("rejects password change when the current password is wrong", async () => {
-    const { service, prisma } = makeService();
+    const { service, prisma, gitlabService } = makeService();
     prisma.user.findFirst.mockResolvedValue({
       id: "user-1",
+      email: "user@example.com",
+      name: "User One",
       passwordHash: await bcrypt.hash("password-123", 10)
     });
 
@@ -383,6 +397,8 @@ describe("AuthService", () => {
         }
       )
     ).rejects.toThrow("Current password is incorrect");
+
+    expect(gitlabService.syncUserHttpsPassword).not.toHaveBeenCalled();
   });
 
   it("rejects password change when confirmation does not match", async () => {
@@ -406,9 +422,11 @@ describe("AuthService", () => {
   });
 
   it("rejects password change when the new password matches the current one", async () => {
-    const { service, prisma } = makeService();
+    const { service, prisma, gitlabService } = makeService();
     prisma.user.findFirst.mockResolvedValue({
       id: "user-1",
+      email: "user@example.com",
+      name: "User One",
       passwordHash: await bcrypt.hash("password-123", 10)
     });
 
@@ -427,6 +445,105 @@ describe("AuthService", () => {
         }
       )
     ).rejects.toThrow("New password must be different from the current password");
+
+    expect(gitlabService.syncUserHttpsPassword).not.toHaveBeenCalled();
+  });
+
+  it("aborts password change when GitLab HTTPS password sync fails", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      name: "User One",
+      passwordHash: await bcrypt.hash("password-123", 10)
+    });
+    gitlabService.syncUserHttpsPassword.mockRejectedValue(new Error("GitLab unavailable"));
+
+    await expect(
+      service.changePassword(
+        {
+          userId: "user-1",
+          email: "user@example.com",
+          globalRole: "editor"
+        },
+        "current-session-token",
+        {
+          currentPassword: "password-123",
+          newPassword: "new-password-456",
+          confirmPassword: "new-password-456"
+        }
+      )
+    ).rejects.toThrow("GitLab unavailable");
+
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.session.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("syncs the current Atlasium password into GitLab for HTTPS clone", async () => {
+    const { service, prisma, auditService, gitlabService } = makeService();
+    const currentPassword = "password-123";
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      name: "User One",
+      passwordHash: await bcrypt.hash(currentPassword, 10)
+    });
+    gitlabService.syncUserHttpsPassword.mockResolvedValue({ username: "user" });
+
+    await expect(
+      service.syncGitlabHttpsPassword(
+        {
+          userId: "user-1",
+          email: "user@example.com",
+          globalRole: "editor"
+        },
+        { currentPassword }
+      )
+    ).resolves.toEqual({
+      enabled: true,
+      username: "user"
+    });
+
+    expect(gitlabService.syncUserHttpsPassword).toHaveBeenCalledWith(
+      {
+        id: "user-1",
+        email: "user@example.com",
+        name: "User One"
+      },
+      currentPassword
+    );
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "user-1",
+      entityType: "gitlab_https_password",
+      entityId: "user-1",
+      action: "auth.gitlab.https_password.sync",
+      metadata: {
+        username: "user"
+      }
+    });
+  });
+
+  it("rejects GitLab HTTPS password sync when the current password is wrong", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      name: "User One",
+      passwordHash: await bcrypt.hash("password-123", 10)
+    });
+
+    await expect(
+      service.syncGitlabHttpsPassword(
+        {
+          userId: "user-1",
+          email: "user@example.com",
+          globalRole: "editor"
+        },
+        { currentPassword: "wrong-password" }
+      )
+    ).rejects.toThrow("Current password is incorrect");
+
+    expect(gitlabService.syncUserHttpsPassword).not.toHaveBeenCalled();
   });
 
   it("rejects all-projects invite payload when project-specific assignments are provided", async () => {

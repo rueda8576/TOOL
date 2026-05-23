@@ -820,9 +820,112 @@ describe("GitlabService", () => {
         provider: "openid_connect",
         extern_uid: "missing-user",
         skip_confirmation: true,
-        force_random_password: true,
         can_create_group: false,
-        projects_limit: 0
+        projects_limit: 0,
+        force_random_password: true
+      })
+    });
+  });
+
+  it("syncs the Atlasium password into an existing OIDC GitLab user for HTTPS clone", async () => {
+    const service = makeService();
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(200, { password_authentication_enabled_for_git: false }) as Response)
+      .mockResolvedValueOnce(jsonResponse(200, { password_authentication_enabled_for_git: true }) as Response)
+      .mockResolvedValueOnce(
+        jsonResponse(200, [
+          {
+            id: 7,
+            username: "luisjrc",
+            name: "Luis",
+            email: "luis@example.com",
+            identities: [{ provider: "openid_connect", extern_uid: "atlasium-user-1" }]
+          }
+        ]) as Response
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          id: 7,
+          username: "luisjrc",
+          name: "Luis",
+          email: "luis@example.com"
+        }) as Response
+      );
+
+    await expect(
+      service.syncUserHttpsPassword(
+        {
+          id: "atlasium-user-1",
+          email: "luis@example.com",
+          name: "Luis"
+        },
+        "atlasium-password-123"
+      )
+    ).resolves.toEqual({ username: "luisjrc" });
+
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://git.atlasium.info/api/v4/application/settings");
+    expect(fetchSpy.mock.calls[1]?.[0]).toBe("https://git.atlasium.info/api/v4/application/settings");
+    expect(fetchSpy.mock.calls[1]?.[1]).toMatchObject({
+      method: "PUT",
+      body: JSON.stringify({
+        password_authentication_enabled_for_git: true
+      })
+    });
+    expect(fetchSpy.mock.calls[2]?.[0]).toBe(
+      "https://git.atlasium.info/api/v4/users?extern_uid=atlasium-user-1&provider=openid_connect"
+    );
+    expect(fetchSpy.mock.calls[3]?.[0]).toBe("https://git.atlasium.info/api/v4/users/7");
+    expect(fetchSpy.mock.calls[3]?.[1]).toMatchObject({
+      method: "PUT",
+      body: JSON.stringify({
+        password: "atlasium-password-123",
+        skip_reconfirmation: true
+      })
+    });
+  });
+
+  it("creates a managed OIDC GitLab user with the Atlasium password when HTTPS clone is enabled first", async () => {
+    const service = makeService();
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(200, { password_authentication_enabled_for_git: true }) as Response)
+      .mockResolvedValueOnce(jsonResponse(200, []) as Response)
+      .mockResolvedValueOnce(
+        jsonResponse(201, {
+          id: 10,
+          username: "new-user",
+          name: "New User",
+          email: "new.user@example.com"
+        }) as Response
+      );
+
+    await expect(
+      service.syncUserHttpsPassword(
+        {
+          id: "new-user-id",
+          email: "new.user@example.com",
+          name: "New User"
+        },
+        "atlasium-password-123"
+      )
+    ).resolves.toEqual({ username: "new-user" });
+
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://git.atlasium.info/api/v4/application/settings");
+    expect(fetchSpy.mock.calls[1]?.[0]).toBe(
+      "https://git.atlasium.info/api/v4/users?extern_uid=new-user-id&provider=openid_connect"
+    );
+    expect(fetchSpy.mock.calls[2]?.[0]).toBe("https://git.atlasium.info/api/v4/users");
+    expect(fetchSpy.mock.calls[2]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        username: "new.user",
+        name: "New User",
+        email: "new.user@example.com",
+        provider: "openid_connect",
+        extern_uid: "new-user-id",
+        skip_confirmation: true,
+        can_create_group: false,
+        projects_limit: 0,
+        password: "atlasium-password-123"
       })
     });
   });

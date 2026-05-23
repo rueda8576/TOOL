@@ -23,6 +23,15 @@ export type ChangePasswordPayload = {
   confirmPassword: string;
 };
 
+export type SyncGitlabHttpsPasswordPayload = {
+  currentPassword: string;
+};
+
+export type GitlabHttpsPasswordStatus = {
+  enabled: true;
+  username: string;
+};
+
 export async function getCurrentAccountProfile(token: string): Promise<AccountProfile> {
   return authFetch<AccountProfile>("/auth/me", { token });
 }
@@ -32,6 +41,19 @@ export async function changeAccountPassword(
   payload: ChangePasswordPayload
 ): Promise<{ changed: true }> {
   return authFetch<{ changed: true }>("/auth/password/change", {
+    token,
+    init: {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }
+  });
+}
+
+export async function syncGitlabHttpsPassword(
+  token: string,
+  payload: SyncGitlabHttpsPasswordPayload
+): Promise<GitlabHttpsPasswordStatus> {
+  return authFetch<GitlabHttpsPasswordStatus>("/auth/gitlab/https-password", {
     token,
     init: {
       method: "POST",

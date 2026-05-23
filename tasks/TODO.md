@@ -1,5 +1,24 @@
 # Implementation TODO (v1 bootstrap)
 
+## HTTPS Clone with Atlasium Password Sync (2026-05-23)
+- [x] Add authenticated backend action to sync the current Atlasium password into the OIDC-linked GitLab user for Git over HTTPS.
+- [x] Sync GitLab local password during Atlasium password changes, aborting if GitLab cannot be updated.
+- [x] Update Account and Code UI to explain username + Atlasium password HTTPS clone after enablement.
+- [x] Update runbook and lessons with the accepted password-sync tradeoff.
+- [x] Add focused backend tests and run type-check/diff verification.
+
+### Review - HTTPS Clone with Atlasium Password Sync
+- Added `POST /auth/gitlab/https-password`, validating the current Atlasium password before syncing it to the OIDC-linked GitLab user.
+- GitLab password sync resolves users through `provider=openid_connect` and `extern_uid=<Atlasium user id>`, creates the OIDC user when missing, and ensures `password_authentication_enabled_for_git=true`.
+- Atlasium password changes now sync the new password to GitLab before updating the local Atlasium hash, so a GitLab sync failure aborts the change.
+- Account and Code now describe HTTPS clone as GitLab username plus Atlasium password after enablement, while keeping SSH recommended and PAT as fallback.
+- Verification:
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/gitlab/gitlab.service.spec.ts src/auth/auth.service.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/auth.controller.http.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `git diff --check` passed
+
 ## HTTPS Clone via Git Credential Manager (2026-05-23)
 - [x] Document Windows Git Credential Manager browser/OAuth configuration for `git.atlasium.info`.
 - [x] Update the Code HTTPS clone guidance to point users at Atlasium browser login through GCM.

@@ -154,6 +154,10 @@ type GitlabIdentity = {
   extern_uid: string;
 };
 
+type GitlabApplicationSettings = {
+  password_authentication_enabled_for_git?: boolean;
+};
+
 type GitlabSshKey = {
   id: number;
   title: string;
@@ -357,6 +361,28 @@ export class GitlabService {
       avatarUrl: connection.avatarUrl,
       webUrl: connection.webUrl
     };
+  }
+
+  async syncUserHttpsPassword(
+    user: { id: string; email: string; name: string },
+    password: string
+  ): Promise<{ username: string }> {
+    return this.withSystemAccessToken(async (accessToken) => {
+      try {
+        await this.ensureGitPasswordAuthenticationEnabled(accessToken);
+
+        const existingUser = await this.findGitlabUserByAtlasiumIdentity(user.id, accessToken);
+        const gitlabUser = existingUser
+          ? await this.updateManagedOidcUserPassword(existingUser.id, password, accessToken)
+          : await this.createManagedOidcUser(user, accessToken, password);
+
+        return {
+          username: gitlabUser.username
+        };
+      } catch (error) {
+        throw this.mapHttpsPasswordSyncError(error);
+      }
+    });
   }
 
   async listUserSshKeys(userId: string): Promise<Array<{
@@ -1407,6 +1433,22 @@ export class GitlabService {
     return error instanceof Error ? error : new BadGatewayException("GitLab SSH key request failed");
   }
 
+  private mapHttpsPasswordSyncError(error: unknown): Error {
+    if (error instanceof GitlabApiError) {
+      if (error.status === 401 || error.status === 403) {
+        return new ServiceUnavailableException("Atlasium GitLab system token is not authorized");
+      }
+      if (error.status >= 500) {
+        return new BadGatewayException("GitLab is currently unavailable");
+      }
+      return new BadRequestException(
+        this.extractGitlabErrorMessage(error.responseBody, "Unable to sync GitLab HTTPS password")
+      );
+    }
+
+    return error instanceof Error ? error : new BadGatewayException("Unable to sync GitLab HTTPS password");
+  }
+
   private ensureGlobalAdmin(user: AuthenticatedUser): void {
     if (user.globalRole !== "admin") {
       throw new ForbiddenException("Only admins can manage project repositories");
@@ -1844,7 +1886,8 @@ export class GitlabService {
 
   private async createManagedOidcUser(
     user: { id: string; email: string; name: string },
-    accessToken: string
+    accessToken: string,
+    password?: string
   ): Promise<GitlabUserSearchResult> {
     const baseUsername = this.buildManagedGitlabUsername(user);
     const candidateUsernames = [
@@ -1867,9 +1910,9 @@ export class GitlabService {
               provider: "openid_connect",
               extern_uid: user.id,
               skip_confirmation: true,
-              force_random_password: true,
               can_create_group: false,
-              projects_limit: 0
+              projects_limit: 0,
+              ...(password ? { password } : { force_random_password: true })
             })
           }
         );
@@ -1882,6 +1925,46 @@ export class GitlabService {
     }
 
     throw lastError instanceof Error ? lastError : new BadGatewayException("Unable to create GitLab user");
+  }
+
+  private async ensureGitPasswordAuthenticationEnabled(accessToken: string): Promise<void> {
+    const settings = await this.executeGitlabRequest<GitlabApplicationSettings>(
+      accessToken,
+      "/application/settings"
+    );
+
+    if (settings.password_authentication_enabled_for_git === true) {
+      return;
+    }
+
+    await this.executeGitlabRequest<GitlabApplicationSettings>(
+      accessToken,
+      "/application/settings",
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          password_authentication_enabled_for_git: true
+        })
+      }
+    );
+  }
+
+  private async updateManagedOidcUserPassword(
+    gitlabUserId: number,
+    password: string,
+    accessToken: string
+  ): Promise<GitlabUserSearchResult> {
+    return this.executeGitlabRequest<GitlabUserSearchResult>(
+      accessToken,
+      `/users/${encodeURIComponent(String(gitlabUserId))}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          password,
+          skip_reconfirmation: true
+        })
+      }
+    );
   }
 
   private buildManagedGitlabUsername(user: { id: string; email: string }): string {

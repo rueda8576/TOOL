@@ -17,6 +17,7 @@ import { CreateGitlabSshKeyDto } from "./dto/create-gitlab-ssh-key.dto";
 import { InviteDto } from "./dto/invite.dto";
 import { LoginDto } from "./dto/login.dto";
 import { PasswordResetDto } from "./dto/password-reset.dto";
+import { SyncGitlabHttpsPasswordDto } from "./dto/sync-gitlab-https-password.dto";
 
 const escapeHtml = (value: string): string =>
   value
@@ -432,6 +433,8 @@ export class AuthService {
       },
       select: {
         id: true,
+        email: true,
+        name: true,
         passwordHash: true
       }
     });
@@ -449,6 +452,15 @@ export class AuthService {
     if (reusesCurrentPassword) {
       throw new BadRequestException("New password must be different from the current password");
     }
+
+    await this.gitlabService.syncUserHttpsPassword(
+      {
+        id: activeUser.id,
+        email: activeUser.email,
+        name: activeUser.name
+      },
+      dto.newPassword
+    );
 
     await this.prisma.user.update({
       where: {
@@ -476,6 +488,58 @@ export class AuthService {
     });
 
     return { changed: true };
+  }
+
+  async syncGitlabHttpsPassword(
+    user: AuthenticatedUser,
+    dto: SyncGitlabHttpsPasswordDto
+  ): Promise<{ enabled: true; username: string }> {
+    const activeUser = await this.prisma.user.findFirst({
+      where: {
+        id: user.userId,
+        deletedAt: null,
+        isActive: true
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        passwordHash: true
+      }
+    });
+
+    if (!activeUser) {
+      throw new UnauthorizedException("Session expired");
+    }
+
+    const validCurrentPassword = await bcrypt.compare(dto.currentPassword, activeUser.passwordHash);
+    if (!validCurrentPassword) {
+      throw new BadRequestException("Current password is incorrect");
+    }
+
+    const result = await this.gitlabService.syncUserHttpsPassword(
+      {
+        id: activeUser.id,
+        email: activeUser.email,
+        name: activeUser.name
+      },
+      dto.currentPassword
+    );
+
+    await this.auditService.log({
+      userId: activeUser.id,
+      entityType: "gitlab_https_password",
+      entityId: activeUser.id,
+      action: "auth.gitlab.https_password.sync",
+      metadata: {
+        username: result.username
+      }
+    });
+
+    return {
+      enabled: true,
+      username: result.username
+    };
   }
 
   async getGitlabConnectionStatus(user: AuthenticatedUser): Promise<{

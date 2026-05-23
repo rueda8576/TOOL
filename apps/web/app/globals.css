@@ -3237,10 +3237,15 @@ body.wiki-layout-dragging * {
 .account-ssh-hint {
   display: block;
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .account-gcm-hint {
+  padding-top: 0.25rem;
+}
+
+.account-git-https-hint {
   padding-top: 0.25rem;
 }
 

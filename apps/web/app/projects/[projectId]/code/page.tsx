@@ -509,13 +509,13 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     </button>
                   </div>
                   <p className="text-muted" style={{ fontSize: "0.78rem" }}>
-                    SSH recommended. HTTPS can use Git Credential Manager browser login with Atlasium SSO; PAT remains the fallback.{" "}
-                    <Link href="/account">Manage SSH keys →</Link>
+                    SSH recommended. HTTPS can use your GitLab username and Atlasium password after enablement; PAT remains the fallback.{" "}
+                    <Link href="/account">Manage Git access →</Link>
                   </p>
                   <div className="code-https-help">
-                    <p className="eyebrow">Windows HTTPS setup</p>
-                    <code>git config --global credential.git.atlasium.info.provider gitlab</code>
-                    <code>git config --global credential.gitLabAuthModes browser</code>
+                    <p className="eyebrow">Windows HTTPS login</p>
+                    <code>{`git clone ${connectedRepository.httpCloneUrl.replace("https://", "https://<gitlab-username>@")}`}</code>
+                    <code>Enter your Atlasium password in Git Credential Manager</code>
                   </div>
                 </div>
                 <div className="button-row">

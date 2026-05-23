@@ -15,6 +15,7 @@ import { InviteDto } from "./dto/invite.dto";
 import { LoginDto } from "./dto/login.dto";
 import { OidcService } from "./oidc.service";
 import { PasswordResetDto } from "./dto/password-reset.dto";
+import { SyncGitlabHttpsPasswordDto } from "./dto/sync-gitlab-https-password.dto";
 import { AuthService } from "./auth.service";
 
 @Controller("auth")
@@ -139,6 +140,15 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   disconnectGitlabConnection(@CurrentUser() user: AuthenticatedUser): Promise<{ disconnected: true }> {
     return this.authService.disconnectGitlabConnection(user);
+  }
+
+  @Post("gitlab/https-password")
+  @UseGuards(JwtAuthGuard)
+  syncGitlabHttpsPassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SyncGitlabHttpsPasswordDto
+  ): Promise<{ enabled: true; username: string }> {
+    return this.authService.syncGitlabHttpsPassword(user, dto);
   }
 
   @Get("gitlab/ssh-keys")
