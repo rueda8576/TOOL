@@ -17,6 +17,7 @@ describe("AuthController HTTP", () => {
       acceptInvite: jest.fn(),
       requestPasswordReset: jest.fn(),
       getCurrentUserProfile: jest.fn(),
+      updateUsername: jest.fn(),
       changePassword: jest.fn(),
       getGitlabConnectionStatus: jest.fn(),
       beginGitlabConnect: jest.fn(),
@@ -77,6 +78,7 @@ describe("AuthController HTTP", () => {
       user: {
         id: "user-1",
         email: "user@example.com",
+        username: "user",
         name: "User",
         globalRole: "editor"
       }
@@ -98,6 +100,7 @@ describe("AuthController HTTP", () => {
       user: {
         id: "user-1",
         email: "user@example.com",
+        username: "user",
         name: "User",
         globalRole: "editor"
       }
@@ -151,6 +154,7 @@ describe("AuthController HTTP", () => {
       id: "user-1",
       name: "Account User",
       email: "user@example.com",
+      username: "account",
       globalRole: "editor",
       timezone: "Europe/Madrid"
     });
@@ -169,6 +173,43 @@ describe("AuthController HTTP", () => {
       id: "user-1",
       name: "Account User",
       email: "user@example.com",
+      username: "account",
+      globalRole: "editor",
+      timezone: "Europe/Madrid"
+    });
+  });
+
+  it("updates the authenticated user's username", async () => {
+    authService.updateUsername.mockResolvedValue({
+      id: "user-1",
+      name: "Account User",
+      email: "user@example.com",
+      username: "new-user",
+      globalRole: "editor",
+      timezone: "Europe/Madrid"
+    });
+
+    const response = await request(app.getHttpServer())
+      .patch("/auth/me/username")
+      .set(authHeaders("editor", { userId: "user-1", email: "user@example.com" }))
+      .send({ username: "new-user" })
+      .expect(200);
+
+    expect(authService.updateUsername).toHaveBeenCalledWith(
+      {
+        userId: "user-1",
+        email: "user@example.com",
+        globalRole: "editor"
+      },
+      {
+        username: "new-user"
+      }
+    );
+    expect(response.body).toEqual({
+      id: "user-1",
+      name: "Account User",
+      email: "user@example.com",
+      username: "new-user",
       globalRole: "editor",
       timezone: "Europe/Madrid"
     });

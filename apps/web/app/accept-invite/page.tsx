@@ -20,6 +20,7 @@ function AcceptInviteForm(): JSX.Element {
 
   const [token, setToken] = useState(tokenFromQuery);
   const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,8 +37,13 @@ function AcceptInviteForm(): JSX.Element {
 
     const trimmedToken = token.trim();
     const trimmedName = name.trim();
-    if (!trimmedToken || !trimmedName || password.length < 8) {
-      setError("Token, name, and password (min 8 characters) are required.");
+    const trimmedUsername = username.trim().toLowerCase();
+    if (!trimmedToken || !trimmedName || !trimmedUsername || password.length < 8) {
+      setError("Token, name, username, and password (min 8 characters) are required.");
+      return;
+    }
+    if (!/^[a-z0-9](?:[a-z0-9._-]{0,30}[a-z0-9])?$/.test(trimmedUsername)) {
+      setError("Username must be 2-32 lowercase letters, numbers, dots, underscores, or hyphens, and start and end with a letter or number.");
       return;
     }
 
@@ -54,6 +60,7 @@ function AcceptInviteForm(): JSX.Element {
         body: JSON.stringify({
           token: trimmedToken,
           name: trimmedName,
+          username: trimmedUsername,
           password
         })
       });
@@ -103,6 +110,20 @@ function AcceptInviteForm(): JSX.Element {
           <label>
             Full name
             <input className="input" value={name} onChange={(event) => setName(event.target.value)} required autoComplete="name" />
+          </label>
+
+          <label>
+            Username
+            <input
+              className="input"
+              value={username}
+              onChange={(event) => setUsername(event.target.value.toLowerCase())}
+              minLength={2}
+              maxLength={32}
+              required
+              autoComplete="username"
+              spellCheck={false}
+            />
           </label>
 
           <label>

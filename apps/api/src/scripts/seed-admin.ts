@@ -14,11 +14,20 @@ async function main(): Promise<void> {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
+  const username = email
+    .split("@")[0]
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "")
+    .slice(0, 32)
+    .replace(/[^a-z0-9]+$/g, "") || "admin";
 
   const user = await prisma.user.upsert({
     where: { email: email.toLowerCase() },
     create: {
       email: email.toLowerCase(),
+      username: username.length >= 2 ? username : "admin",
       name,
       passwordHash,
       globalRole: GlobalRole.ADMIN
@@ -33,6 +42,7 @@ async function main(): Promise<void> {
     select: {
       id: true,
       email: true,
+      username: true,
       globalRole: true
     }
   });
@@ -45,7 +55,7 @@ async function main(): Promise<void> {
 
   await prisma.$disconnect();
 
-  console.log(`Admin seeded: ${user.email} (${user.globalRole})`);
+  console.log(`Admin seeded: ${user.email} / ${user.username} (${user.globalRole})`);
 }
 
 main().catch((error) => {

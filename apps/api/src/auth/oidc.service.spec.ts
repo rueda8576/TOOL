@@ -154,6 +154,7 @@ describe("OidcService", () => {
       user: {
         id: "user-1",
         email: "user@example.com",
+        username: "user",
         name: "User One",
         deletedAt: null,
         isActive: true
@@ -162,6 +163,7 @@ describe("OidcService", () => {
     prisma.user.findFirst.mockResolvedValue({
       id: "user-1",
       email: "user@example.com",
+      username: "user",
       name: "User One"
     });
 
@@ -228,7 +230,7 @@ describe("OidcService", () => {
       email: "user@example.com",
       email_verified: true,
       name: "User One",
-      preferred_username: "user@example.com"
+      preferred_username: "user"
     });
   });
 
@@ -243,6 +245,7 @@ describe("OidcService", () => {
       user: {
         id: "user-1",
         email: "user@example.com",
+        username: "user",
         name: "User One",
         deletedAt: null,
         isActive: true

@@ -78,10 +78,15 @@ describe("GitlabService", () => {
         upsert: jest.fn(),
         findUnique: jest.fn(),
         delete: jest.fn(),
-        update: jest.fn()
+        update: jest.fn(),
+        updateMany: jest.fn()
       },
       project: {
         findFirst: jest.fn()
+      },
+      user: {
+        findFirst: jest.fn(),
+        findMany: jest.fn()
       },
       projectRepository: {
         findUnique: jest.fn(),
@@ -143,6 +148,12 @@ describe("GitlabService", () => {
 
   it("exchanges an authorization code, upserts the connection, and returns connection status", async () => {
     const { service, prisma } = makeServiceWithDeps();
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      email: "luis@example.com",
+      name: "Luis",
+      username: "luis"
+    });
     jest.spyOn(service as any, "exchangeUserOAuthToken").mockResolvedValue({
       access_token: "access-token",
       refresh_token: "refresh-token",
@@ -158,6 +169,29 @@ describe("GitlabService", () => {
       web_url: "https://git.atlasium.info/luis",
       identities: [{ provider: "openid_connect", extern_uid: "user-1" }]
     });
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse(200, [
+          {
+            id: 7,
+            username: "luis",
+            name: "Luis",
+            email: "luis@example.com",
+            avatar_url: "https://git.atlasium.info/avatar.png",
+            web_url: "https://git.atlasium.info/luis",
+            identities: [{ provider: "openid_connect", extern_uid: "user-1" }]
+          }
+        ]) as Response
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, [
+          {
+            id: 7,
+            username: "luis",
+            identities: [{ provider: "openid_connect", extern_uid: "user-1" }]
+          }
+        ]) as Response
+      );
     prisma.gitLabConnection.findUnique.mockResolvedValue({
       username: "luis",
       name: "Luis",
@@ -196,7 +230,13 @@ describe("GitlabService", () => {
   });
 
   it("rejects GitLab OAuth connections that do not match the Atlasium OIDC identity", async () => {
-    const { service } = makeServiceWithDeps();
+    const { service, prisma } = makeServiceWithDeps();
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      name: "User",
+      username: "user"
+    });
     jest.spyOn(service as any, "exchangeUserOAuthToken").mockResolvedValue({
       access_token: "access-token",
       refresh_token: "refresh-token",
@@ -708,7 +748,7 @@ describe("GitlabService", () => {
     expect(markReconnectRequiredSpy).toHaveBeenCalledWith("user-1");
   });
 
-  it("resolves GitLab user ids from OIDC identity, linked email fallback, creation, and cache", async () => {
+  it("resolves GitLab user ids from OIDC identity, username sync, creation, and cache", async () => {
     const service = makeService();
     const cache = new Map<string, string | null>([["cached-user", "88"]]);
 
@@ -717,6 +757,7 @@ describe("GitlabService", () => {
         {
           id: "cached-user",
           email: "cached@example.com",
+          username: "cached",
           name: "Cached User"
         },
         "system-token",
@@ -728,10 +769,20 @@ describe("GitlabService", () => {
       jsonResponse(200, [
         {
           id: 77,
+          username: "old-persisted",
           email: "persisted@example.com",
           identities: [{ provider: "openid_connect", extern_uid: "persisted-user" }]
         }
       ]) as Response
+    );
+    fetchSpy.mockResolvedValueOnce(jsonResponse(200, []) as Response);
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(200, {
+        id: 77,
+        username: "persisted",
+        email: "persisted@example.com",
+        identities: [{ provider: "openid_connect", extern_uid: "persisted-user" }]
+      }) as Response
     );
 
     await expect(
@@ -739,6 +790,7 @@ describe("GitlabService", () => {
         {
           id: "persisted-user",
           email: "persisted@example.com",
+          username: "persisted",
           name: "Persisted User"
         },
         "system-token",
@@ -747,46 +799,7 @@ describe("GitlabService", () => {
     ).resolves.toBe("77");
 
     fetchSpy.mockResolvedValueOnce(jsonResponse(200, []) as Response);
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse(200, [
-        {
-          id: 7,
-          email: "editor@example.com",
-          public_email: null,
-          identities: [{ provider: "openid_connect", extern_uid: "lookup-user" }]
-        },
-        {
-          id: 8,
-          email: "other@example.com",
-          public_email: null,
-          identities: [{ provider: "openid_connect", extern_uid: "other-user" }]
-        }
-      ]) as Response
-    );
-
-    await expect(
-      (service as any).resolveGitlabUserId(
-        {
-          id: "lookup-user",
-          email: "editor@example.com",
-          name: "Editor User"
-        },
-        "system-token",
-        cache
-      )
-    ).resolves.toBe("7");
-
     fetchSpy.mockResolvedValueOnce(jsonResponse(200, []) as Response);
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse(200, [
-        {
-          id: 9,
-          email: "missing@example.com",
-          public_email: null,
-          identities: []
-        }
-      ]) as Response
-    );
     fetchSpy.mockResolvedValueOnce(
       jsonResponse(201, {
         id: 10,
@@ -800,6 +813,7 @@ describe("GitlabService", () => {
         {
           id: "missing-user",
           email: "missing@example.com",
+          username: "missing",
           name: "Missing User"
         },
         "system-token",
@@ -810,6 +824,14 @@ describe("GitlabService", () => {
     expect(fetchSpy.mock.calls[0]?.[0]).toBe(
       "https://git.atlasium.info/api/v4/users?extern_uid=persisted-user&provider=openid_connect"
     );
+    expect(fetchSpy.mock.calls[1]?.[0]).toBe("https://git.atlasium.info/api/v4/users?username=persisted");
+    expect(fetchSpy.mock.calls[2]?.[0]).toBe("https://git.atlasium.info/api/v4/users/77");
+    expect(fetchSpy.mock.calls[2]?.[1]).toMatchObject({
+      method: "PUT",
+      body: JSON.stringify({
+        username: "persisted"
+      })
+    });
     expect(fetchSpy.mock.calls[5]?.[0]).toBe("https://git.atlasium.info/api/v4/users");
     expect(fetchSpy.mock.calls[5]?.[1]).toMatchObject({
       method: "POST",
@@ -843,6 +865,7 @@ describe("GitlabService", () => {
           }
         ]) as Response
       )
+      .mockResolvedValueOnce(jsonResponse(200, []) as Response)
       .mockResolvedValueOnce(
         jsonResponse(200, {
           id: 7,
@@ -857,6 +880,7 @@ describe("GitlabService", () => {
         {
           id: "atlasium-user-1",
           email: "luis@example.com",
+          username: "luisjrc",
           name: "Luis"
         },
         "atlasium-password-123"
@@ -874,8 +898,9 @@ describe("GitlabService", () => {
     expect(fetchSpy.mock.calls[2]?.[0]).toBe(
       "https://git.atlasium.info/api/v4/users?extern_uid=atlasium-user-1&provider=openid_connect"
     );
-    expect(fetchSpy.mock.calls[3]?.[0]).toBe("https://git.atlasium.info/api/v4/users/7");
-    expect(fetchSpy.mock.calls[3]?.[1]).toMatchObject({
+    expect(fetchSpy.mock.calls[3]?.[0]).toBe("https://git.atlasium.info/api/v4/users?username=luisjrc");
+    expect(fetchSpy.mock.calls[4]?.[0]).toBe("https://git.atlasium.info/api/v4/users/7");
+    expect(fetchSpy.mock.calls[4]?.[1]).toMatchObject({
       method: "PUT",
       body: JSON.stringify({
         password: "atlasium-password-123",
@@ -888,6 +913,7 @@ describe("GitlabService", () => {
     const service = makeService();
     fetchSpy
       .mockResolvedValueOnce(jsonResponse(200, { password_authentication_enabled_for_git: true }) as Response)
+      .mockResolvedValueOnce(jsonResponse(200, []) as Response)
       .mockResolvedValueOnce(jsonResponse(200, []) as Response)
       .mockResolvedValueOnce(
         jsonResponse(201, {
@@ -903,6 +929,7 @@ describe("GitlabService", () => {
         {
           id: "new-user-id",
           email: "new.user@example.com",
+          username: "new-user",
           name: "New User"
         },
         "atlasium-password-123"
@@ -913,11 +940,12 @@ describe("GitlabService", () => {
     expect(fetchSpy.mock.calls[1]?.[0]).toBe(
       "https://git.atlasium.info/api/v4/users?extern_uid=new-user-id&provider=openid_connect"
     );
-    expect(fetchSpy.mock.calls[2]?.[0]).toBe("https://git.atlasium.info/api/v4/users");
-    expect(fetchSpy.mock.calls[2]?.[1]).toMatchObject({
+    expect(fetchSpy.mock.calls[2]?.[0]).toBe("https://git.atlasium.info/api/v4/users?username=new-user");
+    expect(fetchSpy.mock.calls[3]?.[0]).toBe("https://git.atlasium.info/api/v4/users");
+    expect(fetchSpy.mock.calls[3]?.[1]).toMatchObject({
       method: "POST",
       body: JSON.stringify({
-        username: "new.user",
+        username: "new-user",
         name: "New User",
         email: "new.user@example.com",
         provider: "openid_connect",
@@ -928,6 +956,33 @@ describe("GitlabService", () => {
         password: "atlasium-password-123"
       })
     });
+  });
+
+  it("rejects managed GitLab username conflicts instead of silently suffixing", async () => {
+    const service = makeService();
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(200, []) as Response)
+      .mockResolvedValueOnce(
+        jsonResponse(200, [
+          {
+            id: 4,
+            username: "taken",
+            name: "Taken User",
+            identities: []
+          }
+        ]) as Response
+      );
+
+    await expect(
+      service.syncManagedUserIdentity({
+        id: "atlasium-user-1",
+        email: "user@example.com",
+        username: "taken",
+        name: "User One"
+      })
+    ).rejects.toThrow("GitLab username is already in use");
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("builds desired project members for admins, editors, readers, and unresolved GitLab identities", async () => {

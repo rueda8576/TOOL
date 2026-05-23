@@ -64,6 +64,7 @@ describe("AuthService", () => {
       createUserSshKey: jest.fn(),
       deleteUserSshKey: jest.fn(),
       syncProjectRepositoryAccess: jest.fn(),
+      syncManagedUserIdentity: jest.fn(),
       syncUserHttpsPassword: jest.fn()
     };
 
@@ -158,6 +159,7 @@ describe("AuthService", () => {
     prisma.user.findFirst.mockResolvedValue({
       id: "user-1",
       email: "user@example.com",
+      username: "user",
       name: "Example User",
       globalRole: GlobalRole.EDITOR,
       passwordHash: await bcrypt.hash(password, 10)
@@ -171,7 +173,10 @@ describe("AuthService", () => {
 
     expect(prisma.user.findFirst).toHaveBeenCalledWith({
       where: {
-        email: "user@example.com",
+        OR: [
+          { email: "user@example.com" },
+          { username: "user@example.com" }
+        ],
         deletedAt: null,
         isActive: true
       }
@@ -201,10 +206,37 @@ describe("AuthService", () => {
       user: {
         id: "user-1",
         email: "user@example.com",
+        username: "user",
         name: "Example User",
         globalRole: "editor"
       }
     });
+  });
+
+  it("logs in with a username identifier", async () => {
+    const { service, prisma } = makeService();
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      username: "luisjrc",
+      name: "Example User",
+      globalRole: GlobalRole.EDITOR,
+      passwordHash: await bcrypt.hash("password-123", 10)
+    });
+    prisma.session.create.mockResolvedValue({});
+
+    await expect(
+      service.login({
+        email: "luisjrc",
+        password: "password-123"
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        user: expect.objectContaining({
+          username: "luisjrc"
+        })
+      })
+    );
   });
 
   it("rejects login when the password is invalid", async () => {
@@ -280,6 +312,7 @@ describe("AuthService", () => {
       id: "user-7",
       name: "Profile User",
       email: "profile@example.com",
+      username: "profile",
       globalRole: GlobalRole.ADMIN,
       timezone: "Europe/Madrid"
     });
@@ -300,6 +333,7 @@ describe("AuthService", () => {
         id: true,
         name: true,
         email: true,
+        username: true,
         globalRole: true,
         timezone: true
       }
@@ -308,9 +342,95 @@ describe("AuthService", () => {
       id: "user-7",
       name: "Profile User",
       email: "profile@example.com",
+      username: "profile",
       globalRole: "admin",
       timezone: "Europe/Madrid"
     });
+  });
+
+  it("updates the current username and syncs the linked GitLab user", async () => {
+    const { service, prisma, gitlabService, auditService } = makeService();
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      username: "old-user",
+      name: "User One",
+      globalRole: GlobalRole.EDITOR,
+      timezone: "Europe/Madrid"
+    });
+    prisma.user.findUnique.mockResolvedValue(null);
+    gitlabService.syncManagedUserIdentity.mockResolvedValue({ username: "new-user" });
+    prisma.user.update.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      username: "new-user",
+      name: "User One",
+      globalRole: GlobalRole.EDITOR,
+      timezone: "Europe/Madrid"
+    });
+
+    await expect(
+      service.updateUsername(
+        {
+          userId: "user-1",
+          email: "user@example.com",
+          globalRole: "editor"
+        },
+        { username: "New-User" }
+      )
+    ).resolves.toEqual({
+      id: "user-1",
+      email: "user@example.com",
+      username: "new-user",
+      name: "User One",
+      globalRole: "editor",
+      timezone: "Europe/Madrid"
+    });
+
+    expect(gitlabService.syncManagedUserIdentity).toHaveBeenCalledWith({
+      id: "user-1",
+      email: "user@example.com",
+      name: "User One",
+      username: "new-user"
+    });
+    expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        username: "new-user"
+      }
+    }));
+    expect(auditService.log).toHaveBeenCalledWith(expect.objectContaining({
+      action: "auth.username.update",
+      metadata: {
+        previousUsername: "old-user",
+        username: "new-user"
+      }
+    }));
+  });
+
+  it("rejects username updates when the username is already used", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      username: "old-user",
+      name: "User One",
+      globalRole: GlobalRole.EDITOR,
+      timezone: "Europe/Madrid"
+    });
+    prisma.user.findUnique.mockResolvedValue({ id: "user-2" });
+
+    await expect(
+      service.updateUsername(
+        {
+          userId: "user-1",
+          email: "user@example.com",
+          globalRole: "editor"
+        },
+        { username: "taken" }
+      )
+    ).rejects.toThrow("Username is already in use");
+
+    expect(gitlabService.syncManagedUserIdentity).not.toHaveBeenCalled();
   });
 
   it("changes the password and revokes all other sessions", async () => {
@@ -319,6 +439,7 @@ describe("AuthService", () => {
     prisma.user.findFirst.mockResolvedValue({
       id: "user-1",
       email: "user@example.com",
+      username: "user",
       name: "User One",
       passwordHash: await bcrypt.hash(currentPassword, 10)
     });
@@ -344,6 +465,7 @@ describe("AuthService", () => {
       {
         id: "user-1",
         email: "user@example.com",
+        username: "user",
         name: "User One"
       },
       "new-password-456"
@@ -378,6 +500,7 @@ describe("AuthService", () => {
     prisma.user.findFirst.mockResolvedValue({
       id: "user-1",
       email: "user@example.com",
+      username: "user",
       name: "User One",
       passwordHash: await bcrypt.hash("password-123", 10)
     });
@@ -426,6 +549,7 @@ describe("AuthService", () => {
     prisma.user.findFirst.mockResolvedValue({
       id: "user-1",
       email: "user@example.com",
+      username: "user",
       name: "User One",
       passwordHash: await bcrypt.hash("password-123", 10)
     });
@@ -454,6 +578,7 @@ describe("AuthService", () => {
     prisma.user.findFirst.mockResolvedValue({
       id: "user-1",
       email: "user@example.com",
+      username: "user",
       name: "User One",
       passwordHash: await bcrypt.hash("password-123", 10)
     });
@@ -485,6 +610,7 @@ describe("AuthService", () => {
     prisma.user.findFirst.mockResolvedValue({
       id: "user-1",
       email: "user@example.com",
+      username: "user",
       name: "User One",
       passwordHash: await bcrypt.hash(currentPassword, 10)
     });
@@ -508,6 +634,7 @@ describe("AuthService", () => {
       {
         id: "user-1",
         email: "user@example.com",
+        username: "user",
         name: "User One"
       },
       currentPassword
@@ -528,6 +655,7 @@ describe("AuthService", () => {
     prisma.user.findFirst.mockResolvedValue({
       id: "user-1",
       email: "user@example.com",
+      username: "user",
       name: "User One",
       passwordHash: await bcrypt.hash("password-123", 10)
     });
@@ -630,6 +758,77 @@ describe("AuthService", () => {
       })
     );
     expect(result.projectIds).toEqual(["p1", "p2"]);
+  });
+
+  it("creates a new invited user with the requested Atlasium username", async () => {
+    const { service, prisma } = makeService();
+
+    prisma.invite.findFirst.mockResolvedValue({
+      id: "invite-1",
+      email: "invitee@example.com",
+      globalRole: GlobalRole.READER,
+      accessMode: InviteAccessMode.SELECTED_PROJECTS,
+      defaultProjectRole: null,
+      status: InviteStatus.PENDING,
+      expiresAt: new Date(Date.now() + 60_000),
+      projectId: null,
+      inviteProjects: []
+    });
+    prisma.user.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+    prisma.user.create.mockResolvedValue({
+      id: "user-1",
+      email: "invitee@example.com",
+      username: "invitee",
+      globalRole: GlobalRole.READER
+    });
+    prisma.notificationPreference.create.mockResolvedValue({});
+    prisma.invite.update.mockResolvedValue({});
+    prisma.session.create.mockResolvedValue({});
+
+    await service.acceptInvite({
+      token: "valid-token",
+      name: "Invited User",
+      username: "Invitee",
+      password: "password-123"
+    });
+
+    expect(prisma.user.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        email: "invitee@example.com",
+        username: "invitee",
+        name: "Invited User"
+      })
+    });
+  });
+
+  it("rejects duplicate usernames when accepting an invite for a new user", async () => {
+    const { service, prisma } = makeService();
+
+    prisma.invite.findFirst.mockResolvedValue({
+      id: "invite-1",
+      email: "invitee@example.com",
+      globalRole: GlobalRole.READER,
+      accessMode: InviteAccessMode.SELECTED_PROJECTS,
+      defaultProjectRole: null,
+      status: InviteStatus.PENDING,
+      expiresAt: new Date(Date.now() + 60_000),
+      projectId: null,
+      inviteProjects: []
+    });
+    prisma.user.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "other-user" });
+
+    await expect(
+      service.acceptInvite({
+        token: "valid-token",
+        name: "Invited User",
+        username: "taken",
+        password: "password-123"
+      })
+    ).rejects.toThrow("Username is already in use");
   });
 
   it("accepts selected-project invite and assigns only selected active projects with their roles", async () => {

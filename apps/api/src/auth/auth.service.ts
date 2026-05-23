@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { GlobalRole, InviteAccessMode, InviteStatus, NotificationEventType, NotificationStatus, ProjectRole } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { JwtService } from "@nestjs/jwt";
@@ -7,6 +7,7 @@ import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { generateSecureToken, hashValue } from "../common/crypto";
 import { apiRoleToPrismaRole, pickHigherRole, prismaRoleToApiRole } from "../common/role-map";
+import { deriveUsernameFromEmail, validateAtlasiumUsername } from "../common/username";
 import { getEnv } from "../config/env";
 import { GitlabService } from "../gitlab/gitlab.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -18,6 +19,7 @@ import { InviteDto } from "./dto/invite.dto";
 import { LoginDto } from "./dto/login.dto";
 import { PasswordResetDto } from "./dto/password-reset.dto";
 import { SyncGitlabHttpsPasswordDto } from "./dto/sync-gitlab-https-password.dto";
+import { UpdateUsernameDto } from "./dto/update-username.dto";
 
 const escapeHtml = (value: string): string =>
   value
@@ -66,13 +68,16 @@ export class AuthService {
   async login(dto: LoginDto): Promise<{
     token: string;
     expiresAt: Date;
-    user: { id: string; email: string; name: string; globalRole: "admin" | "editor" | "reader" };
+    user: { id: string; email: string; username: string; name: string; globalRole: "admin" | "editor" | "reader" };
   }> {
-    const email = dto.email.toLowerCase();
+    const identifier = dto.email.trim().toLowerCase();
 
     const user = await this.prisma.user.findFirst({
       where: {
-        email,
+        OR: [
+          { email: identifier },
+          { username: identifier }
+        ],
         deletedAt: null,
         isActive: true
       }
@@ -116,6 +121,7 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
+        username: user.username,
         name: user.name,
         globalRole: prismaRoleToApiRole(user.globalRole)
       }
@@ -243,9 +249,15 @@ export class AuthService {
     let resultingRole = invitedRole;
 
     if (!user) {
+      const username = dto.username
+        ? validateAtlasiumUsername(dto.username)
+        : deriveUsernameFromEmail(invite.email);
+      await this.ensureUsernameAvailable(username);
+
       user = await this.prisma.user.create({
         data: {
           email: invite.email,
+          username,
           name: dto.name,
           passwordHash: await bcrypt.hash(dto.password, 10),
           globalRole: invite.globalRole
@@ -381,6 +393,7 @@ export class AuthService {
     id: string;
     name: string;
     email: string;
+    username: string;
     globalRole: "admin" | "editor" | "reader";
     timezone: string;
   }> {
@@ -394,6 +407,7 @@ export class AuthService {
         id: true,
         name: true,
         email: true,
+        username: true,
         globalRole: true,
         timezone: true
       }
@@ -407,8 +421,90 @@ export class AuthService {
       id: profile.id,
       name: profile.name,
       email: profile.email,
+      username: profile.username,
       globalRole: prismaRoleToApiRole(profile.globalRole),
       timezone: profile.timezone
+    };
+  }
+
+  async updateUsername(
+    user: AuthenticatedUser,
+    dto: UpdateUsernameDto
+  ): Promise<{
+    id: string;
+    name: string;
+    email: string;
+    username: string;
+    globalRole: "admin" | "editor" | "reader";
+    timezone: string;
+  }> {
+    const username = validateAtlasiumUsername(dto.username);
+    const activeUser = await this.prisma.user.findFirst({
+      where: {
+        id: user.userId,
+        deletedAt: null,
+        isActive: true
+      },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        name: true,
+        globalRole: true,
+        timezone: true
+      }
+    });
+
+    if (!activeUser) {
+      throw new UnauthorizedException("Session expired");
+    }
+
+    await this.ensureUsernameAvailable(username, activeUser.id);
+
+    await this.gitlabService.syncManagedUserIdentity({
+      id: activeUser.id,
+      email: activeUser.email,
+      name: activeUser.name,
+      username
+    });
+
+    const updatedUser = username === activeUser.username
+      ? activeUser
+      : await this.prisma.user.update({
+          where: {
+            id: activeUser.id
+          },
+          data: {
+            username
+          },
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            name: true,
+            globalRole: true,
+            timezone: true
+          }
+        });
+
+    await this.auditService.log({
+      userId: activeUser.id,
+      entityType: "user",
+      entityId: activeUser.id,
+      action: "auth.username.update",
+      metadata: {
+        previousUsername: activeUser.username,
+        username
+      }
+    });
+
+    return {
+      id: updatedUser.id,
+      name: updatedUser.name,
+      email: updatedUser.email,
+      username: updatedUser.username,
+      globalRole: prismaRoleToApiRole(updatedUser.globalRole),
+      timezone: updatedUser.timezone
     };
   }
 
@@ -434,6 +530,7 @@ export class AuthService {
       select: {
         id: true,
         email: true,
+        username: true,
         name: true,
         passwordHash: true
       }
@@ -457,6 +554,7 @@ export class AuthService {
       {
         id: activeUser.id,
         email: activeUser.email,
+        username: activeUser.username,
         name: activeUser.name
       },
       dto.newPassword
@@ -503,6 +601,7 @@ export class AuthService {
       select: {
         id: true,
         email: true,
+        username: true,
         name: true,
         passwordHash: true
       }
@@ -521,6 +620,7 @@ export class AuthService {
       {
         id: activeUser.id,
         email: activeUser.email,
+        username: activeUser.username,
         name: activeUser.name
       },
       dto.currentPassword
@@ -880,5 +980,20 @@ export class AuthService {
     });
 
     return repositories.map((repository) => repository.projectId);
+  }
+
+  private async ensureUsernameAvailable(username: string, currentUserId?: string): Promise<void> {
+    const existing = await this.prisma.user.findUnique({
+      where: {
+        username
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (existing && existing.id !== currentUserId) {
+      throw new ConflictException("Username is already in use");
+    }
   }
 }

@@ -233,12 +233,13 @@ At this point GitLab itself should be ready. Atlasium OIDC login flow and per-us
 GitLab authentication model after go-live:
 - `https://git.atlasium.info/users/sign_in` auto-redirects normal users to Atlasium SSO.
 - Local GitLab admin login remains available only through `https://git.atlasium.info/users/sign_in?auto_sign_in=false`.
-- Web sign-in uses Atlasium OIDC identity; `git clone` should use SSH keys first, HTTPS with GitLab username plus Atlasium password after Account enablement as the Windows fallback, and HTTPS+PAT only if password sync is unavailable.
+- Web sign-in uses Atlasium OIDC identity; Atlasium `username` is the GitLab username and OIDC `preferred_username`.
+- `git clone` should use SSH keys first, HTTPS with Atlasium username plus Atlasium password after Account enablement as the Windows fallback, and HTTPS+PAT only if password sync is unavailable.
 
 Windows HTTPS clone with Git Credential Manager:
 
 ```powershell
-# First enable HTTPS clone password in Atlasium Account.
+# First set/check Atlasium username and enable HTTPS clone password in Atlasium Account.
 
 @"
 protocol=https
@@ -251,7 +252,7 @@ git clone https://luisjrc@git.atlasium.info/atlasium/nav.git
 
 Expected behavior:
 - Git Credential Manager asks for the GitLab account password.
-- Username is the GitLab OIDC username, for example `luisjrc`.
+- Username is the Atlasium username, synchronized to the GitLab OIDC user, for example `luisjrc`.
 - Password is the current Atlasium password after Account enablement.
 - Git Credential Manager stores the resulting GitLab credential locally.
 - If password sync is not available on the workstation/account, use a GitLab personal access token as the password.
@@ -280,13 +281,13 @@ Manual smoke test:
 4. Sign in once through GitLab SSO with an Atlasium admin account to trigger JIT provisioning.
 5. Create project.
 6. Verify that a managed GitLab repository was provisioned for the project.
-7. Open `Account`, connect GitLab API access, add at least one SSH public key, and enable HTTPS clone password.
+7. Open `Account`, confirm/edit the Atlasium username, connect GitLab API access, add at least one SSH public key, and enable HTTPS clone password.
 8. Open `Code` and confirm:
    - SSH clone is primary.
-   - HTTPS clone explains GitLab username plus Atlasium password after Account enablement.
+   - HTTPS clone explains Atlasium username plus Atlasium password after Account enablement.
    - `Download ZIP` still works.
 9. Clone the managed repository through SSH from a workstation that has the uploaded private key.
-10. Clone the managed repository through HTTPS from Windows with Git Credential Manager using the GitLab username and Atlasium password.
+10. Clone the managed repository through HTTPS from Windows with Git Credential Manager using the Atlasium username and Atlasium password.
 11. Browse branches/files, then create a branch or MR as an editor/admin.
 12. Open Wiki/Documents/Tasks/Meetings.
 13. In Documents: create/upload/compile/preview.

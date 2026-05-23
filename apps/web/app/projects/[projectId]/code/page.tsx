@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
+import { LoginResponse } from "../../../../lib/client-api";
 import {
   createProjectRepository,
   createRepositoryBranch,
@@ -31,6 +32,18 @@ import {
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 
 type CodeTab = "files" | "commits" | "branches" | "merge-requests";
+
+function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
+  if (!rawUser) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawUser) as LoginResponse["user"];
+  } catch {
+    return null;
+  }
+}
 
 function parentPath(path: string): string {
   const trimmed = path.trim();
@@ -112,6 +125,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [success, setSuccess] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<CodeTab>("files");
   const [showMRModal, setShowMRModal] = useState(false);
+  const [gitUsername, setGitUsername] = useState<string | null>(null);
 
   const canWrite = access?.canWrite ?? false;
   const isAdmin = access?.isAdmin ?? false;
@@ -213,6 +227,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       return;
     }
     setToken(storedToken);
+    setGitUsername(parseStoredUser(localStorage.getItem("doctoral_user"))?.username ?? null);
     setLoading(true);
     Promise.all([loadAccess(storedToken), loadConnection(storedToken), loadRepository(storedToken)])
       .then(() => { setError(null); })
@@ -514,7 +529,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                   </p>
                   <div className="code-https-help">
                     <p className="eyebrow">Windows HTTPS login</p>
-                    <code>{`git clone ${connectedRepository.httpCloneUrl.replace("https://", "https://<gitlab-username>@")}`}</code>
+                    <code>{`git clone ${connectedRepository.httpCloneUrl.replace("https://", `https://${gitUsername || "<gitlab-username>"}@`)}`}</code>
                     <code>Enter your Atlasium password in Git Credential Manager</code>
                   </div>
                 </div>

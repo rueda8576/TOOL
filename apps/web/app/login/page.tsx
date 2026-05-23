@@ -67,14 +67,14 @@ export default function LoginPage(): JSX.Element {
 
         <form className="form-grid" onSubmit={handleSubmit}>
           <label>
-            Email
+            Email or username
             <input
               className="input"
-              type="email"
+              type="text"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              autoComplete="email"
+              autoComplete="username"
             />
           </label>
           <label>

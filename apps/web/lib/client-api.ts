@@ -96,6 +96,7 @@ export type LoginResponse = {
   user: {
     id: string;
     email: string;
+    username: string;
     name: string;
     globalRole: "admin" | "editor" | "reader";
   };

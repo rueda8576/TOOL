@@ -4,6 +4,7 @@ export type AccountProfile = {
   id: string;
   name: string;
   email: string;
+  username: string;
   globalRole: "admin" | "editor" | "reader";
   timezone: string;
 };
@@ -32,6 +33,10 @@ export type GitlabHttpsPasswordStatus = {
   username: string;
 };
 
+export type UpdateUsernamePayload = {
+  username: string;
+};
+
 export async function getCurrentAccountProfile(token: string): Promise<AccountProfile> {
   return authFetch<AccountProfile>("/auth/me", { token });
 }
@@ -57,6 +62,19 @@ export async function syncGitlabHttpsPassword(
     token,
     init: {
       method: "POST",
+      body: JSON.stringify(payload)
+    }
+  });
+}
+
+export async function updateAccountUsername(
+  token: string,
+  payload: UpdateUsernamePayload
+): Promise<AccountProfile> {
+  return authFetch<AccountProfile>("/auth/me/username", {
+    token,
+    init: {
+      method: "PATCH",
       body: JSON.stringify(payload)
     }
   });

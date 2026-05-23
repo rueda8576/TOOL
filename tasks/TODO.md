@@ -1,5 +1,24 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Username as GitLab Identity (2026-05-23)
+- [x] Add persistent unique `User.username` with backfill migration and validation helpers.
+- [x] Update invite acceptance, login, account profile, and username edit endpoint.
+- [x] Use username in OIDC preferred_username and GitLab managed user create/rename flows.
+- [x] Update Accept Invite, Login, Account, Code, and runbook guidance.
+- [x] Add focused backend tests and run type-check/diff verification.
+
+### Review - Atlasium Username as GitLab Identity
+- Added unique `User.username` with a migration that backfills existing users from normalized email local-parts and stable suffixes for collisions.
+- Login now accepts email or username; invite acceptance stores a username; `/auth/me` returns it; `/auth/me/username` updates it after syncing the linked GitLab OIDC account.
+- OIDC now emits `preferred_username=user.username`, and managed GitLab provisioning/renaming uses Atlasium username exactly instead of deriving from email.
+- Account, Accept Invite, Login, Code, and the go-live runbook now present Atlasium username as the Git/GitLab username.
+- Verification:
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/auth/auth.service.spec.ts src/auth/oidc.service.spec.ts src/gitlab/gitlab.service.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/auth.controller.http.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `git diff --check` passed
+
 ## HTTPS Clone with Atlasium Password Sync (2026-05-23)
 - [x] Add authenticated backend action to sync the current Atlasium password into the OIDC-linked GitLab user for Git over HTTPS.
 - [x] Sync GitLab local password during Atlasium password changes, aborting if GitLab cannot be updated.

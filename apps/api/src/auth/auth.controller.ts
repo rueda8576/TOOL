@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { Request, Response } from "express";
 
 import { CurrentSessionToken } from "../common/current-session-token.decorator";
@@ -16,6 +16,7 @@ import { LoginDto } from "./dto/login.dto";
 import { OidcService } from "./oidc.service";
 import { PasswordResetDto } from "./dto/password-reset.dto";
 import { SyncGitlabHttpsPasswordDto } from "./dto/sync-gitlab-https-password.dto";
+import { UpdateUsernameDto } from "./dto/update-username.dto";
 import { AuthService } from "./auth.service";
 
 @Controller("auth")
@@ -32,7 +33,7 @@ export class AuthController {
   ): Promise<{
     token: string;
     expiresAt: Date;
-    user: { id: string; email: string; name: string; globalRole: "admin" | "editor" | "reader" };
+    user: { id: string; email: string; username: string; name: string; globalRole: "admin" | "editor" | "reader" };
   }> {
     const result = await this.authService.login(dto);
     response.setHeader("Set-Cookie", buildSessionCookie(result.token, result.expiresAt));
@@ -67,10 +68,27 @@ export class AuthController {
     id: string;
     name: string;
     email: string;
+    username: string;
     globalRole: "admin" | "editor" | "reader";
     timezone: string;
   }> {
     return this.authService.getCurrentUserProfile(user);
+  }
+
+  @Patch("me/username")
+  @UseGuards(JwtAuthGuard)
+  updateUsername(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateUsernameDto
+  ): Promise<{
+    id: string;
+    name: string;
+    email: string;
+    username: string;
+    globalRole: "admin" | "editor" | "reader";
+    timezone: string;
+  }> {
+    return this.authService.updateUsername(user, dto);
   }
 
   @Post("password/change")

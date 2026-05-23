@@ -154,6 +154,7 @@ export class OidcService {
           select: {
             id: true,
             email: true,
+            username: true,
             name: true,
             deletedAt: true,
             isActive: true
@@ -187,7 +188,7 @@ export class OidcService {
         sub: authorizationCode.user.id,
         email: authorizationCode.user.email,
         name: authorizationCode.user.name,
-        preferred_username: authorizationCode.user.email,
+        preferred_username: authorizationCode.user.username,
         scope: authorizationCode.scope,
         token_use: "userinfo"
       },
@@ -203,7 +204,7 @@ export class OidcService {
       email: authorizationCode.user.email,
       email_verified: true,
       name: authorizationCode.user.name,
-      preferred_username: authorizationCode.user.email
+      preferred_username: authorizationCode.user.username
     };
     if (authorizationCode.nonce) {
       idTokenPayload.nonce = authorizationCode.nonce;
@@ -242,6 +243,7 @@ export class OidcService {
       select: {
         id: true,
         email: true,
+        username: true,
         name: true
       }
     });
@@ -255,7 +257,7 @@ export class OidcService {
       email: user.email,
       email_verified: true,
       name: user.name,
-      preferred_username: user.email
+      preferred_username: user.username
     };
   }
 

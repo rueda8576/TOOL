@@ -11,6 +11,7 @@ import {
   getNotificationPreferences,
   NotificationPreferences,
   syncGitlabHttpsPassword,
+  updateAccountUsername,
   updateAccountNotificationPreferences
 } from "../../lib/account";
 import {
@@ -50,6 +51,7 @@ function persistStoredUser(profile: AccountProfile): void {
     JSON.stringify({
       id: profile.id,
       email: profile.email,
+      username: profile.username,
       name: profile.name,
       globalRole: profile.globalRole
     })
@@ -81,6 +83,10 @@ export default function AccountPage(): JSX.Element {
   const [profile, setProfile] = useState<AccountProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [usernameDraft, setUsernameDraft] = useState("");
+  const [usernameSubmitting, setUsernameSubmitting] = useState(false);
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [usernameSuccess, setUsernameSuccess] = useState<string | null>(null);
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -143,6 +149,7 @@ export default function AccountPage(): JSX.Element {
       try {
         const nextProfile = await getCurrentAccountProfile(authToken);
         setProfile(nextProfile);
+        setUsernameDraft(nextProfile.username);
         persistStoredUser(nextProfile);
         setProfileError(null);
       } catch (loadError) {
@@ -351,6 +358,44 @@ export default function AccountPage(): JSX.Element {
     }
   };
 
+  const onSaveUsername = async (): Promise<void> => {
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+
+    const nextUsername = usernameDraft.trim().toLowerCase();
+    if (!/^[a-z0-9](?:[a-z0-9._-]{0,30}[a-z0-9])?$/.test(nextUsername)) {
+      setUsernameError("Username must be 2-32 lowercase letters, numbers, dots, underscores, or hyphens, and start and end with a letter or number.");
+      setUsernameSuccess(null);
+      return;
+    }
+
+    setUsernameSubmitting(true);
+    setUsernameError(null);
+    setUsernameSuccess(null);
+    try {
+      const updated = await updateAccountUsername(token, {
+        username: nextUsername
+      });
+      setProfile(updated);
+      setUsernameDraft(updated.username);
+      setHttpsCloneUsername(updated.username);
+      persistStoredUser(updated);
+      setUsernameSuccess("Username updated.");
+      if (connection?.connected) {
+        await loadConnection(token);
+      }
+    } catch (saveError) {
+      const message = (saveError as Error).message || "Unable to update username.";
+      if (!handleAuthFailure(message)) {
+        setUsernameError(message);
+      }
+    } finally {
+      setUsernameSubmitting(false);
+    }
+  };
+
   const onSaveNotifications = async (): Promise<void> => {
     if (!token || !notificationPreferences) {
       return;
@@ -530,6 +575,10 @@ export default function AccountPage(): JSX.Element {
                   <p className="account-profile-value">{profile.email}</p>
                 </article>
                 <article className="account-profile-item">
+                  <p className="account-profile-label">Username</p>
+                  <p className="account-profile-value">@{profile.username}</p>
+                </article>
+                <article className="account-profile-item">
                   <p className="account-profile-label">Role</p>
                   <p className="account-profile-value">{formatRoleLabel(profile.globalRole)}</p>
                 </article>
@@ -538,6 +587,37 @@ export default function AccountPage(): JSX.Element {
                   <p className="account-profile-value">{profile.timezone}</p>
                 </article>
               </div>
+            ) : null}
+
+            {!profileLoading && profile ? (
+              <form
+                className="stack-sm"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void onSaveUsername();
+                }}
+              >
+                <label>
+                  Git username
+                  <input
+                    className="input"
+                    value={usernameDraft}
+                    onChange={(event) => setUsernameDraft(event.target.value.toLowerCase())}
+                    minLength={2}
+                    maxLength={32}
+                    autoComplete="username"
+                    spellCheck={false}
+                  />
+                </label>
+                <p className="text-muted">Used as your GitLab username and for HTTPS clone prompts.</p>
+                {usernameError ? <p className="alert alert-error">{usernameError}</p> : null}
+                {usernameSuccess ? <p className="alert alert-success">{usernameSuccess}</p> : null}
+                <div className="button-row">
+                  <button className="button" type="submit" disabled={usernameSubmitting || usernameDraft.trim() === profile.username}>
+                    {usernameSubmitting ? "Saving..." : "Save username"}
+                  </button>
+                </div>
+              </form>
             ) : null}
           </section>
 
@@ -1054,10 +1134,10 @@ export default function AccountPage(): JSX.Element {
               <div className="account-git-https-hint stack-xxs">
                 <p className="account-ssh-meta-label">Windows HTTPS clone</p>
                 <p className="text-muted">
-                  Username: <strong>{httpsCloneUsername || connection?.username || "your GitLab username"}</strong>
+                  Username: <strong>{httpsCloneUsername || profile?.username || connection?.username || "your GitLab username"}</strong>
                 </p>
                 <code className="account-ssh-hint">{`@"\nprotocol=https\nhost=git.atlasium.info\n\n"@ | git credential-manager erase`}</code>
-                <code className="account-ssh-hint">git clone https://{httpsCloneUsername || connection?.username || "username"}@git.atlasium.info/atlasium/nav.git</code>
+                <code className="account-ssh-hint">git clone https://{httpsCloneUsername || profile?.username || connection?.username || "username"}@git.atlasium.info/atlasium/nav.git</code>
               </div>
             </div>
           </section>
