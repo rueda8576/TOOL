@@ -197,9 +197,10 @@ if [ "${MODE}" = "post-deploy" ]; then
   log "Checking Atlasium OIDC discovery..."
   check_http_contains "${APP_BASE_URL}/api/auth/oidc/.well-known/openid-configuration" "issuer\":\"${APP_BASE_URL}/api/auth/oidc"
 
-  log "Checking GitLab sign-in page exposes Atlasium SSO..."
-  if ! curl -fsSL "${GITLAB_EXTERNAL_URL}/users/sign_in" | grep -q 'Atlasium'; then
-    fail "GitLab sign-in page does not expose the Atlasium OIDC label yet"
+  log "Checking GitLab sign-in page exposes or starts Atlasium SSO..."
+  sign_in_html="$(curl -fsSL "${GITLAB_EXTERNAL_URL}/users/sign_in")"
+  if ! printf '%s' "${sign_in_html}" | grep -Eq 'Atlasium|/users/auth/openid_connect|openid_connect'; then
+    fail "GitLab sign-in page does not expose or start the Atlasium OIDC flow yet"
   fi
 fi
 

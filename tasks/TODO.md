@@ -1,5 +1,20 @@
 # Implementation TODO (v1 bootstrap)
 
+## Production GitLab SSO Repair (2026-05-22)
+- [x] Diagnose deployed Atlasium/GitLab OIDC configuration on the VPS without printing secrets.
+- [x] Reconcile GitLab Omniauth/OIDC configuration if the running container does not expose Atlasium SSO.
+- [x] Verify GitLab web login exposes Atlasium SSO while root bypass remains available.
+- [x] Document production result and any follow-up for clone credentials.
+
+### Review - Production GitLab SSO Repair
+- Production already had the required Atlasium OIDC variables and GitLab Omniauth settings loaded.
+- The normal GitLab sign-in page is an auto-submit page that posts to `/users/auth/openid_connect`; it does not necessarily show the visible `Atlasium` label before redirecting.
+- Simulated the GitLab OIDC POST from the VPS and confirmed it returns `302` to `https://atlasium.info/api/auth/oidc/authorize?...`.
+- Confirmed the root bypass URL still exposes the local GitLab sign-in form plus the Atlasium provider.
+- Updated `infra/scripts/validate-managed-gitlab-rollout.sh` so post-deploy validation accepts either the visible Atlasium label or the auto-start `openid_connect` flow.
+- Copied the updated validator to `/opt/atlasium` and re-ran `post-deploy`; it passed.
+- Follow-up: use `https://git.atlasium.info/users/sign_in` for normal Atlasium SSO, not `?auto_sign_in=false`; clone credentials are still SSH or HTTPS PAT, not the Atlasium password.
+
 ## Code Tab GitLab Token Refresh Race (2026-05-13)
 - [x] Add per-user single-flight handling for GitLab OAuth refreshes in the API.
 - [x] Reuse the shared refresh path for proactive expiry refresh and retry-after-401 refresh.
