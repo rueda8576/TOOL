@@ -3235,7 +3235,13 @@ body.wiki-layout-dragging * {
 }
 
 .account-ssh-hint {
+  display: block;
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.account-gcm-hint {
+  padding-top: 0.25rem;
 }
 
 /* ── Code: overview card ─────────────────────────────────── */
@@ -3293,6 +3299,25 @@ body.wiki-layout-dragging * {
 
 .code-clone-copy {
   flex-shrink: 0;
+}
+
+.code-https-help {
+  display: grid;
+  gap: 0.28rem;
+  padding-top: 0.1rem;
+}
+
+.code-https-help .eyebrow {
+  margin: 0;
+}
+
+.code-https-help code {
+  display: block;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 
 /* ── Code: tabs ──────────────────────────────────────────── */

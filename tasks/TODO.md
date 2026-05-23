@@ -1,5 +1,21 @@
 # Implementation TODO (v1 bootstrap)
 
+## HTTPS Clone via Git Credential Manager (2026-05-23)
+- [x] Document Windows Git Credential Manager browser/OAuth configuration for `git.atlasium.info`.
+- [x] Update the Code HTTPS clone guidance to point users at Atlasium browser login through GCM.
+- [x] Update Account/runbook clone guidance while keeping SSH as the primary path and PAT as fallback.
+- [x] Verify production GitLab OAuth redirects into Atlasium SSO and run web type-check/diff hygiene.
+
+### Review - HTTPS Clone via Git Credential Manager
+- The Code tab now explains that HTTPS clone can use Git Credential Manager browser login with Atlasium SSO, with SSH still recommended and PAT as fallback.
+- Account now shows the Windows GCM setup commands next to CLI Git access.
+- The go-live runbook documents clearing stale `git.atlasium.info` credentials and cloning over HTTPS through GCM browser login.
+- Production GitLab OAuth probing redirects to `/users/sign_in`, whose response auto-starts `/users/auth/openid_connect`, confirming the SSO entrypoint for browser login.
+- Verification:
+  - `curl` probe of `https://git.atlasium.info/oauth/authorize?...` confirmed GitLab sign-in auto-starts `openid_connect`
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `git diff --check` passed
+
 ## Deploy Checkout Auth Fix (2026-05-23)
 - [x] Align deploy checkout with CI checkout runtime and explicit workflow-run SHA authentication.
 - [x] Restrict automatic deploy promotion to successful CI runs from the same repository on `main`.

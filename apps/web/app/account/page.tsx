@@ -847,11 +847,16 @@ export default function AccountPage(): JSX.Element {
                 <div className="stack-xs">
                   <p className="eyebrow">SSH keys</p>
                   <h3 className="section-heading">CLI Git access</h3>
-                  <p>Atlasium manages GitLab SSH keys here so `Code` can use SSH as the primary clone method while HTTPS remains a PAT fallback.</p>
+                  <p>Atlasium manages GitLab SSH keys here so `Code` can use SSH as the primary clone method. HTTPS can use Git Credential Manager browser login with Atlasium SSO; PAT remains the fallback.</p>
                   <p className="text-muted">
                     Recommended command:{" "}
                     <code className="account-ssh-hint">ssh-keygen -t ed25519 -C "{connection?.email || profile?.email || "your-email"}"</code>
                   </p>
+                  <div className="account-gcm-hint stack-xxs">
+                    <p className="account-ssh-meta-label">Windows HTTPS setup</p>
+                    <code className="account-ssh-hint">git config --global credential.git.atlasium.info.provider gitlab</code>
+                    <code className="account-ssh-hint">git config --global credential.gitLabAuthModes browser</code>
+                  </div>
                 </div>
 
                 {canManageSshKeys ? (
