@@ -82,6 +82,7 @@ describe("API integration", () => {
     const user = await prisma.user.create({
       data: {
         email: "admin@example.com",
+        username: "admin",
         name: "Admin User",
         passwordHash,
         globalRole: GlobalRole.ADMIN
