@@ -47,6 +47,7 @@ import {
 } from "../../../../../lib/documents";
 import { inferMonacoDocumentLanguage } from "../../../../../lib/monaco-languages";
 import { getProjectAccess, ProjectAccess } from "../../../../../lib/project-access";
+import { useConfirmDialog } from "../../../../../lib/use-confirm-dialog";
 import { useUnsavedChangesGuard } from "../../../../../lib/use-unsaved-changes-guard";
 
 type LatexTreeEntry = { path: string; isDirectory: boolean };
@@ -262,6 +263,7 @@ export default function DocumentDetailPage({
   params: { projectId: string; documentId: string };
 }): JSX.Element {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirmDialog();
   const firstVersionFolderInputRef = useRef<HTMLInputElement>(null);
   const pdfPreviewFrameRef = useRef<HTMLIFrameElement>(null);
   const monacoEditorRef = useRef<LatexMonacoEditorHandle | null>(null);
@@ -911,7 +913,8 @@ export default function DocumentDetailPage({
 
   const { requestExitProject } = useUnsavedChangesGuard({
     isDirty: hasUnsavedLatexChanges,
-    confirmMessage: "You have unsaved LaTeX changes. Exit project anyway?"
+    confirmMessage: "You have unsaved LaTeX changes. Exit project anyway?",
+    confirmExit: confirm
   });
 
   useEffect(() => {
@@ -1420,7 +1423,12 @@ export default function DocumentDetailPage({
       return;
     }
 
-    const confirmed = window.confirm(`Delete document "${documentDetail.title}"?`);
+    const confirmed = await confirm({
+      title: "Delete document",
+      message: `Delete document "${documentDetail.title}"?`,
+      confirmLabel: "Delete document",
+      destructive: true
+    });
     if (!confirmed) {
       return;
     }
@@ -1444,6 +1452,7 @@ export default function DocumentDetailPage({
     destroyPresenceCollaboration,
     documentDetail,
     canWrite,
+    confirm,
     params.projectId,
     router,
     token
@@ -1740,6 +1749,7 @@ export default function DocumentDetailPage({
           </div>
         )
       ) : null}
+      {confirmDialog}
     </AppShell>
   );
 }

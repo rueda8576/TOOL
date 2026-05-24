@@ -16,6 +16,7 @@ import {
   listProjectDocuments
 } from "../../../../lib/documents";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
+import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
 
 const documentTypes: Array<{ value: DocumentTypeValue; label: string }> = [
   { value: "paper", label: "Paper" },
@@ -57,6 +58,7 @@ export default function ProjectDocumentsPage({
   params: { projectId: string };
 }): JSX.Element {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirmDialog();
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [token, setToken] = useState<string | null>(null);
   const [projectAccess, setProjectAccess] = useState<ProjectAccess | null>(null);
@@ -249,7 +251,12 @@ export default function ProjectDocumentsPage({
       return;
     }
 
-    const confirmed = window.confirm(`Delete document "${document.title}"?`);
+    const confirmed = await confirm({
+      title: "Delete document",
+      message: `Delete document "${document.title}"?`,
+      confirmLabel: "Delete document",
+      destructive: true
+    });
     if (!confirmed) {
       return;
     }
@@ -467,6 +474,7 @@ export default function ProjectDocumentsPage({
           </p>
         ) : null}
       </section>
+      {confirmDialog}
     </AppShell>
   );
 }

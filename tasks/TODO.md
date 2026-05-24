@@ -1,5 +1,26 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Workbench Navigation + Account Drawer (2026-05-24)
+- [x] Add the implementation plan and preserve existing visual identity lessons.
+- [x] Add shared UI primitives for buttons, icon buttons, alerts, tabs, modal/dialog, user menu, and account drawer surfaces.
+- [x] Move Account settings into a reusable surface that works both as `/account` and as an in-shell drawer.
+- [x] Remove `Account` from project/global sidebar navigation and add persistent user controls outside the project module nav.
+- [x] Give `Code` equal navigation and project-overview weight alongside `Wiki` and `Documents`.
+- [x] Replace Code-to-Account links with in-context Git access drawer actions where possible.
+- [x] Run type-check, build, and diff hygiene verification.
+
+### Review - Atlasium Workbench Navigation + Account Drawer
+- Removed `Account` from sidebar navigation so project modules stay scoped to project work.
+- Added a persistent user menu in `AppShell` with Account settings, Git access, Notifications, Security, and Sign out actions.
+- Extracted Account settings into `AccountSettingsSurface`, reused by `/account` and the in-shell `AccountDrawer`.
+- Added shared UI primitives and a reusable confirmation dialog hook; replaced all browser `window.confirm` usage in migrated web surfaces.
+- Promoted Code as a first-class project module with sidebar iconography, project overview presence, stronger repository workspace header, iconized repository tabs, and Git access drawer actions.
+- Verification:
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - `git diff --check` passed
+  - `rg -n "window\\.confirm|href=\"/account\"|label: \"Account\"" apps/web/app apps/web/components` returned no matches
+
 ## Atlasium Digital Visual Identity (2026-05-24)
 - [x] Record the identity direction: contemporary institution, living archive, graphite + amber, editorial serif + UI sans.
 - [x] Update web font loading for editorial display and sans UI roles.

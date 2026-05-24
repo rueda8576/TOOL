@@ -1,10 +1,10 @@
 "use client";
 
-import Link from "next/link";
+import { Code2, Download, ExternalLink, FileCode2, GitBranch, GitCommitHorizontal, GitPullRequest } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { AppShell } from "../../../../components/app-shell";
+import { AppShell, openAccountSettings } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
 import { LoginResponse } from "../../../../lib/client-api";
 import {
@@ -475,8 +475,12 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
             {/* Compact overview card */}
             <section className="panel code-overview-card">
               <div className="stack-xs code-overview-info">
-                <p className="eyebrow">{connectedRepository.pathWithNamespace}</p>
+                <p className="eyebrow code-workspace-kicker">
+                  <Code2 size={15} aria-hidden="true" />
+                  Repository workspace
+                </p>
                 <h2 className="section-heading">{connectedRepository.name}</h2>
+                <code className="code-overview-namespace">{connectedRepository.pathWithNamespace}</code>
                 {connectedRepository.description ? (
                   <p>{connectedRepository.description}</p>
                 ) : (
@@ -525,7 +529,9 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                   </div>
                   <p className="text-muted" style={{ fontSize: "0.78rem" }}>
                     SSH recommended. HTTPS can use your GitLab username and Atlasium password after enablement; PAT remains the fallback.{" "}
-                    <Link href="/account">Manage Git access →</Link>
+                    <button type="button" className="inline-link-button" onClick={() => openAccountSettings("git")}>
+                      Manage Git access
+                    </button>
                   </p>
                   <div className="code-https-help">
                     <p className="eyebrow">Windows HTTPS login</p>
@@ -540,6 +546,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     onClick={() => void onOpenInGitlab()}
                     disabled={openingGitlab}
                   >
+                    <ExternalLink size={16} aria-hidden="true" />
                     {openingGitlab ? "Opening..." : "Open in GitLab"}
                   </button>
                   <button
@@ -549,6 +556,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     disabled={downloadingArchive || !gitlabConnected}
                     title={!gitlabConnected ? "Connect GitLab API access to download ZIP archives" : undefined}
                   >
+                    <Download size={16} aria-hidden="true" />
                     {downloadingArchive ? "Downloading..." : "Download ZIP"}
                   </button>
                 </div>
@@ -559,7 +567,9 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
             {!gitlabConnected ? (
               <p className="alert alert-info">
                 {connectStateMessage}{" "}
-                <Link href="/account">Connect account →</Link>
+                <button type="button" className="inline-link-button" onClick={() => openAccountSettings("git")}>
+                  Connect account
+                </button>
               </p>
             ) : (
               <>
@@ -572,6 +582,12 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                       branches: "Branches",
                       "merge-requests": "Merge Requests",
                     };
+                    const icons: Record<CodeTab, JSX.Element> = {
+                      files: <FileCode2 size={16} aria-hidden="true" />,
+                      commits: <GitCommitHorizontal size={16} aria-hidden="true" />,
+                      branches: <GitBranch size={16} aria-hidden="true" />,
+                      "merge-requests": <GitPullRequest size={16} aria-hidden="true" />
+                    };
                     const counts: Partial<Record<CodeTab, number>> = {
                       branches: branches.length || undefined,
                       "merge-requests": mergeRequests.length || undefined,
@@ -583,6 +599,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                         className={`code-tab${activeTab === tab ? " active" : ""}`}
                         onClick={() => setActiveTab(tab)}
                       >
+                        {icons[tab]}
                         {labels[tab]}
                         {counts[tab] ? <span className="code-tab-count">{counts[tab]}</span> : null}
                       </button>

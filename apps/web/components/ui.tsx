@@ -1,0 +1,146 @@
+import { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
+
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+
+function buttonClassName(variant: ButtonVariant, className?: string): string {
+  const variantClass =
+    variant === "primary"
+      ? "button"
+      : variant === "secondary"
+        ? "button button-secondary"
+        : variant === "ghost"
+          ? "button button-ghost"
+          : "button button-danger";
+  return className ? `${variantClass} ${className}` : variantClass;
+}
+
+export function Button({
+  variant = "primary",
+  className,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant }): JSX.Element {
+  return <button className={buttonClassName(variant, className)} {...props} />;
+}
+
+export function IconButton({
+  label,
+  className,
+  children,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; children: ReactNode }): JSX.Element {
+  return (
+    <button className={buttonClassName("secondary", className ? `icon-button ${className}` : "icon-button")} aria-label={label} title={label} {...props}>
+      {children}
+    </button>
+  );
+}
+
+export function Panel({ className, ...props }: HTMLAttributes<HTMLElement>): JSX.Element {
+  return <section className={className ? `panel ${className}` : "panel"} {...props} />;
+}
+
+export function Alert({
+  tone = "info",
+  className,
+  ...props
+}: HTMLAttributes<HTMLParagraphElement> & { tone?: "info" | "success" | "warning" | "error" }): JSX.Element {
+  return <p className={className ? `alert alert-${tone} ${className}` : `alert alert-${tone}`} {...props} />;
+}
+
+export function Badge({ className, ...props }: HTMLAttributes<HTMLSpanElement>): JSX.Element {
+  return <span className={className ? `badge ${className}` : "badge"} {...props} />;
+}
+
+export function Tabs<TValue extends string>({
+  tabs,
+  value,
+  onChange,
+  label,
+  className
+}: {
+  tabs: Array<{ value: TValue; label: string; count?: number }>;
+  value: TValue;
+  onChange: (value: TValue) => void;
+  label: string;
+  className?: string;
+}): JSX.Element {
+  return (
+    <nav className={className ? `tabs ${className}` : "tabs"} aria-label={label}>
+      {tabs.map((tab) => (
+        <button
+          key={tab.value}
+          type="button"
+          className={value === tab.value ? "tab tab-active" : "tab"}
+          onClick={() => onChange(tab.value)}
+          aria-current={value === tab.value ? "page" : undefined}
+        >
+          {tab.label}
+          {tab.count ? <span className="tab-count">{tab.count}</span> : null}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+export function Modal({
+  title,
+  children,
+  onClose,
+  className
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+  className?: string;
+}): JSX.Element {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
+      <div className={className ? `panel modal-panel ${className}` : "panel modal-panel"} onClick={(event) => event.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function ConfirmDialog({
+  title,
+  message,
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  busy = false,
+  destructive = false,
+  onConfirm,
+  onCancel
+}: {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  busy?: boolean;
+  destructive?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}): JSX.Element {
+  return (
+    <Modal title={title} onClose={onCancel} className="confirm-dialog">
+      <div className="stack-md">
+        <div className="stack-xs">
+          <h2 className="section-heading">{title}</h2>
+          <p>{message}</p>
+        </div>
+        <div className="button-row">
+          <Button variant="secondary" type="button" onClick={onCancel} disabled={busy}>
+            {cancelLabel}
+          </Button>
+          <Button variant={destructive ? "danger" : "primary"} type="button" onClick={onConfirm} disabled={busy}>
+            {confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+export function ToastProvider({ children }: { children: ReactNode }): JSX.Element {
+  return <>{children}</>;
+}

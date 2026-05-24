@@ -15,6 +15,7 @@ import {
 } from "../../lib/admin-users";
 import { authFetch, LoginResponse } from "../../lib/client-api";
 import { ProjectSummary } from "../../lib/api";
+import { useConfirmDialog } from "../../lib/use-confirm-dialog";
 
 type ProjectOrderBy = "newest" | "key" | "name";
 type InviteAccessMode = "all" | "selected";
@@ -92,6 +93,7 @@ function countProjectRoleMap(projectRoleMap: ProjectRoleMap): number {
 
 export default function ProjectsPage(): JSX.Element {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirmDialog();
   const [token, setToken] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<LoginResponse["user"]["globalRole"] | null>(null);
@@ -378,7 +380,12 @@ export default function ProjectsPage(): JSX.Element {
       return;
     }
 
-    const confirmed = window.confirm(`Delete project ${project.key} - ${project.name}?`);
+    const confirmed = await confirm({
+      title: "Delete project",
+      message: `Delete project ${project.key} - ${project.name}?`,
+      confirmLabel: "Delete project",
+      destructive: true
+    });
     if (!confirmed) {
       return;
     }
@@ -639,11 +646,15 @@ export default function ProjectsPage(): JSX.Element {
       return;
     }
 
-    const confirmed = window.confirm(
-      mode === "hard"
-        ? `Hard delete user ${managedUser.name} (${managedUser.email})? This permanently removes the account and only works when no historical records depend on it.`
-        : `Delete user ${managedUser.name} (${managedUser.email})? They will lose access immediately.`
-    );
+    const confirmed = await confirm({
+      title: mode === "hard" ? "Hard delete user" : "Delete user",
+      message:
+        mode === "hard"
+          ? `Hard delete user ${managedUser.name} (${managedUser.email})? This permanently removes the account and only works when no historical records depend on it.`
+          : `Delete user ${managedUser.name} (${managedUser.email})? They will lose access immediately.`,
+      confirmLabel: mode === "hard" ? "Hard delete user" : "Delete user",
+      destructive: true
+    });
     if (!confirmed) {
       return;
     }
@@ -1260,6 +1271,7 @@ export default function ProjectsPage(): JSX.Element {
           </div>
         )}
       </section>
+      {confirmDialog}
     </AppShell>
   );
 }

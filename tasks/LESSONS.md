@@ -9,6 +9,8 @@
 - Do not hardcode placeholder project identifiers (e.g., `demo`) in production navigation links.
 - Shared layout components must receive active route context (like `projectId`) so links target real resources.
 - When a route depends on project context, hide or disable those links outside project-scoped pages.
+- Keep personal account/settings surfaces out of project module navigation; expose them through persistent user utilities so opening settings does not feel like leaving the active project.
+- When repository work is a core product surface, treat `Code` as a first-class project module with the same navigation and overview weight as `Wiki` and `Documents`.
 
 ## UI consistency
 - When fixing a user-facing label issue in one project tab, apply the same fix across equivalent tabs to avoid inconsistent UX.
@@ -105,6 +107,15 @@
 - Keep product naming aligned across visible UI brand labels and metadata title to avoid split identity between sidebar and browser tab.
 - In project-scoped navigation, the sidebar brand can switch from global product name to operational project identifier (`project.key`) while preserving a stable fallback (`WorkMesh`) when context/token fetch fails.
 - Keep deployment naming consistent end-to-end (`/opt/<brand>`, `/var/lib/<brand>/storage`, nginx site name) to avoid mixed legacy identifiers during infrastructure migration.
+
+## Atlasium visual identity
+- Treat Atlasium as a contemporary institution: sober, rigorous, editorial, and modern rather than generic SaaS, flat corporate dashboard, or old academic portal.
+- Preserve the "living archive" visual metaphor: document layers, tabs, indexes, margins, annotations, versions, provenance, and traceability should guide UI/UX decisions.
+- Use the graphite + amber identity as the default palette, with cool off-white backgrounds and steel blue/mineral green only as functional support colors.
+- Keep `Source Serif 4` for editorial/identity moments and `Inter` for operational UI, forms, navigation, tables, and repeated controls.
+- Reuse `AtlasiumMark` for compact brand expression in sidebar, auth, favicon-like, and small-space contexts; do not introduce alternate marks without explicitly revisiting the identity.
+- Avoid decorative gradients, orb/bokeh backgrounds, and visual effects that weaken the living-archive identity or reduce operational clarity.
+- Future redesigns should preserve these identity tokens and criteria unless the user explicitly decides to change Atlasium's visual identity.
 
 ## Monorepo Docker builds
 - In multi-stage Dockerfiles for PNPM workspaces, do not assume copying only root `node_modules` is enough for build scripts; ensure filtered dependencies are installed in the build stage before running `pnpm --filter <pkg> build` to avoid missing local binaries like `tsc`.

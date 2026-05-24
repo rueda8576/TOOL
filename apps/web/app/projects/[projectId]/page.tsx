@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "../../../components/app-shell";
 import { ProjectSubtitle } from "../../../components/project-subtitle";
 import { DocumentListItem, listProjectDocuments } from "../../../lib/documents";
+import { getProjectRepositoryStatus, ProjectRepositoryStatus } from "../../../lib/gitlab";
 import { listProjectMeetings, MeetingListItem } from "../../../lib/meetings";
 import { listProjectTasks, TaskListItem } from "../../../lib/tasks";
 
@@ -115,6 +116,7 @@ export default function ProjectDetailPage({
   const [documents, setDocuments] = useState<DocumentListItem[]>([]);
   const [meetings, setMeetings] = useState<MeetingListItem[]>([]);
   const [inProgressTasks, setInProgressTasks] = useState<TaskListItem[]>([]);
+  const [repositoryStatus, setRepositoryStatus] = useState<ProjectRepositoryStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -139,13 +141,14 @@ export default function ProjectDetailPage({
       setLoading(true);
       setError(null);
       try {
-        const [documentsResult, meetingsResult, tasksResult] = await Promise.all([
+        const [documentsResult, meetingsResult, tasksResult, repositoryResult] = await Promise.all([
           listProjectDocuments(params.projectId, authToken),
           listProjectMeetings(params.projectId, authToken, {
             from: dayKeyFromDate(currentMonthStart),
             to: dayKeyFromDate(currentMonthEnd)
           }),
-          listProjectTasks(params.projectId, authToken)
+          listProjectTasks(params.projectId, authToken),
+          getProjectRepositoryStatus(params.projectId, authToken)
         ]);
 
         const sortedDocuments = [...documentsResult]
@@ -166,6 +169,7 @@ export default function ProjectDetailPage({
         setDocuments(sortedDocuments);
         setMeetings(meetingsResult);
         setInProgressTasks(topInProgressTasks);
+        setRepositoryStatus(repositoryResult);
       } catch (dashboardError) {
         setError((dashboardError as Error).message);
       } finally {
@@ -224,6 +228,33 @@ export default function ProjectDetailPage({
                   ))}
                 </ul>
               ) : null}
+            </article>
+
+            <article className="panel project-overview-card project-overview-code">
+              <div className="project-overview-card-header">
+                <h3 className="section-heading">Code repository</h3>
+                <Link className="button button-secondary" href={`/projects/${params.projectId}/code`}>
+                  Open code
+                </Link>
+              </div>
+              {repositoryStatus?.connected ? (
+                <div className="stack-sm">
+                  <div className="project-overview-code-summary">
+                    <strong>{repositoryStatus.name}</strong>
+                    <code>{repositoryStatus.pathWithNamespace}</code>
+                  </div>
+                  <p className="project-overview-meta">
+                    {repositoryStatus.visibility} | Default {repositoryStatus.defaultBranch}
+                    {repositoryStatus.lastActivityAt ? ` | Activity ${formatDate(repositoryStatus.lastActivityAt)}` : ""}
+                  </p>
+                  <div className="button-row">
+                    <span className="badge">Managed</span>
+                    <span className="badge">GitLab</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="alert alert-info">Managed repository not provisioned yet.</p>
+              )}
             </article>
 
             <article className="panel project-overview-card project-overview-tasks">

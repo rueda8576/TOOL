@@ -5,13 +5,15 @@ import { useCallback, useEffect } from "react";
 export function useUnsavedChangesGuard({
   isDirty,
   confirmMessage,
+  confirmExit,
   enabled = true
 }: {
   isDirty: boolean;
   confirmMessage: string;
+  confirmExit?: (options: { title: string; message: string; confirmLabel?: string; destructive?: boolean }) => Promise<boolean>;
   enabled?: boolean;
 }): {
-  requestExitProject: () => boolean;
+  requestExitProject: () => Promise<boolean>;
 } {
   const shouldGuard = enabled && isDirty;
 
@@ -31,12 +33,20 @@ export function useUnsavedChangesGuard({
     };
   }, [shouldGuard]);
 
-  const requestExitProject = useCallback((): boolean => {
+  const requestExitProject = useCallback(async (): Promise<boolean> => {
     if (!shouldGuard) {
       return true;
     }
-    return window.confirm(confirmMessage);
-  }, [confirmMessage, shouldGuard]);
+    if (!confirmExit) {
+      return false;
+    }
+    return confirmExit({
+      title: "Discard unsaved changes",
+      message: confirmMessage,
+      confirmLabel: "Discard changes",
+      destructive: true
+    });
+  }, [confirmExit, confirmMessage, shouldGuard]);
 
   return { requestExitProject };
 }

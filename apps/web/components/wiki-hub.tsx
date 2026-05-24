@@ -44,6 +44,7 @@ import {
   WikiTreeNode
 } from "../lib/wiki";
 import { getProjectAccess, ProjectAccess } from "../lib/project-access";
+import { useConfirmDialog } from "../lib/use-confirm-dialog";
 
 type SaveState = "idle" | "saving" | "saved" | "error" | "conflict";
 type WikiSidebarWidthMode = "auto" | "manual";
@@ -811,6 +812,7 @@ export function WikiHub({
   initialPath?: string | null;
 }): JSX.Element {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirmDialog();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importFilesInputRef = useRef<HTMLInputElement>(null);
   const importFolderInputRef = useRef<HTMLInputElement>(null);
@@ -970,7 +972,8 @@ export function WikiHub({
   }, [draftContent, draftTitle, isEditing, isRealtimeActive]);
   const { requestExitProject } = useUnsavedChangesGuard({
     isDirty,
-    confirmMessage: "You have unsaved wiki draft changes. Exit project anyway?"
+    confirmMessage: "You have unsaved wiki draft changes. Exit project anyway?",
+    confirmExit: confirm
   });
 
   useEffect(() => {
@@ -1954,7 +1957,12 @@ export function WikiHub({
     }
 
     const targetPage = pageDetail.page;
-    const confirmed = window.confirm(`Delete wiki page "/${targetPage.path}"?`);
+    const confirmed = await confirm({
+      title: "Delete wiki page",
+      message: `Delete wiki page "/${targetPage.path}"?`,
+      confirmLabel: "Delete page",
+      destructive: true
+    });
     if (!confirmed) {
       return;
     }
@@ -3177,6 +3185,7 @@ export function WikiHub({
       {isDraggingSidebarSplitter ? (
         <div className="wiki-drag-scrim" onPointerMove={onSidebarDragScrimPointerMove} onPointerUp={onSidebarDragScrimPointerUp} />
       ) : null}
+      {confirmDialog}
     </AppShell>
   );
 }

@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import { AppShell } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
+import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
 import {
   createProjectMeeting,
   deleteMeeting,
@@ -263,6 +264,7 @@ export default function ProjectMeetingsPage({
   params: { projectId: string };
 }): JSX.Element {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirmDialog();
   const searchParams = useSearchParams();
   const searchParamsValue = searchParams.toString();
   const doneRef = useRef<HTMLTextAreaElement>(null);
@@ -682,7 +684,13 @@ export default function ProjectMeetingsPage({
       return;
     }
 
-    if (!window.confirm("Delete this minute?")) {
+    const confirmed = await confirm({
+      title: "Delete minute",
+      message: "Delete this minute?",
+      confirmLabel: "Delete minute",
+      destructive: true
+    });
+    if (!confirmed) {
       return;
     }
 
@@ -976,6 +984,7 @@ export default function ProjectMeetingsPage({
           </aside>
         </section>
       ) : null}
+      {confirmDialog}
     </AppShell>
   );
 }

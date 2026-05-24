@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AppShell } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
+import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
 import {
   createProjectTask,
   deleteTask as deleteTaskApi,
@@ -55,6 +56,7 @@ export default function ProjectTasksPage({
   params: { projectId: string };
 }): JSX.Element {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirmDialog();
   const [token, setToken] = useState<string | null>(null);
   const [projectAccess, setProjectAccess] = useState<ProjectAccess | null>(null);
   const [tasks, setTasks] = useState<TaskListItem[]>([]);
@@ -257,7 +259,12 @@ export default function ProjectTasksPage({
     if (!token) { setError("Missing session token. Please sign in again."); return; }
     if (!canWrite) { setError("You do not have write access to this project."); return; }
 
-    const confirmed = window.confirm("Delete this task?");
+    const confirmed = await confirm({
+      title: "Delete task",
+      message: "Delete this task?",
+      confirmLabel: "Delete task",
+      destructive: true
+    });
     if (!confirmed) { setContextMenu(null); return; }
 
     setActiveTaskActionId(taskId);
@@ -546,6 +553,7 @@ export default function ProjectTasksPage({
           </button>
         </div>
       ) : null}
+      {confirmDialog}
     </AppShell>
   );
 }

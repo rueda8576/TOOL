@@ -1,14 +1,40 @@
 "use client";
 
+import {
+  BookOpen,
+  CalendarDays,
+  Code2,
+  FileText,
+  FolderKanban,
+  LayoutDashboard,
+  ListChecks,
+  PanelLeftClose
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import { AccountDrawer } from "./account-drawer";
+import { AccountSettingsTab } from "./account-settings-surface";
 import { AtlasiumMark } from "./atlasium-mark";
+import { StoredAtlasiumUser, UserMenu } from "./user-menu";
 import { ProjectSummary } from "../lib/api";
 import { authFetch } from "../lib/client-api";
 
 const APP_SIDEBAR_COLLAPSED_STORAGE_KEY = "atlasium_shell_sidebar_collapsed";
+const OPEN_ACCOUNT_SETTINGS_EVENT = "atlasium:open-account-settings";
+
+function parseStoredUser(rawValue: string | null): StoredAtlasiumUser | null {
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawValue) as StoredAtlasiumUser;
+  } catch {
+    return null;
+  }
+}
 
 export function AppShell({
   title,
@@ -33,11 +59,40 @@ export function AppShell({
   const [brandTitle, setBrandTitle] = useState("Atlasium");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarPreferenceLoaded, setSidebarPreferenceLoaded] = useState(false);
+  const [storedUser, setStoredUser] = useState<StoredAtlasiumUser | null>(null);
+  const [accountDrawerOpen, setAccountDrawerOpen] = useState(false);
+  const [accountDrawerTab, setAccountDrawerTab] = useState<AccountSettingsTab>("profile");
 
   useEffect(() => {
     const storedPreference = localStorage.getItem(APP_SIDEBAR_COLLAPSED_STORAGE_KEY);
     setSidebarCollapsed(storedPreference === "true");
     setSidebarPreferenceLoaded(true);
+    setStoredUser(parseStoredUser(localStorage.getItem("doctoral_user")));
+  }, []);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === "doctoral_user") {
+        setStoredUser(parseStoredUser(event.newValue));
+      }
+    };
+    const onOpenAccountSettings = (event: Event): void => {
+      const requestedTab = (event as CustomEvent<{ tab?: AccountSettingsTab }>).detail?.tab ?? "profile";
+      setAccountDrawerTab(requestedTab);
+      setAccountDrawerOpen(true);
+    };
+    const onUserUpdated = (): void => {
+      setStoredUser(parseStoredUser(localStorage.getItem("doctoral_user")));
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(OPEN_ACCOUNT_SETTINGS_EVENT, onOpenAccountSettings);
+    window.addEventListener("atlasium:user-updated", onUserUpdated);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(OPEN_ACCOUNT_SETTINGS_EVENT, onOpenAccountSettings);
+      window.removeEventListener("atlasium:user-updated", onUserUpdated);
+    };
   }, []);
 
   useEffect(() => {
@@ -90,43 +145,56 @@ export function AppShell({
         {
           href: `/projects/${projectId}`,
           label: "Overview",
+          icon: LayoutDashboard,
           active: pathname === `/projects/${projectId}`
         },
         {
           href: `/projects/${projectId}/wiki`,
           label: "Wiki",
+          icon: BookOpen,
           active: pathname === `/projects/${projectId}/wiki` || pathname.startsWith(`/projects/${projectId}/wiki/`)
         },
         {
           href: `/projects/${projectId}/documents`,
           label: "Documents",
+          icon: FileText,
           active: pathname === `/projects/${projectId}/documents` || pathname.startsWith(`/projects/${projectId}/documents/`)
         },
         {
           href: `/projects/${projectId}/code`,
           label: "Code",
+          icon: Code2,
           active: pathname === `/projects/${projectId}/code` || pathname.startsWith(`/projects/${projectId}/code/`)
         },
         {
           href: `/projects/${projectId}/tasks`,
           label: "Tasks",
+          icon: ListChecks,
           active: pathname === `/projects/${projectId}/tasks` || pathname.startsWith(`/projects/${projectId}/tasks/`)
         },
         {
           href: `/projects/${projectId}/meetings`,
           label: "Meetings",
+          icon: CalendarDays,
           active: pathname === `/projects/${projectId}/meetings` || pathname.startsWith(`/projects/${projectId}/meetings/`)
-        },
-        {
-          href: "/account",
-          label: "Account",
-          active: pathname === "/account"
         }
       ]
     : [
-        { href: "/projects", label: "Projects", active: pathname === "/projects" },
-        { href: "/account", label: "Account", active: pathname === "/account" }
+        { href: "/projects", label: "Projects", icon: FolderKanban, active: pathname === "/projects" }
       ];
+
+  const openAccountDrawer = useCallback((tab: AccountSettingsTab): void => {
+    setAccountDrawerTab(tab);
+    setAccountDrawerOpen(true);
+  }, []);
+
+  const signOut = useCallback((): void => {
+    localStorage.removeItem("doctoral_token");
+    localStorage.removeItem("doctoral_user");
+    setStoredUser(null);
+    setAccountDrawerOpen(false);
+    router.replace("/login");
+  }, [router]);
 
   const onExitProject = useCallback(async (): Promise<void> => {
     if (!projectId || exitBusy) {
@@ -165,32 +233,38 @@ export function AppShell({
           </div>
           <button
             type="button"
-            className="sidebar-toggle-button"
+            className="sidebar-toggle-button icon-button"
             onClick={() => setSidebarCollapsed(true)}
             aria-label="Hide navigation menu"
+            title="Hide navigation menu"
           >
-            Hide menu
+            <PanelLeftClose size={16} aria-hidden="true" />
           </button>
         </div>
         <nav className="nav-links">
-          {navLinks.map((item) => (
-            <Link
-              key={item.href}
-              className={item.active ? "nav-link nav-link-active" : "nav-link"}
-              href={item.href}
-              aria-current={item.active ? "page" : undefined}
-            >
-              {item.label}
-            </Link>
-          ))}
+          {navLinks.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                className={item.active ? "nav-link nav-link-active" : "nav-link"}
+                href={item.href}
+                aria-current={item.active ? "page" : undefined}
+              >
+                <Icon size={17} aria-hidden="true" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
         </nav>
-        {projectId ? (
-          <div className="sidebar-footer">
+        <div className="sidebar-footer">
+          <UserMenu user={storedUser} onOpenAccount={openAccountDrawer} onSignOut={signOut} />
+          {projectId ? (
             <button type="button" className="nav-exit-button" onClick={() => void onExitProject()} disabled={exitBusy}>
               {exitBusy ? "Exiting..." : "Exit project"}
             </button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </aside>
       <main className="content">
         <div className={fullWidth ? "content-inner content-inner-fluid" : "content-inner"}>
@@ -215,6 +289,11 @@ export function AppShell({
           {children}
         </div>
       </main>
+      <AccountDrawer open={accountDrawerOpen} initialTab={accountDrawerTab} onClose={() => setAccountDrawerOpen(false)} />
     </div>
   );
+}
+
+export function openAccountSettings(tab: AccountSettingsTab = "profile"): void {
+  window.dispatchEvent(new CustomEvent(OPEN_ACCOUNT_SETTINGS_EVENT, { detail: { tab } }));
 }
