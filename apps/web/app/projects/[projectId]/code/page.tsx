@@ -940,7 +940,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                         <label>
                           Description
                           <textarea
-                            className="textarea"
+                            className="input textarea-sm"
                             value={mergeRequestDescription}
                             onChange={(event) => setMergeRequestDescription(event.target.value)}
                             rows={4}

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import { AtlasiumMark } from "./atlasium-mark";
 import { ProjectSummary } from "../lib/api";
 import { authFetch } from "../lib/client-api";
 
@@ -156,8 +157,9 @@ export function AppShell({
       <aside className="sidebar">
         <div className="sidebar-topbar">
           <div className="brand">
-            <span className="brand-dot" />
+            <AtlasiumMark size="sm" className="brand-mark" />
             <div>
+              {projectId ? <p className="brand-kicker">Project archive</p> : <p className="brand-kicker">Atlasium</p>}
               <p className="brand-title">{brandTitle}</p>
             </div>
           </div>

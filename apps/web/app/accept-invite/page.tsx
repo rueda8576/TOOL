@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { AtlasiumMark } from "../../components/atlasium-mark";
 import { API_BASE_URL } from "../../lib/client-api";
 
 type AcceptInviteResponse = {
@@ -90,6 +91,10 @@ function AcceptInviteForm(): JSX.Element {
     <main className="login-shell">
       <section className="panel login-panel">
         <div className="login-header">
+          <div className="auth-brand-lockup auth-brand-lockup-left">
+            <AtlasiumMark size="md" />
+            <p className="eyebrow">Atlasium</p>
+          </div>
           <h1 className="section-heading">Accept invitation</h1>
           <p>Create your account to join Atlasium.</p>
         </div>
@@ -160,6 +165,10 @@ function AcceptInviteFallback(): JSX.Element {
     <main className="login-shell">
       <section className="panel login-panel">
         <div className="login-header">
+          <div className="auth-brand-lockup auth-brand-lockup-left">
+            <AtlasiumMark size="md" />
+            <p className="eyebrow">Atlasium</p>
+          </div>
           <h1 className="section-heading">Accept invitation</h1>
           <p>Loading invite details...</p>
         </div>

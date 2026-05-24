@@ -1,5 +1,44 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Digital Visual Identity (2026-05-24)
+- [x] Record the identity direction: contemporary institution, living archive, graphite + amber, editorial serif + UI sans.
+- [x] Update web font loading for editorial display and sans UI roles.
+- [x] Rebuild root visual tokens for canvas, surfaces, borders, text, brand/accent, semantic states, radii, and shadows.
+- [x] Add a reusable Atlasium symbol component for sidebar, home, login, and invite surfaces.
+- [x] Apply the identity to base shell, home/auth screens, panels, buttons, inputs, badges, alerts, and document/workspace-safe surfaces.
+- [x] Verify web type-check, production build, and diff hygiene.
+
+### Review - Atlasium Digital Visual Identity
+- Established the Atlasium identity direction in the web base layer: contemporary institution, living archive, graphite + amber, editorial serif plus sans UI.
+- Switched display typography to `Source Serif 4` and UI typography to `Inter`.
+- Added a reusable `AtlasiumMark` SVG component and used it in the sidebar, home, login, and invite screens.
+- Rebuilt root design tokens and compatibility aliases for surfaces, panels, borders, text, brand/accent, semantic states, radii, and shadows.
+- Applied the identity to shell navigation, page headers, auth/home surfaces, panels, buttons, inputs, badges, and alerts.
+- Fixed the Code merge-request description textarea so it uses the shared input styling.
+- Verification:
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed; Next retried transient Google Fonts socket failures and then completed successfully
+  - `git diff --check` passed
+
+## Atlasium v0.3.0 Release Tag (2026-05-24)
+- [x] Confirm `main` matches `origin/main`, the worktree is clean, and `v0.3.0` does not already exist.
+- [x] Run release verification before tagging.
+- [x] Create annotated Git tag `v0.3.0` with release notes.
+- [x] Push `v0.3.0` to `origin` and verify the remote tag.
+- [x] Record release verification and tag results.
+
+### Review - Atlasium v0.3.0 Release Tag
+- Created annotated tag `v0.3.0` on `78080d2da669948e5f8a6d93944942a290e69faa`.
+- Pushed `v0.3.0` to `origin`; remote peeled tag resolves to the same commit.
+- Release notes cover managed GitLab/OIDC, Code workspace, Git access, Account settings, Wiki improvements, admin/security hardening, and CI/CD/runtime hardening.
+- Verification:
+  - `pnpm test:ci` could not complete because local Postgres was unavailable at `localhost:5432`; Docker is also unavailable in this WSL environment, so the test database could not be started here.
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/worker exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/db build` passed
+  - `git diff --check` passed
+
 ## Atlasium Username as GitLab Identity (2026-05-23)
 - [x] Add persistent unique `User.username` with backfill migration and validation helpers.
 - [x] Update invite acceptance, login, account profile, and username edit endpoint.

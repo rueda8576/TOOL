@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { AtlasiumMark } from "../../components/atlasium-mark";
 import { API_BASE_URL, LoginResponse } from "../../lib/client-api";
 
 export default function LoginPage(): JSX.Element {
@@ -61,6 +62,10 @@ export default function LoginPage(): JSX.Element {
     <main className="login-shell">
       <section className="panel login-panel">
         <div className="login-header">
+          <div className="auth-brand-lockup auth-brand-lockup-left">
+            <AtlasiumMark size="md" />
+            <p className="eyebrow">Atlasium</p>
+          </div>
           <h1 className="section-heading">Sign in</h1>
           <p>Use your invited account to access Atlasium.</p>
         </div>
