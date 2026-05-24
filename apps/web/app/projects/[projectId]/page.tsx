@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "../../../components/app-shell";
 import { ProjectSubtitle } from "../../../components/project-subtitle";
+import { LoadingState } from "../../../components/ui";
 import { DocumentListItem, listProjectDocuments } from "../../../lib/documents";
 import { getProjectRepositoryStatus, ProjectRepositoryStatus } from "../../../lib/gitlab";
 import { listProjectMeetings, MeetingListItem } from "../../../lib/meetings";
@@ -201,7 +202,7 @@ export default function ProjectDetailPage({
     >
       <section className="project-overview-dashboard">
         {error ? <p className="alert alert-error">{error}</p> : null}
-        {loading ? <p className="alert alert-info">Loading project dashboard...</p> : null}
+        {loading ? <LoadingState title="Loading project overview" detail="Collecting documents, repository status, tasks, and meetings." /> : null}
 
         {!loading ? (
           <div className="project-overview-grid">

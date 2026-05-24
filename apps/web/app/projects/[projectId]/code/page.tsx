@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { AppShell, openAccountSettings } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
+import { LoadingState } from "../../../../components/ui";
 import { LoginResponse } from "../../../../lib/client-api";
 import {
   createProjectRepository,
@@ -438,7 +439,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   return (
     <AppShell title="Code" subtitle={<ProjectSubtitle projectId={params.projectId} suffix="Code" />} projectId={params.projectId}>
       <div className="stack-lg">
-        {loading ? <p className="alert alert-info">Loading Code workspace...</p> : null}
+        {loading ? <LoadingState title="Loading Code workspace" detail="Checking repository and GitLab connection state." /> : null}
         {error ? <p className="alert alert-error">{error}</p> : null}
         {success ? <p className="alert alert-success">{success}</p> : null}
 
@@ -527,7 +528,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                       {copiedCloneType === "https" ? "Copied" : "Copy"}
                     </button>
                   </div>
-                  <p className="text-muted" style={{ fontSize: "0.78rem" }}>
+                  <p className="text-muted code-clone-guidance">
                     SSH recommended. HTTPS can use your GitLab username and Atlasium password after enablement; PAT remains the fallback.{" "}
                     <button type="button" className="inline-link-button" onClick={() => openAccountSettings("git")}>
                       Manage Git access
@@ -683,7 +684,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                           </button>
                         ))}
                         {tree && tree.entries.length === 0 ? (
-                          <p className="text-muted" style={{ padding: "0.5rem 0" }}>This folder is empty.</p>
+                          <p className="text-muted code-empty-folder">This folder is empty.</p>
                         ) : null}
                       </div>
                     </div>

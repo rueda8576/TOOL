@@ -47,6 +47,68 @@ export function Alert({
   return <p className={className ? `alert alert-${tone} ${className}` : `alert alert-${tone}`} {...props} />;
 }
 
+export function LoadingState({
+  title,
+  detail,
+  className
+}: {
+  title: string;
+  detail?: string;
+  className?: string;
+}): JSX.Element {
+  return (
+    <div className={className ? `loading-state ${className}` : "loading-state"} role="status" aria-live="polite">
+      <span className="loading-state-spinner" aria-hidden="true" />
+      <div className="stack-xxs">
+        <p className="loading-state-title">{title}</p>
+        {detail ? <p className="loading-state-detail">{detail}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+export function SkeletonBlock({ className, ...props }: HTMLAttributes<HTMLDivElement>): JSX.Element {
+  return <div className={className ? `skeleton-block ${className}` : "skeleton-block"} aria-hidden="true" {...props} />;
+}
+
+export function EmptyState({
+  title,
+  detail,
+  action,
+  className
+}: {
+  title: string;
+  detail?: string;
+  action?: ReactNode;
+  className?: string;
+}): JSX.Element {
+  return (
+    <div className={className ? `empty-state ${className}` : "empty-state"}>
+      <div className="stack-xxs">
+        <p className="empty-state-title">{title}</p>
+        {detail ? <p className="empty-state-detail">{detail}</p> : null}
+      </div>
+      {action ? <div className="button-row">{action}</div> : null}
+    </div>
+  );
+}
+
+export function FieldMessage({
+  tone = "info",
+  className,
+  ...props
+}: HTMLAttributes<HTMLParagraphElement> & { tone?: "info" | "success" | "warning" | "error" }): JSX.Element {
+  return <p className={className ? `field-message field-message-${tone} ${className}` : `field-message field-message-${tone}`} {...props} />;
+}
+
+export function StatusLine({
+  tone = "info",
+  className,
+  ...props
+}: HTMLAttributes<HTMLParagraphElement> & { tone?: "info" | "success" | "warning" | "error" }): JSX.Element {
+  return <p className={className ? `status-line status-line-${tone} ${className}` : `status-line status-line-${tone}`} {...props} />;
+}
+
 export function Badge({ className, ...props }: HTMLAttributes<HTMLSpanElement>): JSX.Element {
   return <span className={className ? `badge ${className}` : "badge"} {...props} />;
 }

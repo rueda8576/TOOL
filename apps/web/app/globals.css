@@ -20,11 +20,20 @@
   --danger: #a33f32;
   --success: #2f6d55;
   --info: #375f73;
-  --shadow-sm: 0 1px 2px rgba(31, 36, 36, 0.08);
-  --shadow-md: 0 12px 28px rgba(31, 36, 36, 0.12);
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --shadow-low: 0 1px 2px rgba(31, 36, 36, 0.08);
+  --shadow-overlay: 0 16px 36px rgba(31, 36, 36, 0.14);
+  --shadow-sm: var(--shadow-low);
+  --shadow-md: var(--shadow-overlay);
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
+  --radius-pill: 999px;
   --bg-canvas: var(--canvas);
   --bg-surface: var(--surface);
   --bg-surface-soft: var(--surface-soft);
@@ -223,14 +232,13 @@ textarea {
   padding: 0.62rem 0.7rem;
   color: rgba(248, 245, 238, 0.72);
   font-weight: 600;
-  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
 }
 
 .nav-link:hover {
   color: #fffdfa;
   border-color: rgba(255, 253, 250, 0.14);
   background: rgba(255, 253, 250, 0.07);
-  transform: translateX(2px);
 }
 
 .nav-link-active {
@@ -530,7 +538,6 @@ textarea {
   background: var(--panel);
   box-shadow: var(--shadow-sm);
   padding: 1rem 1.05rem;
-  animation: rise 180ms ease;
 }
 
 .panel h2,
@@ -599,13 +606,12 @@ textarea {
   border-radius: var(--radius-sm);
   background: var(--bg-surface-soft);
   padding: 0.8rem 0.85rem;
-  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  transition: border-color 180ms ease, background-color 180ms ease;
 }
 
 .list-item:hover {
-  transform: translateY(-1px);
   border-color: var(--line-strong);
-  box-shadow: var(--shadow-sm);
+  background: var(--surface);
 }
 
 .list-item strong {
@@ -785,13 +791,12 @@ textarea {
   gap: 0.58rem;
   text-align: left;
   cursor: pointer;
-  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
 }
 
 .projects-users-list-button:hover {
   border-color: var(--line-strong);
   background: #f8fbff;
-  transform: translateY(-1px);
 }
 
 .projects-users-list-button-selected {
@@ -1142,19 +1147,16 @@ textarea.input {
   font-weight: 750;
   padding: 0.62rem 0.84rem;
   cursor: pointer;
-  transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease, background-color 180ms ease, border-color 180ms ease;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
 }
 
 .button:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
   filter: saturate(1.04);
 }
 
 .button:disabled {
   opacity: 0.66;
   cursor: default;
-  transform: none;
   box-shadow: none;
   filter: none;
 }
@@ -1316,6 +1318,118 @@ textarea.input {
   border-color: #e8cf9d;
   background: #fff7e8;
   color: var(--warning);
+}
+
+.loading-state {
+  min-height: 4.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.loading-state-spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid color-mix(in srgb, var(--brand) 20%, transparent);
+  border-top-color: var(--brand);
+  border-radius: var(--radius-pill);
+  animation: atlasium-spin 700ms linear infinite;
+  flex: 0 0 auto;
+}
+
+.loading-state-title,
+.empty-state-title {
+  margin: 0;
+  color: var(--text);
+  font-weight: 750;
+}
+
+.loading-state-detail,
+.empty-state-detail {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.skeleton-block {
+  min-height: 4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent),
+    var(--surface-soft);
+  background-size: 220% 100%, 100% 100%;
+  animation: atlasium-skeleton 1.3s ease-in-out infinite;
+}
+
+.empty-state {
+  min-height: 4.75rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 72%, var(--surface-soft) 28%);
+  padding: var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+  align-content: center;
+}
+
+.field-message,
+.status-line {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.field-message-info,
+.status-line-info {
+  color: var(--info);
+}
+
+.field-message-success,
+.status-line-success {
+  color: var(--success);
+}
+
+.field-message-warning,
+.status-line-warning {
+  color: var(--warning);
+}
+
+.field-message-error,
+.status-line-error {
+  color: var(--danger);
+}
+
+@keyframes atlasium-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes atlasium-skeleton {
+  0% {
+    background-position: 140% 0, 0 0;
+  }
+
+  100% {
+    background-position: -80% 0, 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 .documents-page-toolbar {
@@ -2198,13 +2312,12 @@ body.documents-workspace-dragging * {
   align-items: flex-start;
   cursor: pointer;
   position: relative;
-  transition: border-color 170ms ease, background-color 170ms ease, transform 170ms ease;
+  transition: border-color 170ms ease, background-color 170ms ease;
 }
 
 .minutes-day-cell:hover {
   border-color: var(--line-strong);
   background: var(--bg-surface-soft);
-  transform: translateY(-1px);
 }
 
 .minutes-day-cell > span:first-child {
@@ -2674,7 +2787,7 @@ body.wiki-layout-dragging * {
   line-height: 1.2;
   padding: 0.3rem 0.5rem;
   cursor: pointer;
-  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, transform 150ms ease;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
 }
 
 .wiki-markdown-tool:hover {
@@ -2690,7 +2803,7 @@ body.wiki-layout-dragging * {
 }
 
 .wiki-markdown-tool:active {
-  transform: translateY(1px);
+  background: var(--brand-soft);
 }
 
 .wiki-editor-grid {
@@ -2892,18 +3005,6 @@ body.wiki-layout-dragging * {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
-}
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 @media (max-width: 1199px) {
@@ -3693,6 +3794,14 @@ body.wiki-layout-dragging * {
 
 .code-clone-copy {
   flex-shrink: 0;
+}
+
+.code-clone-guidance {
+  font-size: 0.78rem;
+}
+
+.code-empty-folder {
+  padding: 0.5rem 0;
 }
 
 .code-https-help {

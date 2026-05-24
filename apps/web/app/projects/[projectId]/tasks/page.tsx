@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
+import { LoadingState } from "../../../../components/ui";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
 import {
@@ -465,7 +466,7 @@ export default function ProjectTasksPage({
         </section>
       ) : null}
 
-      {loading ? <p className="alert alert-info">Loading tasks...</p> : null}
+      {loading ? <LoadingState title="Loading tasks" detail="Preparing the project board." /> : null}
 
       <section className="kanban">
         {taskColumns.map((column) => {

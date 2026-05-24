@@ -11,6 +11,7 @@ import * as Y from "yjs";
 
 import { AppShell } from "./app-shell";
 import { ProjectSubtitle } from "./project-subtitle";
+import { LoadingState } from "./ui";
 import { WikiHistoryDiff } from "./wiki-history-diff";
 import { API_BASE_URL, LoginResponse } from "../lib/client-api";
 import {
@@ -2776,7 +2777,7 @@ export function WikiHub({
             }}
           />
 
-          {loadingTree ? <p className="alert alert-info">Loading page tree...</p> : null}
+          {loadingTree ? <LoadingState title="Loading page tree" detail="Preparing the wiki index." /> : null}
 
           {!loadingTree && searchModeActive ? (
             <section className="wiki-search-results">
@@ -2871,7 +2872,7 @@ export function WikiHub({
           {!loadingPage && !pageDetail && allPagePaths.length > 0 ? (
             <p className="alert alert-info">{canWrite ? "Select a page from the left tree to start reading or editing." : "Select a page from the left tree to start reading."}</p>
           ) : null}
-          {loadingPage ? <p className="alert alert-info">Loading wiki page...</p> : null}
+          {loadingPage ? <LoadingState title="Loading wiki page" detail="Preparing content, links, and collaboration state." /> : null}
 
           {pageDetail && !isEditing && !historyOpen ? (
             <div className="wiki-read-view">

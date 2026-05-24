@@ -19,6 +19,7 @@ import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 
 import { AppShell } from "../../../../../components/app-shell";
+import { LoadingState } from "../../../../../components/ui";
 import {
   LatexMonacoEditor,
   LatexMonacoEditorHandle
@@ -1542,7 +1543,7 @@ export default function DocumentDetailPage({
       {success ? <p className="alert alert-success">{success}</p> : null}
       {error ? <p className="alert alert-error">{error}</p> : null}
 
-      {loadingDocument ? <p className="alert alert-info">Loading document...</p> : null}
+      {loadingDocument ? <LoadingState title="Loading document" detail="Preparing versions, editor state, and preview." /> : null}
 
       {!loadingDocument && documentDetail && !currentVersion ? (
         <section className="panel">

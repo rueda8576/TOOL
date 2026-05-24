@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 
 import { AppShell } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
+import { LoadingState } from "../../../../components/ui";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
 import {
@@ -850,7 +851,7 @@ export default function ProjectMeetingsPage({
         </div>
       ) : null}
 
-      {loading ? <p className="alert alert-info">Loading minutes...</p> : null}
+      {loading ? <LoadingState title="Loading minutes" detail="Preparing list and calendar views." /> : null}
 
       {!loading && viewMode === "list" ? (
         <section className="meetings-list">

@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../components/app-shell";
+import { LoadingState } from "../../components/ui";
 import {
   AdminManagedUser,
   AdminUserHardDeleteCheck,
@@ -980,7 +981,7 @@ export default function ProjectsPage(): JSX.Element {
               </div>
             ) : null}
 
-            {loading ? <p className="alert alert-info">Loading projects...</p> : null}
+            {loading ? <LoadingState title="Loading projects" detail="Preparing the project directory." /> : null}
 
             {!loading && !listError ? (
               sortedProjects.length > 0 ? (
@@ -1050,7 +1051,7 @@ export default function ProjectsPage(): JSX.Element {
                 </label>
               </div>
 
-              {adminUsersLoading ? <p className="alert alert-info">Loading users...</p> : null}
+              {adminUsersLoading ? <LoadingState title="Loading users" detail="Preparing account and project access records." /> : null}
               {!adminUsersLoading && filteredAdminUsers.length === 0 ? (
                 <p className="alert alert-info">
                   {adminUsers.length === 0 ? "No active users found." : "No users match the current search."}

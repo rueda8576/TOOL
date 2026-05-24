@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
+import { LoadingState } from "../../../../components/ui";
 import {
   createDocumentVersionUpload,
   createProjectDocument,
@@ -422,7 +423,7 @@ export default function ProjectDocumentsPage({
 
       <section className="panel">
         <h3 className="section-heading">Documents</h3>
-        {loading ? <p className="alert alert-info">Loading documents...</p> : null}
+        {loading ? <LoadingState title="Loading documents" detail="Preparing the project document archive." /> : null}
         {!loading && documents.length === 0 ? <p className="alert alert-info">{canWrite ? "No documents yet. Create your first one." : "No documents available yet."}</p> : null}
         {!loading && documents.length > 0 ? (
           <ul className="list">

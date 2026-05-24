@@ -23,6 +23,7 @@ import {
   GitlabSshKey,
   listGitlabSshKeys
 } from "../lib/gitlab";
+import { LoadingState } from "./ui";
 
 export type AccountSettingsTab = "profile" | "security" | "notifications" | "git";
 
@@ -595,7 +596,7 @@ export function AccountSettingsSurface({
               {profile ? <span className="badge">{formatRoleLabel(profile.globalRole)}</span> : null}
             </div>
 
-            {profileLoading ? <p className="alert alert-info">Loading account profile...</p> : null}
+            {profileLoading ? <LoadingState title="Loading account profile" detail="Preparing your Atlasium identity record." /> : null}
             {profileError ? <p className="alert alert-error">{profileError}</p> : null}
 
             {!profileLoading && profile ? (
@@ -759,7 +760,7 @@ export function AccountSettingsSurface({
               <p>Control which Atlasium events can notify you by email and how early task reminders are sent.</p>
             </div>
 
-            {notificationsLoading ? <p className="alert alert-info">Loading notification preferences...</p> : null}
+            {notificationsLoading ? <LoadingState title="Loading notification preferences" detail="Preparing delivery settings." /> : null}
             {notificationsError ? <p className="alert alert-error">{notificationsError}</p> : null}
             {notificationsSuccess ? <p className="alert alert-success">{notificationsSuccess}</p> : null}
 
@@ -949,7 +950,7 @@ export function AccountSettingsSurface({
                 <p>Connect API access for managed repository browsing, archive download, branch creation, merge requests, and SSH-key management.</p>
               </div>
 
-              {gitlabLoading ? <p className="alert alert-info">Loading GitLab access...</p> : null}
+              {gitlabLoading ? <LoadingState title="Loading Git access" detail="Checking GitLab connection and repository credentials." /> : null}
               {gitlabError ? <p className="alert alert-error">{gitlabError}</p> : null}
               {gitlabSuccess ? <p className="alert alert-success">{gitlabSuccess}</p> : null}
               {reconnectMessage ? <p className="alert alert-warning">{reconnectMessage}</p> : null}
@@ -1032,7 +1033,7 @@ export function AccountSettingsSurface({
 
               {canManageSshKeys ? (
                 <>
-                  {sshKeysLoading ? <p className="alert alert-info">Loading SSH keys...</p> : null}
+                  {sshKeysLoading ? <LoadingState title="Loading SSH keys" detail="Retrieving linked GitLab keys." /> : null}
 
                   <div className="account-ssh-list-shell">
                     <div className="account-ssh-section-heading">

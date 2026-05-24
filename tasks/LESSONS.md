@@ -18,6 +18,16 @@
 - Keep action button labels concise; do not append keyboard shortcut hints in the visible label unless explicitly requested.
 - Do not split a dense technical settings workflow into competing nested cards inside a narrow secondary column. If a section combines long labels, action buttons, and optional detail, merge the related controls into one coherent panel and collapse heavy forms by default.
 
+## Anti-vibe-coded product quality
+- Avoid novelty-first UI: no random purple gradients, sparkles, emojis-as-UI, fake testimonials, decorative social links, or generic launch-copy.
+- Consistency is the premium signal: use one spacing scale, one radius scale, one elevation model, one icon system, and shared components instead of page-specific visual improvisation.
+- Motion must be functional and subtle; avoid bounce, rotation, aggressive card lift, glow, and page-wide animation unless it directly communicates product state.
+- Every async action needs visible state: disabled controls, progress labels or spinners, and stable loading/empty/error surfaces.
+- Prefer skeletons or reserved-size loading surfaces for data-heavy modules instead of alert text that shifts layout.
+- Treat metadata as product surface: title, description, favicon/icon, OpenGraph, and Twitter metadata must be intentional and Atlasium-specific.
+- Keep copy operational and specific to Atlasium; avoid generic slogans, buzzword stacking, placeholder/demo language, and vague value claims.
+- Before shipping UI, audit mobile layout, button/link behavior, placeholder text, dead links, visual rhythm, spacing, radii, and motion restraint.
+
 ## Collaboration preferences
 - After every implemented change, always provide the user with the exact commit message to use.
 - Commit messages must use the conventional `type(scope): subject` format, not a free-form sentence.

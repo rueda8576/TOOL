@@ -1,5 +1,29 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Anti-Vibe-Coded UI Hardening (2026-05-24)
+- [x] Persist anti-vibe-coded quality rules in `tasks/LESSONS.md`.
+- [x] Expand web metadata and add stable Atlasium icon/OpenGraph assets.
+- [x] Formalize spacing, radius, and elevation tokens in the web base CSS.
+- [x] Add shared UX state primitives for loading, skeletons, empty states, field messages, and status lines.
+- [x] Replace top-level loading alerts in major data-heavy surfaces with stable loading states.
+- [x] Reduce decorative hover motion and remove nonessential inline styles.
+- [x] Run static audits, web type-check, build, and diff hygiene checks.
+
+### Review - Atlasium Anti-Vibe-Coded UI Hardening
+- Added a permanent `Anti-vibe-coded product quality` section to `tasks/LESSONS.md` covering visual restraint, consistency, motion, async states, metadata, copy, and pre-ship audits.
+- Expanded app metadata with Atlasium-specific title templates, application name, description, OpenGraph, Twitter metadata, and stable local icon/OpenGraph SVG assets.
+- Added spacing, radius, and elevation tokens to the base CSS and reduced decorative hover transforms/entry motion so interaction feedback stays restrained and functional.
+- Added shared UX state primitives: `LoadingState`, `SkeletonBlock`, `EmptyState`, `FieldMessage`, and `StatusLine`.
+- Replaced major top-level data-loading alert paragraphs across Projects, Overview, Documents, Tasks, Meetings, Code, Wiki, document detail, and Account settings with reserved loading surfaces.
+- Removed nonessential inline styles found in the Code workspace; remaining inline styles are reserved for genuinely dynamic concerns such as tree indentation, collaborator colors, context menu positioning, and embedded editor/PDF integrations.
+- Verification:
+  - `rg -n "purple|violet|sparkle|✨|href=\"#\"|window\\.confirm" apps/web/app apps/web/components apps/web/lib` returned no matches
+  - `rg -n "openGraph|twitter|metadataBase|applicationName" apps/web/app/layout.tsx` confirmed the metadata fields
+  - `rg -n "style=\\{\\{|alert alert-|button button-|list-item" apps/web/app apps/web/components` still reports legacy/shared primitive classes and dynamic inline exceptions; these are documented for gradual cleanup rather than removed wholesale in this pass
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - `git diff --check` passed
+
 ## Atlasium Workbench Navigation + Account Drawer (2026-05-24)
 - [x] Add the implementation plan and preserve existing visual identity lessons.
 - [x] Add shared UI primitives for buttons, icon buttons, alerts, tabs, modal/dialog, user menu, and account drawer surfaces.
