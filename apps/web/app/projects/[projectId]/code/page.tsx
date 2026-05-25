@@ -29,7 +29,9 @@ import {
   downloadRepositoryArchive,
   ensureProjectRepositoryAccess,
   getGitlabConnectionStatus,
+  getRepositoryImageMimeType,
   getRepositoryFile,
+  getRepositoryRawFile,
   getRepositoryTree,
   listProjectRepositories,
   GitlabConnectionStatus,
@@ -141,6 +143,9 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [commits, setCommits] = useState<RepositoryCommit[]>([]);
   const [tree, setTree] = useState<RepositoryTree | null>(null);
   const [selectedFile, setSelectedFile] = useState<RepositoryFile | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [imagePreviewLoading, setImagePreviewLoading] = useState(false);
+  const [imagePreviewError, setImagePreviewError] = useState<string | null>(null);
   const [mergeRequests, setMergeRequests] = useState<RepositoryMergeRequest[]>([]);
   const [browserRef, setBrowserRef] = useState("");
   const [browserPath, setBrowserPath] = useState("");
@@ -192,6 +197,9 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const currentMergeRequestSourceBranch =
     mergeRequestSourceBranch || branches.find((branch) => !branch.default)?.name || currentBrowseRef;
   const newRepositoryPathPreview = repositoryPathPreview(newRepositoryName, newRepositoryPath);
+  const selectedFileImageMimeType =
+    selectedFile && selectedFile.binary ? getRepositoryImageMimeType(selectedFile.fileName || selectedFile.filePath) : null;
+  const selectedFileKindLabel = selectedFile ? (selectedFile.binary ? (selectedFileImageMimeType ? "Image" : "Binary") : "Text") : "";
 
   const resetRepositoryWorkspace = useCallback((): void => {
     setBranches([]);
@@ -341,6 +349,55 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [activeTab, selectedFile]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    setImagePreviewUrl(null);
+    setImagePreviewError(null);
+
+    if (!selectedFile || !selectedFile.binary || !selectedFileImageMimeType) {
+      setImagePreviewLoading(false);
+      return () => undefined;
+    }
+
+    if (!token || !connectedRepository) {
+      setImagePreviewLoading(false);
+      setImagePreviewError("Image preview requires an active repository session.");
+      return () => undefined;
+    }
+
+    setImagePreviewLoading(true);
+    void getRepositoryRawFile(params.projectId, connectedRepository.id, token, {
+      filePath: selectedFile.filePath,
+      ref: selectedFile.ref || undefined
+    })
+      .then(({ blob }) => {
+        if (cancelled) {
+          return;
+        }
+        objectUrl = URL.createObjectURL(blob);
+        setImagePreviewUrl(objectUrl);
+      })
+      .catch((previewError) => {
+        if (!cancelled) {
+          setImagePreviewError((previewError as Error).message || "Unable to load image preview.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setImagePreviewLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [connectedRepository, params.projectId, selectedFile, selectedFileImageMimeType, token]);
 
   useEffect(() => {
     if (!token || !connectedRepository || !gitlabConnected) {
@@ -835,7 +892,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                             <div className="code-viewer-title">
                               <code className="code-viewer-path">{selectedFile.filePath}</code>
                               <span>
-                                {selectedFile.binary ? "Binary" : "Text"} file - {formatBytes(selectedFile.size)} - {selectedFile.ref}
+                                {selectedFileKindLabel} file - {formatBytes(selectedFile.size)} - {selectedFile.ref}
                               </span>
                             </div>
                             <div className="code-viewer-actions">
@@ -855,7 +912,22 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                             </div>
                           </div>
                           {selectedFile.binary ? (
-                            <EmptyState title="Binary preview unavailable" detail="Open the repository in GitLab to inspect this file." />
+                            selectedFileImageMimeType ? (
+                              imagePreviewLoading ? (
+                                <LoadingState title="Loading image preview" detail="Fetching the repository image through authenticated GitLab access." />
+                              ) : imagePreviewUrl ? (
+                                <div className="code-image-preview">
+                                  <img src={imagePreviewUrl} alt={selectedFile.fileName} />
+                                </div>
+                              ) : (
+                                <EmptyState
+                                  title="Image preview unavailable"
+                                  detail={imagePreviewError ?? "Open the repository in GitLab to inspect this image."}
+                                />
+                              )
+                            ) : (
+                              <EmptyState title="Binary preview unavailable" detail="Open the repository in GitLab to inspect this file." />
+                            )
                           ) : (
                             <pre className={`code-file-content${fileWordWrap ? " code-file-content-wrap" : ""}`}>{selectedFile.content}</pre>
                           )}

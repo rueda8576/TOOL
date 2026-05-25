@@ -2,6 +2,17 @@ import { authFetch, authFetchResponse } from "./client-api";
 
 const REPOSITORY_ARCHIVE_ACCEPT_HEADER = "application/zip, application/octet-stream, */*";
 
+const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
+  avif: "image/avif",
+  bmp: "image/bmp",
+  gif: "image/gif",
+  ico: "image/x-icon",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp"
+};
+
 export type GitlabConnectionStatus = {
   connected: boolean;
   reconnectRequired: boolean;
@@ -71,6 +82,11 @@ export type RepositoryFile = {
   binary: boolean;
   content: string | null;
 };
+
+export function getRepositoryImageMimeType(fileName: string): string | null {
+  const extension = fileName.split(".").pop()?.toLowerCase();
+  return extension ? IMAGE_MIME_BY_EXTENSION[extension] ?? null : null;
+}
 
 export type RepositoryMergeRequest = {
   id: number;
@@ -251,6 +267,34 @@ export async function getRepositoryFile(
     search.set("ref", params.ref.trim());
   }
   return authFetch<RepositoryFile>(`/projects/${projectId}/repositories/${repositoryId}/file?${search.toString()}`, { token });
+}
+
+export async function getRepositoryRawFile(
+  projectId: string,
+  repositoryId: string,
+  token: string,
+  params: { ref?: string; filePath: string }
+): Promise<{ blob: Blob; contentType: string | null }> {
+  const search = new URLSearchParams({ filePath: params.filePath });
+  if (params.ref?.trim()) {
+    search.set("ref", params.ref.trim());
+  }
+  const response = await authFetchResponse(`/projects/${projectId}/repositories/${repositoryId}/file/raw?${search.toString()}`, {
+    token,
+    init: {
+      method: "GET",
+      headers: {
+        Accept: getRepositoryImageMimeType(params.filePath) ?? "application/octet-stream"
+      }
+    }
+  });
+  const blob = await response.blob();
+  const fallbackMimeType = getRepositoryImageMimeType(params.filePath);
+  const typedBlob = blob.type || !fallbackMimeType ? blob : new Blob([blob], { type: fallbackMimeType });
+  return {
+    blob: typedBlob,
+    contentType: response.headers.get("Content-Type") ?? (typedBlob.type || null)
+  };
 }
 
 export async function createRepositoryBranch(

@@ -1022,6 +1022,49 @@ export class GitlabService {
     });
   }
 
+  async getRepositoryRawFile(
+    projectId: string,
+    filePath: string,
+    ref: string | undefined,
+    user: AuthenticatedUser,
+    repositoryId?: string
+  ): Promise<{
+    buffer: Buffer;
+    fileName: string;
+    contentType: string;
+  }> {
+    const repository = await this.requireReadableRepository(projectId, user, repositoryId);
+    const normalizedFilePath = filePath.trim();
+    if (!normalizedFilePath) {
+      throw new BadRequestException("filePath is required");
+    }
+
+    return this.withUserAccessToken(user.userId, async (accessToken) => {
+      const resolvedRef = ref?.trim() || repository.defaultBranch;
+      const search = new URLSearchParams({ ref: resolvedRef });
+
+      try {
+        const rawFile = await this.executeGitlabBinaryRequest(
+          accessToken,
+          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/files/${encodeURIComponent(normalizedFilePath)}/raw?${search.toString()}`,
+          {
+            headers: {
+              Accept: "*/*"
+            }
+          }
+        );
+
+        return {
+          buffer: rawFile.buffer,
+          fileName: this.buildRepositoryRawFileName(normalizedFilePath),
+          contentType: rawFile.contentType ?? this.detectRepositoryFileContentType(normalizedFilePath) ?? "application/octet-stream"
+        };
+      } catch (error) {
+        throw this.mapRepositoryAccessError(error);
+      }
+    });
+  }
+
   async listMergeRequests(
     projectId: string,
     state: RepositoryMergeRequestState | undefined,
@@ -1647,6 +1690,34 @@ export class GitlabService {
       .replace(/[^a-zA-Z0-9._-]+/g, "-")
       .replace(/^-+|-+$/g, "");
     return `${pathFragment || "repository"}-${refFragment || "archive"}.zip`;
+  }
+
+  private buildRepositoryRawFileName(filePath: string): string {
+    const fileName = filePath.split("/").pop()?.trim() || "repository-file";
+    return fileName.replace(/[\r\n"]/g, "-");
+  }
+
+  private detectRepositoryFileContentType(filePath: string): string | null {
+    const extension = filePath.split(".").pop()?.toLowerCase();
+    switch (extension) {
+      case "png":
+        return "image/png";
+      case "jpg":
+      case "jpeg":
+        return "image/jpeg";
+      case "gif":
+        return "image/gif";
+      case "webp":
+        return "image/webp";
+      case "avif":
+        return "image/avif";
+      case "bmp":
+        return "image/bmp";
+      case "ico":
+        return "image/x-icon";
+      default:
+        return null;
+    }
   }
 
   private resolveTokenExpiry(payload: GitlabOAuthTokenPayload): Date | null {

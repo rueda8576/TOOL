@@ -161,6 +161,35 @@ export class GitlabController {
     return this.gitlabService.getRepositoryFile(projectId, query.filePath, query.ref, user, repositoryId);
   }
 
+  @Get("projects/:projectId/repository/file/raw")
+  async getRawFile(
+    @Param("projectId") projectId: string,
+    @Query() query: GetRepositoryFileQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response
+  ): Promise<void> {
+    const rawFile = await this.gitlabService.getRepositoryRawFile(projectId, query.filePath, query.ref, user);
+    res.setHeader("Content-Type", rawFile.contentType);
+    res.setHeader("Content-Disposition", `inline; filename="${rawFile.fileName}"`);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.send(rawFile.buffer);
+  }
+
+  @Get("projects/:projectId/repositories/:repositoryId/file/raw")
+  async getScopedRawFile(
+    @Param("projectId") projectId: string,
+    @Param("repositoryId") repositoryId: string,
+    @Query() query: GetRepositoryFileQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response
+  ): Promise<void> {
+    const rawFile = await this.gitlabService.getRepositoryRawFile(projectId, query.filePath, query.ref, user, repositoryId);
+    res.setHeader("Content-Type", rawFile.contentType);
+    res.setHeader("Content-Disposition", `inline; filename="${rawFile.fileName}"`);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.send(rawFile.buffer);
+  }
+
   @Get("projects/:projectId/repository/merge-requests")
   listMergeRequests(
     @Param("projectId") projectId: string,

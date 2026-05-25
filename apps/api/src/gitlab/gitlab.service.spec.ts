@@ -1835,6 +1835,50 @@ describe("GitlabService", () => {
     });
   });
 
+  it("streams raw repository files for image previews", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecordById").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      binaryResponse(200, new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+        "content-type": "image/png"
+      }) as Response
+    );
+
+    await expect(
+      service.getRepositoryRawFile(
+        "project-1",
+        "plots/Coordinates.png",
+        "main",
+        {
+          userId: "user-1",
+          globalRole: "reader"
+        } as any,
+        "repo-1"
+      )
+    ).resolves.toEqual({
+      buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+      fileName: "Coordinates.png",
+      contentType: "image/png"
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://git.atlasium.info/api/v4/projects/123/repository/files/plots%2FCoordinates.png/raw?ref=main",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: "*/*",
+          Authorization: "Bearer user-token"
+        })
+      })
+    );
+  });
+
   it("creates a repository branch and writes an audit log", async () => {
     const service = makeService();
     jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);

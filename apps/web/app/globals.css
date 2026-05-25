@@ -4443,6 +4443,32 @@ body.wiki-layout-dragging * {
   word-break: break-word;
 }
 
+.code-image-preview {
+  flex: 1;
+  min-height: 24rem;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(45deg, rgba(23, 32, 45, 0.04) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(23, 32, 45, 0.04) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(23, 32, 45, 0.04) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(23, 32, 45, 0.04) 75%),
+    var(--surface);
+  background-position: 0 0, 0 0.5rem, 0.5rem -0.5rem, -0.5rem 0;
+  background-size: 1rem 1rem;
+  overflow: auto;
+}
+
+.code-image-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
 .code-commit-list {
   display: flex;
   flex-direction: column;

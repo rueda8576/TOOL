@@ -22,6 +22,7 @@ describe("GitlabController HTTP", () => {
       listCommits: jest.fn(),
       getRepositoryTree: jest.fn(),
       getRepositoryFile: jest.fn(),
+      getRepositoryRawFile: jest.fn(),
       listMergeRequests: jest.fn(),
       getRepositoryArchive: jest.fn(),
       createBranch: jest.fn(),
@@ -275,6 +276,11 @@ describe("GitlabController HTTP", () => {
       binary: false,
       content: "# Atlasium"
     });
+    gitlabService.getRepositoryRawFile.mockResolvedValue({
+      fileName: "Coordinates.png",
+      contentType: "image/png",
+      buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47])
+    });
     gitlabService.listMergeRequests.mockResolvedValue([{ id: 7 }]);
     gitlabService.getRepositoryArchive.mockResolvedValue({
       fileName: "atlasium-nav-main.zip",
@@ -309,6 +315,12 @@ describe("GitlabController HTTP", () => {
     await request(app.getHttpServer())
       .get("/projects/project-1/repositories/repo-1/file")
       .query({ filePath: "README.md", ref: "main" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    const rawFile = await request(app.getHttpServer())
+      .get("/projects/project-1/repositories/repo-1/file/raw")
+      .query({ filePath: "plots/Coordinates.png", ref: "main" })
       .set(authHeaders("reader", { userId: "reader-1" }))
       .expect(200);
 
@@ -386,6 +398,17 @@ describe("GitlabController HTTP", () => {
       },
       "repo-1"
     );
+    expect(gitlabService.getRepositoryRawFile).toHaveBeenCalledWith(
+      "project-1",
+      "plots/Coordinates.png",
+      "main",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      },
+      "repo-1"
+    );
     expect(gitlabService.listMergeRequests).toHaveBeenCalledWith(
       "project-1",
       "opened",
@@ -426,6 +449,9 @@ describe("GitlabController HTTP", () => {
       },
       "repo-1"
     );
+    expect(rawFile.headers["content-type"]).toContain("image/png");
+    expect(rawFile.headers["content-disposition"]).toBe("inline; filename=\"Coordinates.png\"");
+    expect(rawFile.headers["cache-control"]).toBe("private, no-store");
   });
 
   it("binds repository file query parameters and current user", async () => {
@@ -437,9 +463,20 @@ describe("GitlabController HTTP", () => {
       binary: false,
       content: "# Atlasium"
     });
+    gitlabService.getRepositoryRawFile.mockResolvedValue({
+      fileName: "README.md",
+      contentType: "text/markdown",
+      buffer: Buffer.from("# Atlasium")
+    });
 
     const response = await request(app.getHttpServer())
       .get("/projects/project-1/repository/file")
+      .query({ filePath: "README.md", ref: "main" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    const rawResponse = await request(app.getHttpServer())
+      .get("/projects/project-1/repository/file/raw")
       .query({ filePath: "README.md", ref: "main" })
       .set(authHeaders("reader", { userId: "reader-1" }))
       .expect(200);
@@ -462,6 +499,18 @@ describe("GitlabController HTTP", () => {
       binary: false,
       content: "# Atlasium"
     });
+    expect(gitlabService.getRepositoryRawFile).toHaveBeenCalledWith(
+      "project-1",
+      "README.md",
+      "main",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      }
+    );
+    expect(rawResponse.headers["content-disposition"]).toBe("inline; filename=\"README.md\"");
+    expect(rawResponse.headers["cache-control"]).toBe("private, no-store");
   });
 
   it("allows admins to search GitLab projects and binds the query", async () => {

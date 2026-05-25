@@ -1,5 +1,26 @@
 # Implementation TODO (v1 bootstrap)
 
+## Code Image Preview For Repository Files (2026-05-25)
+- [x] Add repository raw-file API routes for scoped and legacy Code file access.
+- [x] Implement GitLab raw-file service support with existing repository read permissions.
+- [x] Add web helper and Code viewer state for authenticated raster image preview blobs.
+- [x] Add contained image preview CSS and preserve non-image binary fallback behavior.
+- [x] Add focused API/service tests and run verification.
+
+### Review - Code Image Preview For Repository Files
+- Added authenticated raw-file streaming routes for legacy and repository-scoped Code file access with inline disposition and private no-store cache headers.
+- Added GitLab raw file service support using existing repository read resolution and user GitLab access tokens.
+- The Code viewer now detects raster image files, fetches the raw blob, renders it inline, and revokes object URLs on file/repository changes.
+- Non-image binary files continue to show the existing binary preview fallback, while text files keep the word-wrap viewer.
+- Verification:
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/gitlab/gitlab.service.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/gitlab.controller.http.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - Static audit for raw-file/image-preview references passed
+  - `git diff --check` passed
+
 ## CI API Aggregated Coverage Fix (2026-05-25)
 - [x] Normalize initial project repository metadata when GitLab provision data is partial.
 - [x] Update the API smoke GitLab provision mock to the current repository provision shape.
