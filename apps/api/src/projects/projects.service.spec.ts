@@ -196,9 +196,15 @@ describe("ProjectsService", () => {
       data: expect.objectContaining({
         projectId: "p1",
         gitlabProjectId: "gl-1",
+        name: "Main project",
+        description: "desc",
+        visibility: "private",
+        lastActivityAt: expect.any(Date),
         connectedByUserId: "admin-1"
       })
     });
+    const repositoryCreateData = prisma.projectRepository.create.mock.calls[0][0].data;
+    expect(Number.isNaN(repositoryCreateData.lastActivityAt.getTime())).toBe(false);
     expect(auditService.log).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "project.create",

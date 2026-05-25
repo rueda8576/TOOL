@@ -205,6 +205,7 @@
   - read-access tests must mock whatever the current access helper now needs (`currentRevisionId`, `getProjectAccess`, etc.), not the previous helper contract
 
 ## Backend testing
+- When expanding internal service return shapes that feed required Prisma fields, update integration mocks in the same change and add defensive normalization before database writes so stale partial mocks cannot create invalid required values.
 - In PNPM workspace scripts, avoid relying on `pnpm run <script> -- --coverage ...` for Jest in CI; forwarded args can be treated as test patterns and produce `No tests found`. Prefer dedicated coverage scripts or `pnpm exec jest ...`.
 - For Nest HTTP/controller tests that should exercise real auth/role wiring, keep the real `JwtAuthGuard` and `RolesGuard` in the module and mock `SessionAuthService.authenticateToken`; replacing the guard itself hides route metadata and role regressions.
 - If Prisma migration history does not contain an initial baseline, backend integration CI on a fresh Postgres DB must bootstrap schema (`db push` + `migrate resolve`) before `migrate deploy`; otherwise e2e validation fails before the app even boots.

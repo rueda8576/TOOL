@@ -1,5 +1,21 @@
 # Implementation TODO (v1 bootstrap)
 
+## CI API Aggregated Coverage Fix (2026-05-25)
+- [x] Normalize initial project repository metadata when GitLab provision data is partial.
+- [x] Update the API smoke GitLab provision mock to the current repository provision shape.
+- [x] Add focused ProjectsService coverage for fallback repository metadata.
+- [x] Run the failing integration path, focused backend tests, type-check, coverage when available, and diff hygiene.
+
+### Review - CI API Aggregated Coverage Fix
+- Project creation now falls back to the Atlasium project name, project description, private visibility, and a valid current timestamp when provisioned repository metadata is partial.
+- The API smoke GitLab mock now returns the current managed repository provision shape, including name, description, visibility, and `lastActivityAt`.
+- `ProjectsService` unit coverage now asserts fallback repository metadata and validates the stored `lastActivityAt` is not an invalid date.
+- Verification:
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/projects/projects.service.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `git diff --check` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.integration.config.ts --runInBand --forceExit test/api-smoke.e2e-spec.ts` could not run locally because Postgres is unavailable at `localhost:5432`; this is the same local DB limitation as previous integration checks, not the CI Prisma validation error.
+
 ## Multi-Repository Code Workspace (2026-05-25)
 - [x] Update Prisma schema and migration for multiple managed repositories per project.
 - [x] Refactor GitLab repository service/controller routes for repository-scoped operations while keeping legacy wrappers.

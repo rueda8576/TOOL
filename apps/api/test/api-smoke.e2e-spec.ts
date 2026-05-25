@@ -23,11 +23,18 @@ describe("API integration", () => {
   };
 
   const gitlabService = {
-    provisionManagedRemoteRepository: jest.fn().mockResolvedValue({
-      gitlabProjectId: "gitlab-project-1",
-      pathWithNamespace: "atlasium/visnav",
-      webUrl: "https://git.atlasium.info/atlasium/visnav",
-      defaultBranch: "main"
+    provisionManagedRemoteRepository: jest.fn().mockImplementation((projectKey: string, repositoryName: string) => {
+      const path = projectKey.toLowerCase();
+      return Promise.resolve({
+        gitlabProjectId: "gitlab-project-1",
+        name: repositoryName,
+        description: null,
+        pathWithNamespace: `atlasium/${path}`,
+        webUrl: `https://git.atlasium.info/atlasium/${path}`,
+        defaultBranch: "main",
+        visibility: "private",
+        lastActivityAt: "2026-05-25T12:00:00.000Z"
+      });
     }),
     rollbackManagedRemoteProvision: jest.fn().mockResolvedValue(undefined),
     syncProjectRepositoryAccess: jest.fn().mockResolvedValue(undefined),

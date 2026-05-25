@@ -106,6 +106,14 @@ function toDayKey(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
 
+function parseDateOrFallback(value: Date | string | null | undefined, fallback: Date): Date {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+}
+
 function startOfUtcDay(value: Date): Date {
   return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
 }
@@ -238,6 +246,7 @@ export class ProjectsService {
     }
 
     const provisionedRepository = await this.gitlabService.provisionManagedRemoteRepository(key, dto.name);
+    const repositoryLastActivityAt = parseDateOrFallback(provisionedRepository.lastActivityAt, new Date());
     let project: {
       id: string;
       key: string;
@@ -272,13 +281,13 @@ export class ProjectsService {
           data: {
             projectId: createdProject.id,
             gitlabProjectId: provisionedRepository.gitlabProjectId,
-            name: provisionedRepository.name,
-            description: provisionedRepository.description,
+            name: provisionedRepository.name?.trim() || dto.name,
+            description: provisionedRepository.description ?? dto.description ?? null,
             pathWithNamespace: provisionedRepository.pathWithNamespace,
             webUrl: provisionedRepository.webUrl,
             defaultBranch: provisionedRepository.defaultBranch,
-            visibility: provisionedRepository.visibility,
-            lastActivityAt: new Date(provisionedRepository.lastActivityAt),
+            visibility: provisionedRepository.visibility || "private",
+            lastActivityAt: repositoryLastActivityAt,
             connectedByUserId: user.userId
           }
         });
