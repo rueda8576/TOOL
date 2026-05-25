@@ -104,6 +104,8 @@
 - The `/projects/:projectId` landing page should surface live, cross-module signals (recent documents, in-progress tasks, current-month meetings) rather than static module descriptions.
 - Reuse existing module data contracts in dashboard widgets instead of introducing one-off backend endpoints until aggregation/performance needs justify it.
 - When a dashboard widget links into a module with preselected state, pass explicit query params (`view`, `date`, `month`) and make the target page initialize from them defensively.
+- For dense project overview pages, prefer a command-center model over a card directory: show attention, near-term work, equal module state, and provenance from one curated backend response.
+- Overview aggregation should stay local-data based and avoid live external service calls; deeper freshness belongs in the owning module workspace.
 
 ## Wiki knowledge hub
 - When APIs use bearer-token auth, markdown `<img src="/api/...">` links will not automatically include auth headers; render protected images through an authenticated fetch-to-blob component instead of plain image tags.

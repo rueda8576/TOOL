@@ -1,111 +1,193 @@
 "use client";
 
+import {
+  AlertTriangle,
+  BookOpen,
+  CalendarDays,
+  CheckCircle2,
+  CircleAlert,
+  Clock3,
+  Code2,
+  FileText,
+  GitBranch,
+  ListChecks,
+  ShieldCheck
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "../../../components/app-shell";
 import { ProjectSubtitle } from "../../../components/project-subtitle";
-import { LoadingState } from "../../../components/ui";
-import { DocumentListItem, listProjectDocuments } from "../../../lib/documents";
-import { getProjectRepositoryStatus, ProjectRepositoryStatus } from "../../../lib/gitlab";
-import { listProjectMeetings, MeetingListItem } from "../../../lib/meetings";
-import { listProjectTasks, TaskListItem } from "../../../lib/tasks";
+import { Alert, Badge, EmptyState, LoadingState } from "../../../components/ui";
+import {
+  getProjectOverview,
+  ProjectOverview,
+  ProjectOverviewAttentionItem,
+  ProjectOverviewModule,
+  ProjectOverviewSeverity
+} from "../../../lib/project-overview";
 
-type CalendarDayCell = {
-  dateKey: string;
-  dayNumber: number;
-  inCurrentMonth: boolean;
-  isToday: boolean;
+type ModuleCard = {
+  id: ProjectOverviewModule;
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  metric: string;
+  detail: string;
+  status: string;
 };
 
-const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const MODULE_ICONS: Record<ProjectOverviewModule, LucideIcon> = {
+  wiki: BookOpen,
+  documents: FileText,
+  code: Code2,
+  tasks: ListChecks,
+  meetings: CalendarDays,
+  project: ShieldCheck
+};
 
-function dayKeyFromDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
+const MODULE_LABELS: Record<ProjectOverviewModule, string> = {
+  wiki: "Wiki",
+  documents: "Documents",
+  code: "Code",
+  tasks: "Tasks",
+  meetings: "Meetings",
+  project: "Project"
+};
 
-function parseDayKey(dayKey: string): Date {
-  return new Date(`${dayKey}T12:00:00.000Z`);
-}
-
-function firstDayOfCurrentMonth(): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-}
-
-function lastDayOfMonth(monthStart: Date): Date {
-  return new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0));
-}
-
-function buildMonthCells(monthCursor: Date): CalendarDayCell[] {
-  const monthStart = new Date(Date.UTC(monthCursor.getUTCFullYear(), monthCursor.getUTCMonth(), 1));
-  const startOffset = (monthStart.getUTCDay() + 6) % 7;
-  const gridStart = new Date(Date.UTC(monthCursor.getUTCFullYear(), monthCursor.getUTCMonth(), 1 - startOffset));
-  const todayKey = dayKeyFromDate(new Date());
-
-  const cells: CalendarDayCell[] = [];
-  for (let index = 0; index < 42; index += 1) {
-    const current = new Date(Date.UTC(gridStart.getUTCFullYear(), gridStart.getUTCMonth(), gridStart.getUTCDate() + index));
-    const dateKey = dayKeyFromDate(current);
-    cells.push({
-      dateKey,
-      dayNumber: current.getUTCDate(),
-      inCurrentMonth: current.getUTCMonth() === monthCursor.getUTCMonth(),
-      isToday: dateKey === todayKey
-    });
+function formatDate(dateString: string | null): string {
+  if (!dateString) {
+    return "Not recorded";
   }
-
-  return cells;
+  return new Date(dateString).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
 }
 
-function monthLabel(monthCursor: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC"
-  }).format(monthCursor);
+function formatDateTime(dateString: string | null): string {
+  if (!dateString) {
+    return "Not recorded";
+  }
+  return new Date(dateString).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
-function monthKey(monthStart: Date): string {
-  const month = String(monthStart.getUTCMonth() + 1).padStart(2, "0");
-  return `${monthStart.getUTCFullYear()}-${month}`;
+function formatTitleCase(value: string): string {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
-function formatDate(dateString: string): string {
-  return new Date(dateString).toLocaleDateString();
+function severityIcon(severity: ProjectOverviewSeverity): LucideIcon {
+  if (severity === "danger") {
+    return CircleAlert;
+  }
+  if (severity === "warning") {
+    return AlertTriangle;
+  }
+  return Clock3;
 }
 
-function normalizeDocumentType(type: DocumentListItem["type"]): string {
-  switch (type) {
-    case "paper":
-      return "Paper";
-    case "manual":
-      return "Manual";
-    case "model":
-      return "Model";
-    case "draft":
-      return "Draft";
-    case "minutes":
-      return "Minutes";
+function moduleHref(projectId: string, module: ProjectOverviewModule): string {
+  switch (module) {
+    case "wiki":
+      return `/projects/${projectId}/wiki`;
+    case "documents":
+      return `/projects/${projectId}/documents`;
+    case "code":
+      return `/projects/${projectId}/code`;
+    case "tasks":
+      return `/projects/${projectId}/tasks`;
+    case "meetings":
+      return `/projects/${projectId}/meetings`;
     default:
-      return "Other";
+      return `/projects/${projectId}`;
   }
 }
 
-function compileStatusLabel(status: string): string {
-  switch (status) {
-    case "succeeded":
-      return "Compiled";
-    case "running":
-      return "Compiling";
-    case "failed":
-      return "Compile failed";
-    case "timeout":
-      return "Compile timeout";
-    default:
-      return "Pending compile";
-  }
+function buildModuleCards(projectId: string, overview: ProjectOverview): ModuleCard[] {
+  const { modules } = overview;
+  return [
+    {
+      id: "wiki",
+      label: "Wiki",
+      href: moduleHref(projectId, "wiki"),
+      icon: BookOpen,
+      metric: `${modules.wiki.publishedPages} published`,
+      detail: modules.wiki.draftPages > 0 ? `${modules.wiki.draftPages} draft page${modules.wiki.draftPages === 1 ? "" : "s"} need review` : "Knowledge base is published",
+      status: modules.wiki.latestUpdatedAt ? `Updated ${formatDate(modules.wiki.latestUpdatedAt)}` : "No pages yet"
+    },
+    {
+      id: "documents",
+      label: "Documents",
+      href: moduleHref(projectId, "documents"),
+      icon: FileText,
+      metric: `${modules.documents.total} document${modules.documents.total === 1 ? "" : "s"}`,
+      detail:
+        modules.documents.failedCompiles > 0
+          ? `${modules.documents.failedCompiles} compile issue${modules.documents.failedCompiles === 1 ? "" : "s"}`
+          : `${modules.documents.runningCompiles} compile${modules.documents.runningCompiles === 1 ? "" : "s"} running`,
+      status: modules.documents.latestUpdatedAt ? `Updated ${formatDate(modules.documents.latestUpdatedAt)}` : "No documents yet"
+    },
+    {
+      id: "code",
+      label: "Code",
+      href: moduleHref(projectId, "code"),
+      icon: Code2,
+      metric: modules.code.connected ? "Repository ready" : "Repository missing",
+      detail: modules.code.pathWithNamespace ?? "Managed GitLab repository is not provisioned",
+      status: modules.code.defaultBranch ? `Default ${modules.code.defaultBranch}` : "Open Code to provision"
+    },
+    {
+      id: "tasks",
+      label: "Tasks",
+      href: moduleHref(projectId, "tasks"),
+      icon: ListChecks,
+      metric: `${modules.tasks.open} open`,
+      detail: `${modules.tasks.inProgress} in progress - ${modules.tasks.blocked} blocked`,
+      status: modules.tasks.overdue > 0 ? `${modules.tasks.overdue} overdue` : `${modules.tasks.critical} critical`
+    },
+    {
+      id: "meetings",
+      label: "Meetings",
+      href: moduleHref(projectId, "meetings"),
+      icon: CalendarDays,
+      metric: `${modules.meetings.thisMonth} this month`,
+      detail: `${modules.meetings.upcoming} upcoming - ${modules.meetings.openActions} open actions`,
+      status: modules.meetings.next[0] ? `Next ${formatDateTime(modules.meetings.next[0].scheduledAt)}` : "No upcoming meetings"
+    }
+  ];
+}
+
+function AttentionItem({ item }: { item: ProjectOverviewAttentionItem }): JSX.Element {
+  const Icon = severityIcon(item.severity);
+  const ModuleIcon = MODULE_ICONS[item.module];
+  return (
+    <li className={`overview-attention-item overview-attention-${item.severity}`}>
+      <Link className="overview-attention-link" href={item.href}>
+        <span className="overview-attention-icon" aria-hidden="true">
+          <Icon size={17} />
+        </span>
+        <span className="overview-attention-copy">
+          <span className="overview-attention-title">{item.title}</span>
+          <span className="overview-attention-detail">{item.detail}</span>
+        </span>
+        <span className="overview-attention-meta">
+          <ModuleIcon size={14} aria-hidden="true" />
+          {MODULE_LABELS[item.module]}
+        </span>
+      </Link>
+    </li>
+  );
 }
 
 export default function ProjectDetailPage({
@@ -114,70 +196,23 @@ export default function ProjectDetailPage({
   params: { projectId: string };
 }): JSX.Element {
   const router = useRouter();
-  const [documents, setDocuments] = useState<DocumentListItem[]>([]);
-  const [meetings, setMeetings] = useState<MeetingListItem[]>([]);
-  const [inProgressTasks, setInProgressTasks] = useState<TaskListItem[]>([]);
-  const [repositoryStatus, setRepositoryStatus] = useState<ProjectRepositoryStatus | null>(null);
+  const [overview, setOverview] = useState<ProjectOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const currentMonthStart = useMemo(firstDayOfCurrentMonth, []);
-  const currentMonthEnd = useMemo(() => lastDayOfMonth(currentMonthStart), [currentMonthStart]);
-  const currentMonthKey = useMemo(() => monthKey(currentMonthStart), [currentMonthStart]);
-  const calendarCells = useMemo(() => buildMonthCells(currentMonthStart), [currentMonthStart]);
-
-  const meetingsByDate = useMemo(() => {
-    const grouped = new Map<string, MeetingListItem[]>();
-    for (const meeting of meetings) {
-      if (!grouped.has(meeting.scheduledDate)) {
-        grouped.set(meeting.scheduledDate, []);
-      }
-      grouped.get(meeting.scheduledDate)?.push(meeting);
-    }
-    return grouped;
-  }, [meetings]);
-
-  const loadDashboard = useCallback(
+  const loadOverview = useCallback(
     async (authToken: string): Promise<void> => {
       setLoading(true);
       setError(null);
       try {
-        const [documentsResult, meetingsResult, tasksResult, repositoryResult] = await Promise.all([
-          listProjectDocuments(params.projectId, authToken),
-          listProjectMeetings(params.projectId, authToken, {
-            from: dayKeyFromDate(currentMonthStart),
-            to: dayKeyFromDate(currentMonthEnd)
-          }),
-          listProjectTasks(params.projectId, authToken),
-          getProjectRepositoryStatus(params.projectId, authToken)
-        ]);
-
-        const sortedDocuments = [...documentsResult]
-          .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-          .slice(0, 5);
-
-        const topInProgressTasks = tasksResult
-          .filter((task) => task.status === "in_progress")
-          .sort((left, right) => {
-            const byUpdatedAt = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
-            if (byUpdatedAt !== 0) {
-              return byUpdatedAt;
-            }
-            return Date.parse(right.createdAt) - Date.parse(left.createdAt);
-          })
-          .slice(0, 6);
-
-        setDocuments(sortedDocuments);
-        setMeetings(meetingsResult);
-        setInProgressTasks(topInProgressTasks);
-        setRepositoryStatus(repositoryResult);
-      } catch (dashboardError) {
-        setError((dashboardError as Error).message);
+        setOverview(await getProjectOverview(params.projectId, authToken));
+      } catch (overviewError) {
+        setError((overviewError as Error).message);
       } finally {
         setLoading(false);
       }
     },
-    [currentMonthEnd, currentMonthStart, params.projectId]
+    [params.projectId]
   );
 
   useEffect(() => {
@@ -187,12 +222,12 @@ export default function ProjectDetailPage({
       return;
     }
 
-    void loadDashboard(storedToken);
-  }, [loadDashboard, router]);
+    void loadOverview(storedToken);
+  }, [loadOverview, router]);
 
-  const onCalendarDayClick = (dateKey: string): void => {
-    router.push(`/projects/${params.projectId}/meetings?view=calendar&date=${dateKey}&month=${currentMonthKey}`);
-  };
+  const moduleCards = useMemo(() => (overview ? buildModuleCards(params.projectId, overview) : []), [overview, params.projectId]);
+  const nextTasks = overview?.modules.tasks.next ?? [];
+  const nextMeetings = overview?.modules.meetings.next ?? [];
 
   return (
     <AppShell
@@ -200,143 +235,147 @@ export default function ProjectDetailPage({
       subtitle={<ProjectSubtitle projectId={params.projectId} />}
       projectId={params.projectId}
     >
-      <section className="project-overview-dashboard">
-        {error ? <p className="alert alert-error">{error}</p> : null}
-        {loading ? <LoadingState title="Loading project overview" detail="Collecting documents, repository status, tasks, and meetings." /> : null}
+      <section className="overview-command-center">
+        {error ? <Alert tone="error">{error}</Alert> : null}
+        {loading ? <LoadingState title="Loading project overview" detail="Collecting project state, attention items, module summaries, and provenance." /> : null}
 
-        {!loading ? (
-          <div className="project-overview-grid">
-            <article className="panel project-overview-card">
-              <div className="project-overview-card-header">
-                <h3 className="section-heading">Recent documents</h3>
-                <Link className="button button-secondary" href={`/projects/${params.projectId}/documents`}>
-                  Open documents
-                </Link>
+        {!loading && overview ? (
+          <>
+            <section className="overview-command-band panel">
+              <div className="overview-command-main">
+                <p className="eyebrow">Atlasium project archive</p>
+                <h2>{overview.project.key} - {overview.project.name}</h2>
+                <p>{overview.project.description ?? "Operational research workspace for documents, wiki knowledge, code, meetings, tasks, and traceability."}</p>
               </div>
-              {documents.length === 0 ? <p className="alert alert-info">No documents yet in this project.</p> : null}
-              {documents.length > 0 ? (
-                <ul className="list project-overview-list">
-                  {documents.map((document) => (
-                    <li className="list-item project-overview-item" key={document.id}>
-                      <Link className="project-overview-item-link" href={`/projects/${params.projectId}/documents/${document.id}`}>
-                        <strong>{document.title}</strong>
-                        <p className="project-overview-meta">
-                          {normalizeDocumentType(document.type)} | Updated {formatDate(document.updatedAt)}
-                          {document.latestMainVersion ? ` | ${compileStatusLabel(document.latestMainVersion.compileStatus)}` : ""}
-                        </p>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </article>
+              <div className="overview-command-state" aria-label="Project status summary">
+                <Badge>{formatTitleCase(overview.access.projectRole)}</Badge>
+                <Badge>{overview.access.canWrite ? "Writable" : "Read only"}</Badge>
+                <Badge>{overview.attention.length} attention</Badge>
+                <Badge>{overview.modules.tasks.open} open tasks</Badge>
+              </div>
+            </section>
 
-            <article className="panel project-overview-card project-overview-code">
-              <div className="project-overview-card-header">
-                <h3 className="section-heading">Code repository</h3>
-                <Link className="button button-secondary" href={`/projects/${params.projectId}/code`}>
-                  Open code
-                </Link>
-              </div>
-              {repositoryStatus?.connected ? (
-                <div className="stack-sm">
-                  <div className="project-overview-code-summary">
-                    <strong>{repositoryStatus.name}</strong>
-                    <code>{repositoryStatus.pathWithNamespace}</code>
+            <div className="overview-command-layout">
+              <section className="panel overview-attention-panel" aria-labelledby="overview-attention-title">
+                <div className="overview-panel-heading">
+                  <div>
+                    <p className="eyebrow">Attention</p>
+                    <h3 id="overview-attention-title" className="section-heading">What needs review</h3>
                   </div>
-                  <p className="project-overview-meta">
-                    {repositoryStatus.visibility} | Default {repositoryStatus.defaultBranch}
-                    {repositoryStatus.lastActivityAt ? ` | Activity ${formatDate(repositoryStatus.lastActivityAt)}` : ""}
-                  </p>
-                  <div className="button-row">
-                    <span className="badge">Managed</span>
-                    <span className="badge">GitLab</span>
+                  <Badge>{overview.attention.length} signal{overview.attention.length === 1 ? "" : "s"}</Badge>
+                </div>
+                {overview.attention.length === 0 ? (
+                  <EmptyState
+                    title="No urgent project signals"
+                    detail="The archive has no failed compiles, overdue tasks, blocked work, or upcoming review warnings right now."
+                  />
+                ) : (
+                  <ul className="overview-attention-list">
+                    {overview.attention.map((item) => (
+                      <AttentionItem key={item.id} item={item} />
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <aside className="overview-next-panel panel" aria-labelledby="overview-next-title">
+                <div className="overview-panel-heading">
+                  <div>
+                    <p className="eyebrow">Next in project</p>
+                    <h3 id="overview-next-title" className="section-heading">Near-term work</h3>
                   </div>
                 </div>
-              ) : (
-                <p className="alert alert-info">Managed repository not provisioned yet.</p>
-              )}
-            </article>
-
-            <article className="panel project-overview-card project-overview-tasks">
-              <div className="project-overview-card-header">
-                <h3 className="section-heading">Tasks in progress</h3>
-                <Link className="button button-secondary" href={`/projects/${params.projectId}/tasks`}>
-                  Open tasks board
-                </Link>
-              </div>
-              {inProgressTasks.length === 0 ? <p className="alert alert-info">No tasks currently in progress.</p> : null}
-              {inProgressTasks.length > 0 ? (
-                <ul className="list project-overview-list">
-                  {inProgressTasks.map((task) => (
-                    <li className="list-item project-overview-item" key={task.id}>
-                      <Link className="project-overview-item-link" href={`/projects/${params.projectId}/tasks`}>
-                        <div className="project-overview-task-row">
-                          <strong>{task.title}</strong>
-                          <span className={`badge task-priority-badge task-priority-${task.priority}`}>
-                            {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
-                          </span>
-                        </div>
-                        <p className="project-overview-meta">
-                          {task.assignee ? task.assignee.name : "Unassigned"}
-                          {task.dueDate ? ` · Due ${formatDate(task.dueDate)}` : ""}
-                        </p>
-                      </Link>
-                    </li>
+                <div className="overview-next-section">
+                  <h4>Tasks</h4>
+                  {nextTasks.length === 0 ? <p className="text-muted">No open tasks.</p> : null}
+                  {nextTasks.map((task) => (
+                    <Link key={task.id} className="overview-next-item" href={moduleHref(params.projectId, "tasks")}>
+                      <span>
+                        <strong>{task.title}</strong>
+                        <span>{task.assigneeName ?? "Unassigned"} - {formatTitleCase(task.status)}</span>
+                      </span>
+                      <Badge>{task.dueDate ? formatDate(task.dueDate) : formatTitleCase(task.priority)}</Badge>
+                    </Link>
                   ))}
-                </ul>
-              ) : null}
-            </article>
-
-            <article className="panel project-overview-card project-overview-card-full project-overview-calendar">
-              <div className="project-overview-card-header">
-                <div>
-                  <h3 className="section-heading">Meetings calendar</h3>
-                  <p className="project-overview-meta">{monthLabel(currentMonthStart)}</p>
                 </div>
-                <Link className="button button-secondary" href={`/projects/${params.projectId}/meetings?view=calendar&month=${currentMonthKey}`}>
-                  Open meetings
-                </Link>
-              </div>
-              {meetings.length === 0 ? <p className="project-overview-calendar-note">No minutes in this month yet.</p> : null}
-              <div className="minutes-calendar-grid">
-                {DAY_NAMES.map((dayName) => (
-                  <div className="minutes-day-name" key={dayName}>
-                    {dayName}
-                  </div>
-                ))}
-                {calendarCells.map((cell) => {
-                  const count = meetingsByDate.get(cell.dateKey)?.length ?? 0;
-                  const hasMinutes = count > 0;
-                  const ariaDayLabel = parseDayKey(cell.dateKey).toLocaleDateString("en-US", {
-                    month: "long",
-                    day: "numeric",
-                    year: "numeric"
-                  });
-
-                  return (
-                    <button
-                      key={cell.dateKey}
-                      type="button"
-                      className={[
-                        "minutes-day-cell",
-                        hasMinutes ? "minutes-day-cell-has-minutes" : "",
-                        cell.inCurrentMonth ? "" : "minutes-day-cell-muted",
-                        cell.isToday ? "minutes-day-cell-today" : ""
-                      ]
-                        .join(" ")
-                        .trim()}
-                      onClick={() => onCalendarDayClick(cell.dateKey)}
-                      aria-label={`${ariaDayLabel}. ${hasMinutes ? `Has ${count} minute${count === 1 ? "" : "s"}.` : "No minutes."}`}
+                <div className="overview-next-section">
+                  <h4>Meetings</h4>
+                  {nextMeetings.length === 0 ? <p className="text-muted">No meetings in the next seven days.</p> : null}
+                  {nextMeetings.map((meeting) => (
+                    <Link
+                      key={meeting.id}
+                      className="overview-next-item"
+                      href={`/projects/${params.projectId}/meetings?view=calendar&date=${meeting.scheduledDate}`}
                     >
-                      <span>{cell.dayNumber}</span>
-                      {hasMinutes ? <span className="minutes-day-dot" aria-hidden="true" /> : null}
-                    </button>
-                  );
-                })}
+                      <span>
+                        <strong>{meeting.title}</strong>
+                        <span>{meeting.location ?? "No location"} - {meeting.actionsCount} action{meeting.actionsCount === 1 ? "" : "s"}</span>
+                      </span>
+                      <Badge>{formatDateTime(meeting.scheduledAt)}</Badge>
+                    </Link>
+                  ))}
+                </div>
+              </aside>
+            </div>
+
+            <section className="overview-module-strip" aria-label="Project modules">
+              {moduleCards.map((card) => {
+                const Icon = card.icon;
+                return (
+                  <Link key={card.id} className="overview-module-card panel" href={card.href}>
+                    <span className="overview-module-icon" aria-hidden="true">
+                      <Icon size={18} />
+                    </span>
+                    <span className="overview-module-copy">
+                      <span className="overview-module-label">{card.label}</span>
+                      <strong>{card.metric}</strong>
+                      <span>{card.detail}</span>
+                      <small>{card.status}</small>
+                    </span>
+                  </Link>
+                );
+              })}
+            </section>
+
+            <section className="panel overview-provenance-panel" aria-labelledby="overview-provenance-title">
+              <div className="overview-panel-heading">
+                <div>
+                  <p className="eyebrow">Recent provenance</p>
+                  <h3 id="overview-provenance-title" className="section-heading">Archive activity</h3>
+                </div>
+                <GitBranch size={18} aria-hidden="true" />
               </div>
-            </article>
-          </div>
+              {overview.activity.length === 0 ? (
+                <EmptyState title="No recorded activity yet" detail="Project activity will appear here as documents, wiki pages, code, tasks, and meetings evolve." />
+              ) : (
+                <ol className="overview-activity-list">
+                  {overview.activity.map((entry) => {
+                    const Icon = MODULE_ICONS[entry.module];
+                    return (
+                      <li key={entry.id} className="overview-activity-item">
+                        <Link href={entry.href}>
+                          <span className="overview-activity-icon" aria-hidden="true">
+                            <Icon size={15} />
+                          </span>
+                          <span>
+                            <strong>{entry.title}</strong>
+                            <span>{MODULE_LABELS[entry.module]} - {formatDateTime(entry.occurredAt)}</span>
+                          </span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </section>
+
+            <section className="overview-archive-footer" aria-label="Project archive coverage">
+              <span><CheckCircle2 size={15} aria-hidden="true" /> Wiki {overview.modules.wiki.publishedPages}</span>
+              <span><CheckCircle2 size={15} aria-hidden="true" /> Documents {overview.modules.documents.total}</span>
+              <span><CheckCircle2 size={15} aria-hidden="true" /> Code {overview.modules.code.connected ? "ready" : "pending"}</span>
+              <span><CheckCircle2 size={15} aria-hidden="true" /> Meetings {overview.modules.meetings.thisMonth}</span>
+            </section>
+          </>
         ) : null}
       </section>
     </AppShell>

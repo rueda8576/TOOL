@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { ProjectRole } from "@prisma/client";
+import { CompileStatus, ProjectRole, TaskPriority, TaskStatus } from "@prisma/client";
 
 import { ProjectsService } from "./projects.service";
 
@@ -19,6 +19,24 @@ describe("ProjectsService", () => {
         findMany: jest.fn(),
         update: jest.fn(),
         delete: jest.fn()
+      },
+      document: {
+        findMany: jest.fn()
+      },
+      wikiPage: {
+        findMany: jest.fn()
+      },
+      task: {
+        findMany: jest.fn()
+      },
+      meeting: {
+        findMany: jest.fn()
+      },
+      meetingAction: {
+        count: jest.fn()
+      },
+      auditLog: {
+        findMany: jest.fn()
       },
       projectMember: {
         findMany: jest.fn(),
@@ -364,6 +382,244 @@ describe("ProjectsService", () => {
     });
 
     expect(accessService.getProjectAccess).toHaveBeenCalledWith("u1", "reader", "p1");
+  });
+
+  it("builds project overview from local data with deterministic attention and activity", async () => {
+    const { service, prisma, accessService } = makeService();
+    accessService.getProjectAccess.mockResolvedValue({
+      isAdmin: false,
+      projectRole: "editor",
+      canWrite: true
+    });
+    prisma.project.findFirst.mockResolvedValue({
+      id: "p1",
+      key: "PHD1",
+      name: "Main project",
+      description: "Traceable doctoral archive",
+      createdAt: new Date("2026-05-01T09:00:00.000Z"),
+      updatedAt: new Date("2026-05-20T09:00:00.000Z"),
+      repository: null
+    });
+    prisma.document.findMany.mockResolvedValue([
+      {
+        id: "doc-failed",
+        title: "Thesis draft",
+        type: "PAPER",
+        updatedAt: new Date("2026-05-20T10:00:00.000Z"),
+        versions: [{ compileStatus: CompileStatus.FAILED, createdAt: new Date("2026-05-20T09:00:00.000Z") }]
+      },
+      {
+        id: "doc-ok",
+        title: "Model notes",
+        type: "MODEL",
+        updatedAt: new Date("2026-05-18T10:00:00.000Z"),
+        versions: [{ compileStatus: CompileStatus.SUCCEEDED, createdAt: new Date("2026-05-18T09:00:00.000Z") }]
+      }
+    ]);
+    prisma.wikiPage.findMany.mockResolvedValue([
+      {
+        id: "wiki-draft",
+        title: "Method notes",
+        path: "method/notes",
+        currentRevisionId: "rev-1",
+        updatedAt: new Date("2026-05-19T10:00:00.000Z"),
+        draft: { updatedAt: new Date("2026-05-21T10:00:00.000Z") }
+      },
+      {
+        id: "wiki-published",
+        title: "Published page",
+        path: "published",
+        currentRevisionId: "rev-2",
+        updatedAt: new Date("2026-05-17T10:00:00.000Z"),
+        draft: null
+      }
+    ]);
+    prisma.task.findMany.mockResolvedValue([
+      {
+        id: "task-overdue",
+        title: "Finish chapter",
+        status: TaskStatus.IN_PROGRESS,
+        priority: TaskPriority.CRITICAL,
+        dueDate: new Date("2026-05-10T12:00:00.000Z"),
+        updatedAt: new Date("2026-05-11T10:00:00.000Z"),
+        assignee: { name: "Luis" }
+      },
+      {
+        id: "task-blocked",
+        title: "Review data",
+        status: TaskStatus.BLOCKED,
+        priority: TaskPriority.HIGH,
+        dueDate: null,
+        updatedAt: new Date("2026-05-12T10:00:00.000Z"),
+        assignee: null
+      },
+      {
+        id: "task-done",
+        title: "Done work",
+        status: TaskStatus.DONE,
+        priority: TaskPriority.LOW,
+        dueDate: new Date("2026-05-09T12:00:00.000Z"),
+        updatedAt: new Date("2026-05-09T10:00:00.000Z"),
+        assignee: null
+      }
+    ]);
+    prisma.meeting.findMany
+      .mockResolvedValueOnce([{ id: "meeting-month" }])
+      .mockResolvedValueOnce([
+        {
+          id: "meeting-next",
+          title: "Lab sync",
+          scheduledAt: new Date("2026-05-26T12:00:00.000Z"),
+          location: "Room 1",
+          actions: [{ id: "action-1" }]
+        }
+      ]);
+    prisma.meetingAction.count.mockResolvedValue(3);
+    prisma.auditLog.findMany.mockResolvedValue([
+      {
+        id: "audit-known",
+        entityType: "document",
+        entityId: "doc-failed",
+        action: "document.version.create",
+        createdAt: new Date("2026-05-21T08:00:00.000Z")
+      },
+      {
+        id: "audit-unknown",
+        entityType: "custom_entity",
+        entityId: "custom-1",
+        action: "custom.event",
+        createdAt: new Date("2026-05-20T08:00:00.000Z")
+      }
+    ]);
+
+    const overview = await service.getProjectOverview("p1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(accessService.getProjectAccess).toHaveBeenCalledWith("editor-1", "editor", "p1");
+    expect(prisma.document.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: "p1", deletedAt: null } }));
+    expect(prisma.wikiPage.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: "p1", deletedAt: null } }));
+    expect(prisma.task.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: "p1", deletedAt: null } }));
+    expect(prisma.meeting.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({ projectId: "p1", deletedAt: null })
+      })
+    );
+    expect(prisma.meetingAction.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        meeting: {
+          projectId: "p1",
+          deletedAt: null
+        }
+      })
+    });
+
+    expect(overview.project).toEqual({
+      id: "p1",
+      key: "PHD1",
+      name: "Main project",
+      description: "Traceable doctoral archive",
+      createdAt: "2026-05-01T09:00:00.000Z",
+      updatedAt: "2026-05-20T09:00:00.000Z"
+    });
+    expect(overview.modules.documents).toMatchObject({
+      total: 2,
+      failedCompiles: 1,
+      runningCompiles: 0
+    });
+    expect(overview.modules.wiki).toMatchObject({
+      publishedPages: 2,
+      draftPages: 1
+    });
+    expect(overview.modules.code.connected).toBe(false);
+    expect(overview.modules.tasks).toMatchObject({
+      open: 2,
+      inProgress: 1,
+      blocked: 1,
+      overdue: 1,
+      critical: 1
+    });
+    expect(overview.modules.meetings).toMatchObject({
+      thisMonth: 1,
+      upcoming: 1,
+      openActions: 3
+    });
+    expect(overview.attention.map((item) => item.id)).toEqual([
+      "task-overdue-task-overdue",
+      "document-compile-doc-failed",
+      "repository-missing",
+      "task-blocked-task-blocked",
+      "wiki-drafts",
+      "meeting-upcoming-meeting-next"
+    ]);
+    expect(overview.activity).toEqual([
+      expect.objectContaining({
+        id: "audit-known",
+        module: "documents",
+        title: "Document version added",
+        href: "/projects/p1/documents"
+      }),
+      expect.objectContaining({
+        id: "audit-unknown",
+        module: "project",
+        title: "Custom Event",
+        href: "/projects/p1"
+      })
+    ]);
+  });
+
+  it("keeps reader overview readable without exposing draft-only wiki attention", async () => {
+    const { service, prisma, accessService } = makeService();
+    accessService.getProjectAccess.mockResolvedValue({
+      isAdmin: false,
+      projectRole: "reader",
+      canWrite: false
+    });
+    prisma.project.findFirst.mockResolvedValue({
+      id: "p-reader",
+      key: "READ",
+      name: "Reader project",
+      description: null,
+      createdAt: new Date("2026-05-01T09:00:00.000Z"),
+      updatedAt: new Date("2026-05-20T09:00:00.000Z"),
+      repository: {
+        pathWithNamespace: "atlasium/read",
+        defaultBranch: "main",
+        updatedAt: new Date("2026-05-20T08:00:00.000Z")
+      }
+    });
+    prisma.document.findMany.mockResolvedValue([]);
+    prisma.wikiPage.findMany.mockResolvedValue([]);
+    prisma.task.findMany.mockResolvedValue([]);
+    prisma.meeting.findMany.mockResolvedValue([]);
+    prisma.meetingAction.count.mockResolvedValue(0);
+    prisma.auditLog.findMany.mockResolvedValue([]);
+
+    const overview = await service.getProjectOverview("p-reader", {
+      userId: "reader-1",
+      email: "reader@example.com",
+      globalRole: "reader"
+    });
+
+    expect(prisma.wikiPage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          projectId: "p-reader",
+          deletedAt: null,
+          currentRevisionId: { not: null }
+        }
+      })
+    );
+    expect(overview.access).toEqual({
+      isAdmin: false,
+      projectRole: "reader",
+      canWrite: false
+    });
+    expect(overview.modules.wiki.draftPages).toBe(0);
+    expect(overview.attention.some((item) => item.module === "wiki")).toBe(false);
   });
 
   it("unpinned project is idempotent and logs audit", async () => {

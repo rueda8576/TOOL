@@ -7,7 +7,7 @@ import { RolesGuard } from "../common/roles.guard";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { AddProjectMemberDto } from "./dto/add-project-member.dto";
 import { CreateProjectDto } from "./dto/create-project.dto";
-import { ProjectsService } from "./projects.service";
+import { ProjectOverview, ProjectsService } from "./projects.service";
 
 @Controller("projects")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -45,6 +45,14 @@ export class ProjectsController {
     canWrite: boolean;
   }> {
     return this.projectsService.getProjectAccess(projectId, user);
+  }
+
+  @Get(":projectId/overview")
+  getProjectOverview(
+    @Param("projectId") projectId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<ProjectOverview> {
+    return this.projectsService.getProjectOverview(projectId, user);
   }
 
   @Post(":projectId/pin")

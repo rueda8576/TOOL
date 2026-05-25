@@ -1,5 +1,26 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Project Overview Command Center (2026-05-25)
+- [x] Add `GET /projects/:projectId/overview` with local-data aggregation for project, access, attention, module summaries, and provenance activity.
+- [x] Add focused `ProjectsService.getProjectOverview` tests for access, soft-deleted data, attention ordering, reader behavior, and unknown audit actions.
+- [x] Add a web API helper for the overview response and migrate `/projects/:projectId` to load only the new endpoint.
+- [x] Redesign the Project Overview into a dense command center with attention, next steps, equal module summaries, and recent provenance.
+- [x] Add focused command-center CSS using existing Atlasium tokens and shared UI primitives.
+- [x] Run API/web type-check, web build, focused backend tests, and diff hygiene checks.
+
+### Review - Atlasium Project Overview Command Center
+- Added `GET /projects/:projectId/overview`, aggregating project metadata, access, attention items, module summaries, near-term tasks/meetings, and audit-log provenance from local database state only.
+- Replaced the previous four-card Project Overview with an operational command center: project command band, attention panel, next-work rail, equal module strip for Wiki/Documents/Code/Tasks/Meetings, and recent provenance.
+- Added Wiki as a first-class Overview module and kept Overview actions as navigation-only links into the owning workspace.
+- Kept reader access supported while avoiding unpublished/draft wiki attention for read-only users.
+- Recorded the command-center pattern in `tasks/LESSONS.md`.
+- Verification:
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/projects/projects.service.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - `git diff --check` passed
+
 ## Atlasium Anti-Vibe-Coded UI Hardening (2026-05-24)
 - [x] Persist anti-vibe-coded quality rules in `tasks/LESSONS.md`.
 - [x] Expand web metadata and add stable Atlasium icon/OpenGraph assets.
