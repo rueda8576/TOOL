@@ -20,6 +20,8 @@ import { CreateRepositoryBranchDto } from "./dto/create-repository-branch.dto";
 import { CreateRepositoryMergeRequestDto } from "./dto/create-repository-merge-request.dto";
 import { LinkProjectRepositoryDto } from "./dto/link-project-repository.dto";
 
+const GITLAB_ARCHIVE_ACCEPT_HEADER = "application/zip, application/octet-stream, */*";
+
 type GitlabOAuthTokenPayload = {
   access_token: string;
   refresh_token?: string;
@@ -1057,7 +1059,12 @@ export class GitlabService {
       try {
         const archive = await this.executeGitlabBinaryRequest(
           accessToken,
-          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/archive.zip?${search.toString()}`
+          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/archive.zip?${search.toString()}`,
+          {
+            headers: {
+              Accept: GITLAB_ARCHIVE_ACCEPT_HEADER
+            }
+          }
         );
 
         return {

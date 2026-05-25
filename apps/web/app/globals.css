@@ -4372,6 +4372,26 @@ body.wiki-layout-dragging * {
   font-size: 0.8rem;
 }
 
+.code-viewer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.code-wrap-toggle {
+  width: 2rem;
+  min-width: 2rem;
+  height: 2rem;
+}
+
+.code-wrap-toggle.is-active {
+  border-color: color-mix(in srgb, var(--brand) 55%, var(--line));
+  background: color-mix(in srgb, var(--brand) 13%, var(--surface-raised));
+  color: var(--brand-strong);
+}
+
 .code-viewer-path {
   display: block;
   min-width: 0;
@@ -4399,6 +4419,13 @@ body.wiki-layout-dragging * {
   min-height: 24rem;
   white-space: pre;
   tab-size: 2;
+}
+
+.code-file-content-wrap {
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .code-commit-list {

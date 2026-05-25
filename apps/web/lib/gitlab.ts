@@ -1,5 +1,7 @@
 import { authFetch, authFetchResponse } from "./client-api";
 
+const REPOSITORY_ARCHIVE_ACCEPT_HEADER = "application/zip, application/octet-stream, */*";
+
 export type GitlabConnectionStatus = {
   connected: boolean;
   reconnectRequired: boolean;
@@ -301,7 +303,10 @@ export async function downloadRepositoryArchive(
   const response = await authFetchResponse(`/projects/${projectId}/repository/archive${suffix}`, {
     token,
     init: {
-      method: "GET"
+      method: "GET",
+      headers: {
+        Accept: REPOSITORY_ARCHIVE_ACCEPT_HEADER
+      }
     }
   });
 

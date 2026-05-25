@@ -1,5 +1,26 @@
 # Implementation TODO (v1 bootstrap)
 
+## Code ZIP Download + Word Wrap (2026-05-25)
+- [x] Fix repository archive content negotiation so the Code `ZIP` action downloads archives without `406 Not Acceptable`.
+- [x] Add API coverage for ZIP-compatible GitLab archive `Accept` headers.
+- [x] Request ZIP/binary content explicitly from the web archive helper.
+- [x] Add VS Code-style `Alt+Z` word wrap in the Code file viewer with local preference persistence.
+- [x] Add wrapped-mode CSS that preserves default horizontal scrolling when wrap is off.
+- [x] Run API tests, API/web type-check, web build, static audits, and diff hygiene checks.
+
+### Review - Code ZIP Download + Word Wrap
+- Repository archive downloads now request `application/zip, application/octet-stream, */*` from both the web helper and the API-to-GitLab binary request.
+- The archive service test now asserts the ZIP-compatible `Accept` header while preserving the existing archive URL, buffer, filename, and content-type behavior.
+- The Code file viewer now includes a word-wrap toggle button with `WrapText`, `aria-pressed`, and `Alt+Z` support for selected text files.
+- Word wrap defaults off, persists in `localStorage` under `atlasium_code_file_word_wrap`, and wrapped mode stays contained inside the viewer.
+- Verification:
+  - `pnpm --filter @doctoral/api test -- --runInBand src/gitlab/gitlab.service.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - Static audits for archive headers and word-wrap references passed
+  - `git diff --check` passed
+
 ## Atlasium Code Repository Cockpit (2026-05-25)
 - [x] Replace the large Code repository overview card with a compact two-row repository cockpit.
 - [x] Move SSH/HTTPS clone and Git access guidance into a Clone drawer/modal.

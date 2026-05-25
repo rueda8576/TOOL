@@ -12,6 +12,7 @@ import {
   GitCommitHorizontal,
   GitPullRequest,
   Plus,
+  WrapText,
   X
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
@@ -117,6 +118,8 @@ const TAB_LABELS: Record<CodeTab, string> = {
   "merge-requests": "Merge Requests"
 };
 
+const CODE_FILE_WORD_WRAP_STORAGE_KEY = "atlasium_code_file_word_wrap";
+
 export default function ProjectCodePage({ params }: { params: { projectId: string } }): JSX.Element {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
@@ -155,6 +158,8 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [showBranchModal, setShowBranchModal] = useState(false);
   const [cloneDrawerOpen, setCloneDrawerOpen] = useState(false);
   const [gitUsername, setGitUsername] = useState<string | null>(null);
+  const [fileWordWrap, setFileWordWrap] = useState(false);
+  const [fileWordWrapReady, setFileWordWrapReady] = useState(false);
 
   const canWrite = access?.canWrite ?? false;
   const isAdmin = access?.isAdmin ?? false;
@@ -263,6 +268,50 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       .catch((loadError) => { setError((loadError as Error).message || "Unable to load Code workspace."); })
       .finally(() => { setLoading(false); });
   }, [loadAccess, loadConnection, loadRepository, router]);
+
+  useEffect(() => {
+    setFileWordWrap(localStorage.getItem(CODE_FILE_WORD_WRAP_STORAGE_KEY) === "true");
+    setFileWordWrapReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!fileWordWrapReady) {
+      return;
+    }
+    localStorage.setItem(CODE_FILE_WORD_WRAP_STORAGE_KEY, String(fileWordWrap));
+  }, [fileWordWrap, fileWordWrapReady]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (
+        !event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        event.key.toLowerCase() !== "z" ||
+        activeTab !== "files" ||
+        !selectedFile ||
+        selectedFile.binary
+      ) {
+        return;
+      }
+
+      if (event.target instanceof HTMLElement) {
+        const tagName = event.target.tagName.toLowerCase();
+        if (event.target.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select") {
+          return;
+        }
+      }
+
+      event.preventDefault();
+      setFileWordWrap((current) => !current);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeTab, selectedFile]);
 
   useEffect(() => {
     if (!token || !connectedRepository || !gitlabConnected) {
@@ -707,12 +756,26 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                                 {selectedFile.binary ? "Binary" : "Text"} file - {formatBytes(selectedFile.size)} - {selectedFile.ref}
                               </span>
                             </div>
-                            <span className="code-entry-badge">{fileExtBadge(selectedFile.fileName)}</span>
+                            <div className="code-viewer-actions">
+                              {!selectedFile.binary ? (
+                                <button
+                                  className={`button button-secondary icon-button code-wrap-toggle${fileWordWrap ? " is-active" : ""}`}
+                                  type="button"
+                                  onClick={() => setFileWordWrap((current) => !current)}
+                                  aria-label="Toggle word wrap"
+                                  aria-pressed={fileWordWrap}
+                                  title="Toggle word wrap (Alt+Z)"
+                                >
+                                  <WrapText size={16} aria-hidden="true" />
+                                </button>
+                              ) : null}
+                              <span className="code-entry-badge">{fileExtBadge(selectedFile.fileName)}</span>
+                            </div>
                           </div>
                           {selectedFile.binary ? (
                             <EmptyState title="Binary preview unavailable" detail="Open the repository in GitLab to inspect this file." />
                           ) : (
-                            <pre className="code-file-content">{selectedFile.content}</pre>
+                            <pre className={`code-file-content${fileWordWrap ? " code-file-content-wrap" : ""}`}>{selectedFile.content}</pre>
                           )}
                         </>
                       ) : contentLoading ? (
