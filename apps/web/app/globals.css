@@ -4005,6 +4005,21 @@ body.wiki-layout-dragging * {
   white-space: nowrap;
 }
 
+.code-repository-switcher {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.62rem;
+  max-width: min(38rem, 100%);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.code-repository-switcher .input {
+  min-width: min(26rem, 100%);
+  font-size: 0.85rem;
+}
+
 .code-cockpit-state,
 .code-cockpit-actions,
 .code-cockpit-context {

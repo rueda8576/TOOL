@@ -29,14 +29,15 @@ import {
   downloadRepositoryArchive,
   ensureProjectRepositoryAccess,
   getGitlabConnectionStatus,
-  getProjectRepositoryStatus,
   getRepositoryFile,
   getRepositoryTree,
+  listProjectRepositories,
   GitlabConnectionStatus,
   listRepositoryBranches,
   listRepositoryCommits,
   listRepositoryMergeRequests,
   ProjectRepositoryStatus,
+  ProjectRepositorySummary,
   RepositoryBranch,
   RepositoryCommit,
   RepositoryFile,
@@ -111,6 +112,14 @@ function formatBytes(size: number): string {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+function repositoryPathPreview(name: string, path: string): string {
+  const raw = path.trim() || name.trim();
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 const TAB_LABELS: Record<CodeTab, string> = {
   files: "Files",
   commits: "Commits",
@@ -119,13 +128,15 @@ const TAB_LABELS: Record<CodeTab, string> = {
 };
 
 const CODE_FILE_WORD_WRAP_STORAGE_KEY = "atlasium_code_file_word_wrap";
+const CODE_ACTIVE_REPOSITORY_STORAGE_PREFIX = "atlasium_code_active_repository";
 
 export default function ProjectCodePage({ params }: { params: { projectId: string } }): JSX.Element {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [access, setAccess] = useState<ProjectAccess | null>(null);
   const [connection, setConnection] = useState<GitlabConnectionStatus | null>(null);
-  const [repository, setRepository] = useState<ProjectRepositoryStatus | null>(null);
+  const [repositories, setRepositories] = useState<ProjectRepositorySummary[]>([]);
+  const [activeRepositoryId, setActiveRepositoryId] = useState<string | null>(null);
   const [branches, setBranches] = useState<RepositoryBranch[]>([]);
   const [commits, setCommits] = useState<RepositoryCommit[]>([]);
   const [tree, setTree] = useState<RepositoryTree | null>(null);
@@ -160,12 +171,19 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [gitUsername, setGitUsername] = useState<string | null>(null);
   const [fileWordWrap, setFileWordWrap] = useState(false);
   const [fileWordWrapReady, setFileWordWrapReady] = useState(false);
+  const [showRepositoryModal, setShowRepositoryModal] = useState(false);
+  const [newRepositoryName, setNewRepositoryName] = useState("");
+  const [newRepositoryPath, setNewRepositoryPath] = useState("");
+  const [newRepositoryDescription, setNewRepositoryDescription] = useState("");
 
   const canWrite = access?.canWrite ?? false;
-  const isAdmin = access?.isAdmin ?? false;
-  const repositoryConnected = repository?.connected === true;
   const gitlabConnected = connection?.connected === true && !connection.reconnectRequired;
-  const connectedRepository = repositoryConnected ? repository : null;
+  const activeRepositoryStorageKey = `${CODE_ACTIVE_REPOSITORY_STORAGE_PREFIX}:${params.projectId}`;
+  const connectedRepository = useMemo(
+    () => repositories.find((repository) => repository.id === activeRepositoryId) ?? repositories[0] ?? null,
+    [activeRepositoryId, repositories]
+  );
+  const repositoryConnected = connectedRepository !== null;
   const currentBrowseRef = connectedRepository ? browserRef || connectedRepository.defaultBranch : "";
   const currentBranchSourceRef = newBranchSourceRef || currentBrowseRef;
   const currentMergeRequestTargetBranch = connectedRepository
@@ -173,6 +191,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     : "";
   const currentMergeRequestSourceBranch =
     mergeRequestSourceBranch || branches.find((branch) => !branch.default)?.name || currentBrowseRef;
+  const newRepositoryPathPreview = repositoryPathPreview(newRepositoryName, newRepositoryPath);
 
   const resetRepositoryWorkspace = useCallback((): void => {
     setBranches([]);
@@ -201,19 +220,29 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     return nextConnection;
   }, []);
 
-  const loadRepository = useCallback(
-    async (authToken: string): Promise<ProjectRepositoryStatus> => {
-      const nextRepository = await getProjectRepositoryStatus(params.projectId, authToken);
-      setRepository(nextRepository);
-      return nextRepository;
+  const loadRepositories = useCallback(
+    async (authToken: string): Promise<ProjectRepositorySummary[]> => {
+      const nextRepositories = await listProjectRepositories(params.projectId, authToken);
+      setRepositories(nextRepositories);
+      setActiveRepositoryId((currentId) => {
+        if (currentId && nextRepositories.some((repository) => repository.id === currentId)) {
+          return currentId;
+        }
+        const storedId = localStorage.getItem(activeRepositoryStorageKey);
+        if (storedId && nextRepositories.some((repository) => repository.id === storedId)) {
+          return storedId;
+        }
+        return nextRepositories[0]?.id ?? null;
+      });
+      return nextRepositories;
     },
-    [params.projectId]
+    [activeRepositoryStorageKey, params.projectId]
   );
 
   const loadRepositoryContent = useCallback(
     async (
       authToken: string,
-      nextRepository: Extract<ProjectRepositoryStatus, { connected: true }>,
+      nextRepository: ProjectRepositorySummary,
       paramsOverride: { ref?: string; path?: string } = {}
     ): Promise<void> => {
       setContentLoading(true);
@@ -221,9 +250,9 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
         const resolvedRef = paramsOverride.ref?.trim() || nextRepository.defaultBranch;
         const resolvedPath = paramsOverride.path?.trim() || "";
         const [nextBranches, nextCommits, nextTree] = await Promise.all([
-          listRepositoryBranches(params.projectId, authToken),
-          listRepositoryCommits(params.projectId, authToken, { ref: resolvedRef }),
-          getRepositoryTree(params.projectId, authToken, { ref: resolvedRef, path: resolvedPath })
+          listRepositoryBranches(params.projectId, nextRepository.id, authToken),
+          listRepositoryCommits(params.projectId, nextRepository.id, authToken, { ref: resolvedRef }),
+          getRepositoryTree(params.projectId, nextRepository.id, authToken, { ref: resolvedRef, path: resolvedPath })
         ]);
         setBranches(nextBranches);
         setCommits(nextCommits);
@@ -239,10 +268,10 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   );
 
   const loadMergeRequests = useCallback(
-    async (authToken: string, state: RepositoryMergeRequestState): Promise<void> => {
+    async (authToken: string, repositoryId: string, state: RepositoryMergeRequestState): Promise<void> => {
       setMergeRequestsLoading(true);
       try {
-        const nextMergeRequests = await listRepositoryMergeRequests(params.projectId, authToken, { state });
+        const nextMergeRequests = await listRepositoryMergeRequests(params.projectId, repositoryId, authToken, { state });
         setMergeRequests(nextMergeRequests);
         setMergeRequestsError(null);
       } catch (loadError) {
@@ -263,11 +292,11 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     setToken(storedToken);
     setGitUsername(parseStoredUser(localStorage.getItem("doctoral_user"))?.username ?? null);
     setLoading(true);
-    Promise.all([loadAccess(storedToken), loadConnection(storedToken), loadRepository(storedToken)])
+    Promise.all([loadAccess(storedToken), loadConnection(storedToken), loadRepositories(storedToken)])
       .then(() => { setError(null); })
       .catch((loadError) => { setError((loadError as Error).message || "Unable to load Code workspace."); })
       .finally(() => { setLoading(false); });
-  }, [loadAccess, loadConnection, loadRepository, router]);
+  }, [loadAccess, loadConnection, loadRepositories, router]);
 
   useEffect(() => {
     setFileWordWrap(localStorage.getItem(CODE_FILE_WORD_WRAP_STORAGE_KEY) === "true");
@@ -327,8 +356,16 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       setMergeRequestsError(null);
       return;
     }
-    void loadMergeRequests(token, mergeRequestFilter);
+    void loadMergeRequests(token, connectedRepository.id, mergeRequestFilter);
   }, [connectedRepository, gitlabConnected, loadMergeRequests, mergeRequestFilter, token]);
+
+  useEffect(() => {
+    if (activeRepositoryId) {
+      localStorage.setItem(activeRepositoryStorageKey, activeRepositoryId);
+    } else {
+      localStorage.removeItem(activeRepositoryStorageKey);
+    }
+  }, [activeRepositoryId, activeRepositoryStorageKey]);
 
   useEffect(() => {
     setSelectedFile(null);
@@ -337,12 +374,26 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const onCreateRepository = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     if (!token) { setError("Missing session token. Please sign in again."); return; }
+    const repositoryName = newRepositoryName.trim();
+    if (!repositoryName) {
+      setError("Repository name is required.");
+      return;
+    }
     setCreatingRepository(true);
     setError(null);
     setSuccess(null);
     try {
-      const nextRepository = await createProjectRepository(params.projectId, token);
-      setRepository(nextRepository);
+      const nextRepository = await createProjectRepository(params.projectId, token, {
+        name: repositoryName,
+        path: newRepositoryPath.trim() || undefined,
+        description: newRepositoryDescription.trim() || undefined
+      });
+      const nextRepositories = await loadRepositories(token);
+      if (nextRepository.connected) {
+        setActiveRepositoryId(nextRepository.id);
+      } else {
+        setActiveRepositoryId(nextRepositories[0]?.id ?? null);
+      }
       setBrowserPath("");
       setBrowserRef(nextRepository.connected ? nextRepository.defaultBranch : "");
       setNewBranchSourceRef("");
@@ -351,12 +402,16 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       if (nextRepository.connected) {
         await Promise.all([
           loadRepositoryContent(token, nextRepository, { ref: nextRepository.defaultBranch, path: "" }),
-          loadMergeRequests(token, mergeRequestFilter)
+          loadMergeRequests(token, nextRepository.id, mergeRequestFilter)
         ]);
       }
-      setSuccess("Managed repository provisioned.");
+      setNewRepositoryName("");
+      setNewRepositoryPath("");
+      setNewRepositoryDescription("");
+      setShowRepositoryModal(false);
+      setSuccess("Managed repository created.");
     } catch (createError) {
-      setError((createError as Error).message || "Unable to provision the repository.");
+      setError((createError as Error).message || "Unable to create the repository.");
     } finally {
       setCreatingRepository(false);
     }
@@ -364,6 +419,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
 
   const onOpenEntry = async (entry: RepositoryTree["entries"][number]): Promise<void> => {
     if (!token) { setError("Missing session token. Please sign in again."); return; }
+    if (!connectedRepository) { setContentError("Select a repository before opening files."); return; }
     if (entry.type === "tree") {
       setBrowserPath(entry.path);
       return;
@@ -371,7 +427,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     setContentLoading(true);
     setContentError(null);
     try {
-      const file = await getRepositoryFile(params.projectId, token, {
+      const file = await getRepositoryFile(params.projectId, connectedRepository.id, token, {
         filePath: entry.path,
         ref: currentBrowseRef || undefined
       });
@@ -403,7 +459,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     setDownloadingArchive(true);
     setError(null);
     try {
-      const archive = await downloadRepositoryArchive(params.projectId, token, {
+      const archive = await downloadRepositoryArchive(params.projectId, connectedRepository.id, token, {
         ref: currentBrowseRef || connectedRepository.defaultBranch
       });
       const objectUrl = URL.createObjectURL(archive.blob);
@@ -429,12 +485,12 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     setOpeningGitlab(true);
     setError(null);
     try {
-      const nextRepository = await ensureProjectRepositoryAccess(params.projectId, token);
-      setRepository(nextRepository);
+      const nextRepository = await ensureProjectRepositoryAccess(params.projectId, connectedRepository.id, token);
       if (!nextRepository.connected) {
         setError("This project repository is not provisioned yet.");
         return;
       }
+      setRepositories((current) => current.map((repository) => (repository.id === nextRepository.id ? nextRepository : repository)));
       window.open(nextRepository.webUrl, "_blank", "noopener,noreferrer");
     } catch (openError) {
       setError((openError as Error).message || "Unable to prepare GitLab repository access.");
@@ -446,11 +502,12 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const onCreateBranch = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     if (!token) { setError("Missing session token. Please sign in again."); return; }
+    if (!connectedRepository) { setError("Select a repository before creating branches."); return; }
     setCreatingBranch(true);
     setError(null);
     setSuccess(null);
     try {
-      const created = await createRepositoryBranch(params.projectId, token, {
+      const created = await createRepositoryBranch(params.projectId, connectedRepository.id, token, {
         name: newBranchName.trim(),
         sourceRef: currentBranchSourceRef.trim()
       });
@@ -458,10 +515,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       setBrowserRef(created.name);
       setNewBranchSourceRef(created.name);
       setMergeRequestSourceBranch(created.name);
-      const nextRepository = await loadRepository(token);
-      if (nextRepository.connected) {
-        await loadRepositoryContent(token, nextRepository, { ref: created.name, path: browserPath });
-      }
+      await loadRepositoryContent(token, connectedRepository, { ref: created.name, path: browserPath });
       setShowBranchModal(false);
       setSuccess(`Branch ${created.name} created.`);
     } catch (branchError) {
@@ -474,11 +528,12 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const onCreateMergeRequest = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     if (!token) { setError("Missing session token. Please sign in again."); return; }
+    if (!connectedRepository) { setError("Select a repository before creating merge requests."); return; }
     setCreatingMergeRequest(true);
     setError(null);
     setSuccess(null);
     try {
-      const mergeRequest = await createRepositoryMergeRequest(params.projectId, token, {
+      const mergeRequest = await createRepositoryMergeRequest(params.projectId, connectedRepository.id, token, {
         sourceBranch: currentMergeRequestSourceBranch.trim(),
         targetBranch: currentMergeRequestTargetBranch.trim(),
         title: mergeRequestTitle.trim(),
@@ -487,7 +542,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       setMergeRequestTitle("");
       setMergeRequestDescription("");
       setShowMRModal(false);
-      await loadMergeRequests(token, mergeRequestFilter);
+      await loadMergeRequests(token, connectedRepository.id, mergeRequestFilter);
       setSuccess(`Merge request !${mergeRequest.iid} created.`);
     } catch (mergeRequestError) {
       setError((mergeRequestError as Error).message || "Unable to create the merge request.");
@@ -525,19 +580,18 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
           <section className="panel code-provision-panel">
             <div className="stack-xs">
               <p className="eyebrow">Repository cockpit</p>
-              <h2 className="section-heading">Managed repository not provisioned</h2>
+              <h2 className="section-heading">No repositories yet</h2>
               <p>
-                {isAdmin
-                  ? "Atlasium can provision the managed GitLab repository for this project now."
-                  : "An administrator has not provisioned the managed GitLab repository for this project yet."}
+                {canWrite
+                  ? "Create a managed GitLab repository for this project to start browsing code, branches, and merge requests."
+                  : "This project does not have managed GitLab repositories yet."}
               </p>
             </div>
-            {isAdmin ? (
-              <form onSubmit={(event) => void onCreateRepository(event)}>
-                <button className="button" type="submit" disabled={creatingRepository}>
-                  {creatingRepository ? "Provisioning..." : "Provision repository"}
-                </button>
-              </form>
+            {canWrite ? (
+              <button className="button" type="button" onClick={() => setShowRepositoryModal(true)}>
+                <Plus size={16} aria-hidden="true" />
+                New repository
+              </button>
             ) : null}
           </section>
         ) : null}
@@ -555,6 +609,27 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     <h2>{connectedRepository.name}</h2>
                     <code>{connectedRepository.pathWithNamespace}</code>
                   </div>
+                  <label className="code-repository-switcher">
+                    Repository
+                    <select
+                      className="input"
+                      value={connectedRepository.id}
+                      onChange={(event) => {
+                        setActiveRepositoryId(event.target.value);
+                        setBrowserRef("");
+                        setBrowserPath("");
+                        setSelectedFile(null);
+                        setContentError(null);
+                        setMergeRequestsError(null);
+                      }}
+                    >
+                      {repositories.map((repository) => (
+                        <option key={repository.id} value={repository.id}>
+                          {repository.name} - {repository.pathWithNamespace}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 <div className="code-cockpit-state" aria-label="Repository state">
                   <span className={gitlabConnected ? "code-state-pill code-state-live" : "code-state-pill code-state-warning"}>
@@ -562,6 +637,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                   </span>
                   <span className="badge">{connectedRepository.visibility}</span>
                   {connectedRepository.managed ? <span className="badge">Managed</span> : null}
+                  <span className="badge">{repositories.length} repositor{repositories.length === 1 ? "y" : "ies"}</span>
                   <span className="badge">Default {connectedRepository.defaultBranch}</span>
                 </div>
               </div>
@@ -634,6 +710,12 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                 </div>
 
                 <div className="code-cockpit-actions">
+                  {canWrite ? (
+                    <button className="button button-secondary" type="button" onClick={() => setShowRepositoryModal(true)}>
+                      <Plus size={16} aria-hidden="true" />
+                      New repo
+                    </button>
+                  ) : null}
                   <button className="button button-secondary" type="button" onClick={() => setCloneDrawerOpen(true)}>
                     <Copy size={16} aria-hidden="true" />
                     Clone
@@ -1010,6 +1092,49 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
               </div>
             ) : null}
           </>
+        ) : null}
+
+        {showRepositoryModal ? (
+          <div className="code-mr-modal-backdrop" onClick={() => setShowRepositoryModal(false)} role="dialog" aria-modal="true" aria-label="Create repository">
+            <div className="panel code-mr-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="code-mr-modal-header">
+                <div>
+                  <p className="eyebrow">Managed GitLab repository</p>
+                  <h3 className="section-heading">New repository</h3>
+                </div>
+                <IconButton label="Close new repository" onClick={() => setShowRepositoryModal(false)}>
+                  <X size={16} aria-hidden="true" />
+                </IconButton>
+              </div>
+              <form className="form-grid" onSubmit={(event) => void onCreateRepository(event)}>
+                <label>
+                  Name
+                  <input className="input" value={newRepositoryName} onChange={(event) => setNewRepositoryName(event.target.value)} placeholder="Analysis pipeline" required />
+                </label>
+                <label>
+                  Path
+                  <input className="input" value={newRepositoryPath} onChange={(event) => setNewRepositoryPath(event.target.value)} placeholder="analysis-pipeline" />
+                </label>
+                <label>
+                  Description
+                  <textarea
+                    className="input textarea-sm"
+                    value={newRepositoryDescription}
+                    onChange={(event) => setNewRepositoryDescription(event.target.value)}
+                    rows={3}
+                    placeholder="Optional repository purpose."
+                  />
+                </label>
+                <StatusLine tone="info">
+                  GitLab path suffix: {newRepositoryPathPreview || "repository-name"}. Atlasium will prefix it with the project key.
+                </StatusLine>
+                <div className="code-mr-modal-footer">
+                  <button type="button" className="button button-secondary" onClick={() => setShowRepositoryModal(false)}>Cancel</button>
+                  <button className="button" type="submit" disabled={creatingRepository}>{creatingRepository ? "Creating..." : "Create repository"}</button>
+                </div>
+              </form>
+            </div>
+          </div>
         ) : null}
       </div>
     </AppShell>

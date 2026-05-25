@@ -13,6 +13,7 @@ describe("GitlabController HTTP", () => {
     gitlabService = {
       searchProjects: jest.fn(),
       getRepositoryStatus: jest.fn(),
+      listRepositories: jest.fn(),
       ensureCurrentUserRepositoryAccess: jest.fn(),
       linkRepository: jest.fn(),
       createRepository: jest.fn(),
@@ -43,12 +44,12 @@ describe("GitlabController HTTP", () => {
     await request(app.getHttpServer()).get("/projects/project-1/repository").expect(401);
   });
 
-  it("returns 403 when a non-admin user tries to provision a repository", async () => {
+  it("returns 400 when repository creation payload is malformed", async () => {
     await request(app.getHttpServer())
       .post("/projects/project-1/repository/create")
       .set(authHeaders("reader"))
       .send({})
-      .expect(403);
+      .expect(400);
   });
 
   it("returns 400 for malformed branch creation payloads", async () => {
@@ -82,6 +83,7 @@ describe("GitlabController HTTP", () => {
   it("binds repository status, ensure-access, link, create, disconnect, branch-list, and tree routes", async () => {
     gitlabService.getRepositoryStatus.mockResolvedValue({
       connected: true,
+      id: "repo-1",
       gitlabProjectId: "123",
       name: "Navigation",
       webUrl: "https://git.atlasium.info/atlasium/nav",
@@ -95,8 +97,26 @@ describe("GitlabController HTTP", () => {
       connectedByUserId: "admin-1",
       managed: true
     });
+    gitlabService.listRepositories.mockResolvedValue([
+      {
+        id: "repo-1",
+        gitlabProjectId: "123",
+        name: "Navigation",
+        webUrl: "https://git.atlasium.info/atlasium/nav",
+        sshCloneUrl: "git@git.atlasium.info:atlasium/nav.git",
+        httpCloneUrl: "https://git.atlasium.info/atlasium/nav.git",
+        pathWithNamespace: "atlasium/nav",
+        defaultBranch: "main",
+        visibility: "private",
+        lastActivityAt: "2026-04-06T12:00:00.000Z",
+        connectedAt: "2026-04-06T12:00:00.000Z",
+        connectedByUserId: "admin-1",
+        managed: true
+      }
+    ]);
     gitlabService.ensureCurrentUserRepositoryAccess.mockResolvedValue({
       connected: true,
+      id: "repo-1",
       gitlabProjectId: "123",
       name: "Navigation",
       webUrl: "https://git.atlasium.info/atlasium/nav",
@@ -122,6 +142,11 @@ describe("GitlabController HTTP", () => {
 
     const statusResponse = await request(app.getHttpServer())
       .get("/projects/project-1/repository")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    const repositoriesResponse = await request(app.getHttpServer())
+      .get("/projects/project-1/repositories")
       .set(authHeaders("reader", { userId: "reader-1" }))
       .expect(200);
 
@@ -159,6 +184,14 @@ describe("GitlabController HTTP", () => {
       .expect(200);
 
     expect(gitlabService.getRepositoryStatus).toHaveBeenCalledWith(
+      "project-1",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      }
+    );
+    expect(gitlabService.listRepositories).toHaveBeenCalledWith(
       "project-1",
       {
         userId: "reader-1",
@@ -219,9 +252,180 @@ describe("GitlabController HTTP", () => {
       }
     );
     expect(statusResponse.body.gitlabProjectId).toBe("123");
+    expect(repositoriesResponse.body[0].id).toBe("repo-1");
     expect(ensureAccessResponse.body.gitlabProjectId).toBe("123");
     expect(branchesResponse.body[0].name).toBe("main");
     expect(treeResponse.body.entries[0].path).toBe("src/index.ts");
+  });
+
+  it("binds repository-scoped Code routes", async () => {
+    gitlabService.ensureCurrentUserRepositoryAccess.mockResolvedValue({ connected: true, id: "repo-1" });
+    gitlabService.listBranches.mockResolvedValue([{ name: "main", default: true }]);
+    gitlabService.listCommits.mockResolvedValue([{ id: "abc123" }]);
+    gitlabService.getRepositoryTree.mockResolvedValue({
+      ref: "main",
+      path: "src",
+      entries: [{ id: "blob-1", name: "index.ts", path: "src/index.ts", type: "blob" }]
+    });
+    gitlabService.getRepositoryFile.mockResolvedValue({
+      filePath: "README.md",
+      fileName: "README.md",
+      ref: "main",
+      size: 12,
+      binary: false,
+      content: "# Atlasium"
+    });
+    gitlabService.listMergeRequests.mockResolvedValue([{ id: 7 }]);
+    gitlabService.getRepositoryArchive.mockResolvedValue({
+      fileName: "atlasium-nav-main.zip",
+      contentType: "application/zip",
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04])
+    });
+    gitlabService.createBranch.mockResolvedValue({ name: "feature/nav" });
+    gitlabService.createMergeRequest.mockResolvedValue({ id: 8, iid: 8, title: "Merge notes", state: "opened" });
+
+    await request(app.getHttpServer())
+      .post("/projects/project-1/repositories/repo-1/access/ensure")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/repositories/repo-1/branches")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/repositories/repo-1/commits")
+      .query({ ref: "main" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/repositories/repo-1/tree")
+      .query({ path: "src", ref: "main" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/repositories/repo-1/file")
+      .query({ filePath: "README.md", ref: "main" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/repositories/repo-1/merge-requests")
+      .query({ state: "opened" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/repositories/repo-1/archive")
+      .query({ ref: "main" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post("/projects/project-1/repositories/repo-1/branches")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .send({ name: "feature/nav", sourceRef: "main" })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post("/projects/project-1/repositories/repo-1/merge-requests")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .send({ title: "Merge notes", sourceBranch: "feature/nav", targetBranch: "main" })
+      .expect(201);
+
+    expect(gitlabService.ensureCurrentUserRepositoryAccess).toHaveBeenCalledWith(
+      "project-1",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      },
+      "repo-1"
+    );
+    expect(gitlabService.listBranches).toHaveBeenCalledWith(
+      "project-1",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      },
+      "repo-1"
+    );
+    expect(gitlabService.listCommits).toHaveBeenCalledWith(
+      "project-1",
+      "main",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      },
+      "repo-1"
+    );
+    expect(gitlabService.getRepositoryTree).toHaveBeenCalledWith(
+      "project-1",
+      "src",
+      "main",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      },
+      "repo-1"
+    );
+    expect(gitlabService.getRepositoryFile).toHaveBeenCalledWith(
+      "project-1",
+      "README.md",
+      "main",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      },
+      "repo-1"
+    );
+    expect(gitlabService.listMergeRequests).toHaveBeenCalledWith(
+      "project-1",
+      "opened",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      },
+      "repo-1"
+    );
+    expect(gitlabService.getRepositoryArchive).toHaveBeenCalledWith(
+      "project-1",
+      "main",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      },
+      "repo-1"
+    );
+    expect(gitlabService.createBranch).toHaveBeenCalledWith(
+      "project-1",
+      { name: "feature/nav", sourceRef: "main" },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      },
+      "repo-1"
+    );
+    expect(gitlabService.createMergeRequest).toHaveBeenCalledWith(
+      "project-1",
+      { title: "Merge notes", sourceBranch: "feature/nav", targetBranch: "main" },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      },
+      "repo-1"
+    );
   });
 
   it("binds repository file query parameters and current user", async () => {

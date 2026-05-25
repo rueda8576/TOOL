@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -179,24 +180,24 @@ type ConnectionStatus = {
   webUrl?: string | null;
 };
 
-type RepositoryStatus =
-  | { connected: false }
-  | {
-      connected: true;
-      gitlabProjectId: string;
-      name: string;
-      description: string | null;
-      webUrl: string;
-      sshCloneUrl: string;
-      httpCloneUrl: string;
-      pathWithNamespace: string;
-      defaultBranch: string;
-      visibility: string;
-      lastActivityAt: string;
-      connectedAt: string;
-      connectedByUserId: string;
-      managed: true;
-    };
+type RepositorySummary = {
+  id: string;
+  gitlabProjectId: string;
+  name: string;
+  description: string | null;
+  webUrl: string;
+  sshCloneUrl: string;
+  httpCloneUrl: string;
+  pathWithNamespace: string;
+  defaultBranch: string;
+  visibility: string;
+  lastActivityAt: string;
+  connectedAt: string;
+  connectedByUserId: string;
+  managed: true;
+};
+
+type RepositoryStatus = { connected: false } | ({ connected: true } & RepositorySummary);
 
 type RepositoryRecord = Prisma.ProjectRepositoryGetPayload<{
   include: {
@@ -501,10 +502,19 @@ export class GitlabService {
     throw new ForbiddenException("Atlasium provisions managed GitLab repositories automatically");
   }
 
-  async getRepositoryStatus(projectId: string, user: AuthenticatedUser): Promise<RepositoryStatus> {
+  async listRepositories(projectId: string, user: AuthenticatedUser): Promise<RepositorySummary[]> {
     await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
 
-    const repository = await this.findRepositoryRecord(projectId);
+    const repositories = await this.findRepositoryRecords(projectId);
+    return repositories.map((repository) => this.mapRepositorySummaryFromRecord(repository));
+  }
+
+  async getRepositoryStatus(projectId: string, user: AuthenticatedUser, repositoryId?: string): Promise<RepositoryStatus> {
+    await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
+
+    const repository = repositoryId
+      ? await this.findRepositoryRecordById(projectId, repositoryId)
+      : await this.findRepositoryRecord(projectId);
     if (!repository) {
       return { connected: false };
     }
@@ -516,6 +526,7 @@ export class GitlabService {
 
       return {
         connected: true,
+        id: repository.id,
         gitlabProjectId: String(project.id),
         name: project.name,
         description: project.description,
@@ -535,37 +546,31 @@ export class GitlabService {
     } catch {
       return {
         connected: true,
-        gitlabProjectId: repository.gitlabProjectId,
-        name: repository.project.name,
-        description: repository.project.description,
-        webUrl: repository.webUrl,
-        sshCloneUrl: this.buildRepositorySshCloneUrl(repository.pathWithNamespace),
-        httpCloneUrl: this.buildRepositoryCloneUrl(repository.pathWithNamespace),
-        pathWithNamespace: repository.pathWithNamespace,
-        defaultBranch: repository.defaultBranch,
-        visibility: "private",
-        lastActivityAt: repository.updatedAt.toISOString(),
-        connectedAt: repository.connectedAt.toISOString(),
-        connectedByUserId: repository.connectedByUserId,
-        managed: true
+        ...this.mapRepositorySummaryFromRecord(repository)
       };
     }
   }
 
-  async ensureCurrentUserRepositoryAccess(projectId: string, user: AuthenticatedUser): Promise<RepositoryStatus> {
+  async ensureCurrentUserRepositoryAccess(projectId: string, user: AuthenticatedUser, repositoryId?: string): Promise<RepositoryStatus> {
     await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
 
-    const repository = await this.findRepositoryRecord(projectId);
+    const repository = repositoryId
+      ? await this.findRepositoryRecordById(projectId, repositoryId)
+      : await this.findRepositoryRecord(projectId);
     if (!repository) {
       return { connected: false };
     }
 
     await this.syncProjectRepositoryAccess(projectId);
-    return this.getRepositoryStatus(projectId, user);
+    return this.getRepositoryStatus(projectId, user, repository.id);
   }
 
-  async provisionManagedRemoteRepository(projectKey: string, projectName: string): Promise<ManagedRepositoryProvision> {
-    const repositoryPath = this.normalizeRepositoryPath(projectKey);
+  async provisionManagedRemoteRepository(
+    projectKey: string,
+    repositoryName: string,
+    options: { path?: string; description?: string | null } = {}
+  ): Promise<ManagedRepositoryProvision> {
+    const repositoryPath = this.normalizeRepositoryPath(options.path ?? projectKey);
 
     return this.withSystemAccessToken(async (accessToken) => {
       const group = await this.ensureManagedGroup(accessToken);
@@ -578,8 +583,9 @@ export class GitlabService {
             method: "POST",
             body: JSON.stringify({
               namespace_id: group.id,
-              name: projectName,
+              name: repositoryName,
               path: repositoryPath,
+              ...(options.description?.trim() ? { description: options.description.trim() } : {}),
               visibility: "private",
               initialize_with_readme: true,
               default_branch: "main"
@@ -603,15 +609,30 @@ export class GitlabService {
     projectId: string,
     provisioned: ManagedRepositoryProvision,
     connectedByUserId: string
-  ): Promise<void> {
-    await this.prisma.projectRepository.create({
+  ): Promise<RepositoryRecord> {
+    return this.prisma.projectRepository.create({
       data: {
         projectId,
         gitlabProjectId: provisioned.gitlabProjectId,
+        name: provisioned.name,
+        description: provisioned.description,
         pathWithNamespace: provisioned.pathWithNamespace,
         webUrl: provisioned.webUrl,
         defaultBranch: provisioned.defaultBranch,
+        visibility: provisioned.visibility,
+        lastActivityAt: new Date(provisioned.lastActivityAt),
         connectedByUserId
+      },
+      include: {
+        project: {
+          select: {
+            id: true,
+            key: true,
+            name: true,
+            description: true,
+            deletedAt: true
+          }
+        }
       }
     });
   }
@@ -622,16 +643,10 @@ export class GitlabService {
 
   async createRepository(
     projectId: string,
-    _dto: CreateProjectRepositoryDto,
+    dto: CreateProjectRepositoryDto,
     user: AuthenticatedUser
   ): Promise<RepositoryStatus> {
-    this.ensureGlobalAdmin(user);
-    await this.accessService.getProjectAccess(user.userId, user.globalRole, projectId);
-
-    const existing = await this.findRepositoryRecord(projectId);
-    if (existing) {
-      return this.getRepositoryStatus(projectId, user);
-    }
+    await this.accessService.ensureProjectWritable(user.userId, user.globalRole, projectId);
 
     const atlasiumProject = await this.prisma.project.findFirst({
       where: {
@@ -649,10 +664,20 @@ export class GitlabService {
       throw new NotFoundException("Project not found");
     }
 
-    const provisioned = await this.provisionManagedRemoteRepository(atlasiumProject.key, atlasiumProject.name);
+    const repositoryName = dto.name?.trim();
+    if (!repositoryName) {
+      throw new BadRequestException("Repository name is required");
+    }
+    const repositoryPathSuffix = this.normalizeRepositoryPath(dto.path?.trim() || repositoryName);
+    const repositoryPath = this.normalizeRepositoryPath(`${atlasiumProject.key}-${repositoryPathSuffix}`);
+    const provisioned = await this.provisionManagedRemoteRepository(atlasiumProject.key, repositoryName, {
+      path: repositoryPath,
+      description: dto.description
+    });
+    let repository: RepositoryRecord;
 
     try {
-      await this.registerManagedRepository(atlasiumProject.id, provisioned, user.userId);
+      repository = await this.registerManagedRepository(atlasiumProject.id, provisioned, user.userId);
     } catch (error) {
       await this.deleteManagedRemoteRepository(provisioned.gitlabProjectId);
       throw error;
@@ -663,7 +688,7 @@ export class GitlabService {
     } catch (error) {
       await this.prisma.projectRepository.deleteMany({
         where: {
-          projectId
+          id: repository.id
         }
       });
       await this.deleteManagedRemoteRepository(provisioned.gitlabProjectId);
@@ -674,7 +699,7 @@ export class GitlabService {
       userId: user.userId,
       projectId,
       entityType: "project_repository",
-      entityId: provisioned.gitlabProjectId,
+      entityId: repository.id,
       action: "project.repository.provision",
       metadata: {
         gitlabProjectId: provisioned.gitlabProjectId,
@@ -682,7 +707,7 @@ export class GitlabService {
       }
     });
 
-    return this.getRepositoryStatus(projectId, user);
+    return this.getRepositoryStatus(projectId, user, repository.id);
   }
 
   async linkRepository(
@@ -698,84 +723,103 @@ export class GitlabService {
   }
 
   async archiveManagedRepository(projectId: string): Promise<void> {
-    const repository = await this.findRepositoryRecord(projectId);
-    if (!repository) {
+    const repositories = await this.findRepositoryRecords(projectId);
+    if (repositories.length === 0) {
       return;
     }
 
     await this.withSystemAccessToken(async (accessToken) => {
-      try {
-        await this.executeGitlabRequest<void>(
-          accessToken,
-          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/archive`,
-          {
-            method: "POST"
+      const archived: RepositoryRecord[] = [];
+      for (const repository of repositories) {
+        try {
+          await this.executeGitlabRequest<void>(
+            accessToken,
+            `/projects/${encodeURIComponent(repository.gitlabProjectId)}/archive`,
+            {
+              method: "POST"
+            }
+          );
+          archived.push(repository);
+        } catch (error) {
+          if (error instanceof GitlabApiError && error.status === 404) {
+            continue;
           }
-        );
-      } catch (error) {
-        if (error instanceof GitlabApiError && error.status === 404) {
-          return;
+          await Promise.all(
+            archived.map((archivedRepository) =>
+              this.executeGitlabRequest<void>(
+                accessToken,
+                `/projects/${encodeURIComponent(archivedRepository.gitlabProjectId)}/unarchive`,
+                {
+                  method: "POST"
+                }
+              ).catch(() => undefined)
+            )
+          );
+          throw this.mapInfrastructureError(error);
         }
-        throw this.mapInfrastructureError(error);
       }
     });
   }
 
   async unarchiveManagedRepository(projectId: string): Promise<void> {
-    const repository = await this.findRepositoryRecord(projectId);
-    if (!repository) {
+    const repositories = await this.findRepositoryRecords(projectId);
+    if (repositories.length === 0) {
       return;
     }
 
     await this.withSystemAccessToken(async (accessToken) => {
-      try {
-        await this.executeGitlabRequest<void>(
-          accessToken,
-          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/unarchive`,
-          {
-            method: "POST"
+      for (const repository of repositories) {
+        try {
+          await this.executeGitlabRequest<void>(
+            accessToken,
+            `/projects/${encodeURIComponent(repository.gitlabProjectId)}/unarchive`,
+            {
+              method: "POST"
+            }
+          );
+        } catch (error) {
+          if (error instanceof GitlabApiError && error.status === 404) {
+            continue;
           }
-        );
-      } catch (error) {
-        if (error instanceof GitlabApiError && error.status === 404) {
-          return;
+          throw this.mapInfrastructureError(error);
         }
-        throw this.mapInfrastructureError(error);
       }
     });
   }
 
   async syncProjectRepositoryAccess(projectId: string): Promise<void> {
-    const repository = await this.findRepositoryRecord(projectId);
-    if (!repository) {
+    const repositories = await this.findRepositoryRecords(projectId);
+    if (repositories.length === 0) {
       return;
     }
 
     await this.withSystemAccessToken(async (accessToken) => {
       try {
-        const desiredMembers = await this.buildDesiredMembers(projectId, accessToken, repository.project.deletedAt !== null);
-        const [currentMembers, effectiveMembers] = await Promise.all([
-          this.executeGitlabRequest<GitlabProjectMember[]>(
-            accessToken,
-            `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members?per_page=100`
-          ),
-          this.executeGitlabRequest<GitlabProjectMember[]>(
-            accessToken,
-            `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members/all?per_page=100`
-          )
-        ]);
-        const currentById = new Map(currentMembers.map((member) => [String(member.id), member]));
-        const effectiveById = new Map(effectiveMembers.map((member) => [String(member.id), member]));
+        const desiredMembers = await this.buildDesiredMembers(projectId, accessToken, repositories[0].project.deletedAt !== null);
         const systemUserId = getEnv().GITLAB_SYSTEM_USER_ID?.trim() || null;
 
-        for (const [gitlabUserId, accessLevel] of desiredMembers.entries()) {
-          const existingMember = currentById.get(gitlabUserId);
-          const effectiveMember = effectiveById.get(gitlabUserId);
+        for (const repository of repositories) {
+          const [currentMembers, effectiveMembers] = await Promise.all([
+            this.executeGitlabRequest<GitlabProjectMember[]>(
+              accessToken,
+              `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members?per_page=100`
+            ),
+            this.executeGitlabRequest<GitlabProjectMember[]>(
+              accessToken,
+              `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members/all?per_page=100`
+            )
+          ]);
+          const currentById = new Map(currentMembers.map((member) => [String(member.id), member]));
+          const effectiveById = new Map(effectiveMembers.map((member) => [String(member.id), member]));
 
-          if (!existingMember) {
-            if (effectiveMember && effectiveMember.access_level >= accessLevel) {
-              continue;
-            }
+          for (const [gitlabUserId, accessLevel] of desiredMembers.entries()) {
+            const existingMember = currentById.get(gitlabUserId);
+            const effectiveMember = effectiveById.get(gitlabUserId);
+
+            if (!existingMember) {
+              if (effectiveMember && effectiveMember.access_level >= accessLevel) {
+                continue;
+              }
 
             await this.executeGitlabRequest<void>(
               accessToken,
@@ -788,49 +832,50 @@ export class GitlabService {
                 })
               }
             );
-            continue;
+              continue;
+            }
+
+            // When GitLab already grants enough access through the parent group, leave
+            // the project membership unchanged instead of forcing a conflicting update.
+            if (
+              effectiveMember &&
+              effectiveMember.access_level > existingMember.access_level &&
+              effectiveMember.access_level >= accessLevel
+            ) {
+              continue;
+            }
+
+            if (existingMember.access_level !== accessLevel) {
+              await this.executeGitlabRequest<void>(
+                accessToken,
+                `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members/${encodeURIComponent(gitlabUserId)}`,
+                {
+                  method: "PUT",
+                  body: JSON.stringify({
+                    access_level: accessLevel
+                  })
+                }
+              );
+            }
           }
 
-          // When GitLab already grants enough access through the parent group, leave
-          // the project membership unchanged instead of forcing a conflicting update.
-          if (
-            effectiveMember &&
-            effectiveMember.access_level > existingMember.access_level &&
-            effectiveMember.access_level >= accessLevel
-          ) {
-            continue;
-          }
+          for (const currentMember of currentMembers) {
+            const gitlabUserId = String(currentMember.id);
+            if (systemUserId && gitlabUserId === systemUserId) {
+              continue;
+            }
+            if (desiredMembers.has(gitlabUserId)) {
+              continue;
+            }
 
-          if (existingMember.access_level !== accessLevel) {
             await this.executeGitlabRequest<void>(
               accessToken,
               `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members/${encodeURIComponent(gitlabUserId)}`,
               {
-                method: "PUT",
-                body: JSON.stringify({
-                  access_level: accessLevel
-                })
+                method: "DELETE"
               }
             );
           }
-        }
-
-        for (const currentMember of currentMembers) {
-          const gitlabUserId = String(currentMember.id);
-          if (systemUserId && gitlabUserId === systemUserId) {
-            continue;
-          }
-          if (desiredMembers.has(gitlabUserId)) {
-            continue;
-          }
-
-          await this.executeGitlabRequest<void>(
-            accessToken,
-            `/projects/${encodeURIComponent(repository.gitlabProjectId)}/members/${encodeURIComponent(gitlabUserId)}`,
-            {
-              method: "DELETE"
-            }
-          );
         }
       } catch (error) {
         throw this.mapInfrastructureError(error);
@@ -838,7 +883,7 @@ export class GitlabService {
     });
   }
 
-  async listBranches(projectId: string, user: AuthenticatedUser): Promise<Array<{
+  async listBranches(projectId: string, user: AuthenticatedUser, repositoryId?: string): Promise<Array<{
     name: string;
     default: boolean;
     merged: boolean;
@@ -846,7 +891,7 @@ export class GitlabService {
     protected: boolean;
     webUrl: string | null;
   }>> {
-    const repository = await this.requireReadableRepository(projectId, user);
+    const repository = await this.requireReadableRepository(projectId, user, repositoryId);
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
       const branches = await this.executeGitlabRequest<GitlabBranch[]>(
@@ -864,7 +909,7 @@ export class GitlabService {
     });
   }
 
-  async listCommits(projectId: string, ref: string | undefined, user: AuthenticatedUser): Promise<Array<{
+  async listCommits(projectId: string, ref: string | undefined, user: AuthenticatedUser, repositoryId?: string): Promise<Array<{
     id: string;
     shortId: string;
     title: string;
@@ -873,7 +918,7 @@ export class GitlabService {
     authorName: string;
     webUrl: string | null;
   }>> {
-    const repository = await this.requireReadableRepository(projectId, user);
+    const repository = await this.requireReadableRepository(projectId, user, repositoryId);
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
       const search = new URLSearchParams({ per_page: "25" });
@@ -901,13 +946,14 @@ export class GitlabService {
     projectId: string,
     path: string | undefined,
     ref: string | undefined,
-    user: AuthenticatedUser
+    user: AuthenticatedUser,
+    repositoryId?: string
   ): Promise<{
     ref: string;
     path: string;
     entries: Array<{ id: string; name: string; path: string; type: "tree" | "blob" }>;
   }> {
-    const repository = await this.requireReadableRepository(projectId, user);
+    const repository = await this.requireReadableRepository(projectId, user, repositoryId);
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
       const resolvedRef = ref?.trim() || repository.defaultBranch;
@@ -938,7 +984,8 @@ export class GitlabService {
     projectId: string,
     filePath: string,
     ref: string | undefined,
-    user: AuthenticatedUser
+    user: AuthenticatedUser,
+    repositoryId?: string
   ): Promise<{
     filePath: string;
     fileName: string;
@@ -947,7 +994,7 @@ export class GitlabService {
     binary: boolean;
     content: string | null;
   }> {
-    const repository = await this.requireReadableRepository(projectId, user);
+    const repository = await this.requireReadableRepository(projectId, user, repositoryId);
     const normalizedFilePath = filePath.trim();
     if (!normalizedFilePath) {
       throw new BadRequestException("filePath is required");
@@ -978,7 +1025,8 @@ export class GitlabService {
   async listMergeRequests(
     projectId: string,
     state: RepositoryMergeRequestState | undefined,
-    user: AuthenticatedUser
+    user: AuthenticatedUser,
+    repositoryId?: string
   ): Promise<
     Array<{
       id: number;
@@ -997,7 +1045,7 @@ export class GitlabService {
       } | null;
     }>
   > {
-    const repository = await this.requireReadableRepository(projectId, user);
+    const repository = await this.requireReadableRepository(projectId, user, repositoryId);
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
       const resolvedState = state ?? "opened";
@@ -1044,13 +1092,14 @@ export class GitlabService {
   async getRepositoryArchive(
     projectId: string,
     ref: string | undefined,
-    user: AuthenticatedUser
+    user: AuthenticatedUser,
+    repositoryId?: string
   ): Promise<{
     buffer: Buffer;
     fileName: string;
     contentType: string;
   }> {
-    const repository = await this.requireReadableRepository(projectId, user);
+    const repository = await this.requireReadableRepository(projectId, user, repositoryId);
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
       const resolvedRef = ref?.trim() || repository.defaultBranch;
@@ -1081,9 +1130,10 @@ export class GitlabService {
   async createBranch(
     projectId: string,
     dto: CreateRepositoryBranchDto,
-    user: AuthenticatedUser
+    user: AuthenticatedUser,
+    repositoryId?: string
   ): Promise<{ name: string; webUrl: string | null; default: boolean }> {
-    const repository = await this.requireWritableRepository(projectId, user);
+    const repository = await this.requireWritableRepository(projectId, user, repositoryId);
 
     const createdBranch = await this.withUserAccessToken(user.userId, async (accessToken) => {
       return this.executeGitlabRequest<GitlabBranch>(
@@ -1120,9 +1170,10 @@ export class GitlabService {
   async createMergeRequest(
     projectId: string,
     dto: CreateRepositoryMergeRequestDto,
-    user: AuthenticatedUser
+    user: AuthenticatedUser,
+    repositoryId?: string
   ): Promise<{ id: number; iid: number; title: string; state: string; webUrl: string }> {
-    const repository = await this.requireWritableRepository(projectId, user);
+    const repository = await this.requireWritableRepository(projectId, user, repositoryId);
 
     const mergeRequest = await this.withUserAccessToken(user.userId, async (accessToken) => {
       return this.executeGitlabRequest<GitlabMergeRequest>(
@@ -1162,41 +1213,106 @@ export class GitlabService {
     };
   }
 
-  private async requireReadableRepository(projectId: string, user: AuthenticatedUser): Promise<RepositoryRecord> {
+  private async requireReadableRepository(projectId: string, user: AuthenticatedUser, repositoryId?: string): Promise<RepositoryRecord> {
     await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
-    const repository = await this.findRepositoryRecord(projectId);
+    const repository = repositoryId
+      ? await this.findRepositoryRecordById(projectId, repositoryId)
+      : await this.findRepositoryRecord(projectId);
     if (!repository) {
       throw new NotFoundException("This project repository is not provisioned yet");
     }
     return repository;
   }
 
-  private async requireWritableRepository(projectId: string, user: AuthenticatedUser): Promise<RepositoryRecord> {
+  private async requireWritableRepository(projectId: string, user: AuthenticatedUser, repositoryId?: string): Promise<RepositoryRecord> {
     await this.accessService.ensureProjectWritable(user.userId, user.globalRole, projectId);
-    const repository = await this.findRepositoryRecord(projectId);
+    const repository = repositoryId
+      ? await this.findRepositoryRecordById(projectId, repositoryId)
+      : await this.findRepositoryRecord(projectId);
     if (!repository) {
       throw new NotFoundException("This project repository is not provisioned yet");
     }
     return repository;
+  }
+
+  private async findRepositoryRecordById(projectId: string, repositoryId: string): Promise<RepositoryRecord | null> {
+    return this.prisma.projectRepository.findFirst({
+      where: {
+        id: repositoryId,
+        projectId
+      },
+      include: this.repositoryRecordInclude()
+    });
   }
 
   private async findRepositoryRecord(projectId: string): Promise<RepositoryRecord | null> {
-    return this.prisma.projectRepository.findUnique({
+    return this.findSoleRepositoryRecord(projectId);
+  }
+
+  private async findSoleRepositoryRecord(projectId: string): Promise<RepositoryRecord | null> {
+    const repositories = await this.prisma.projectRepository.findMany({
       where: {
         projectId
       },
-      include: {
-        project: {
-          select: {
-            id: true,
-            key: true,
-            name: true,
-            description: true,
-            deletedAt: true
-          }
+      orderBy: [
+        { name: "asc" },
+        { pathWithNamespace: "asc" }
+      ],
+      take: 2,
+      include: this.repositoryRecordInclude()
+    });
+
+    if (repositories.length > 1) {
+      throw new ConflictException("Multiple repositories exist for this project; use a repository-scoped endpoint");
+    }
+
+    return repositories[0] ?? null;
+  }
+
+  private async findRepositoryRecords(projectId: string): Promise<RepositoryRecord[]> {
+    return this.prisma.projectRepository.findMany({
+      where: {
+        projectId
+      },
+      orderBy: [
+        { name: "asc" },
+        { pathWithNamespace: "asc" }
+      ],
+      include: this.repositoryRecordInclude()
+    });
+  }
+
+  private repositoryRecordInclude() {
+    return {
+      project: {
+        select: {
+          id: true,
+          key: true,
+          name: true,
+          description: true,
+          deletedAt: true
         }
       }
-    });
+    } as const;
+  }
+
+  private mapRepositorySummaryFromRecord(repository: RepositoryRecord): RepositorySummary {
+    return {
+      id: repository.id,
+      gitlabProjectId: repository.gitlabProjectId,
+      name: repository.name,
+      description: repository.description,
+      webUrl: repository.webUrl,
+      sshCloneUrl: this.buildRepositorySshCloneUrl(repository.pathWithNamespace),
+      httpCloneUrl: this.buildRepositoryCloneUrl(repository.pathWithNamespace),
+      pathWithNamespace: repository.pathWithNamespace,
+      defaultBranch: repository.defaultBranch,
+      visibility: repository.visibility,
+      lastActivityAt: repository.lastActivityAt.toISOString(),
+      connectedAt: repository.connectedAt.toISOString(),
+      connectedByUserId: repository.connectedByUserId,
+      managed: true
+    };
   }
 
   private async fetchRepositoryProject(gitlabProjectId: string, accessToken: string): Promise<GitlabProject> {

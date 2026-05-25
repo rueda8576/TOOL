@@ -53,8 +53,14 @@ export type ProjectOverview = {
     };
     code: {
       connected: boolean;
-      pathWithNamespace: string | null;
-      defaultBranch: string | null;
+      repositoryCount: number;
+      latestRepository: {
+        id: string;
+        name: string;
+        pathWithNamespace: string;
+        defaultBranch: string;
+        lastActivityAt: string;
+      } | null;
       lastActivityAt: string | null;
     };
     tasks: {

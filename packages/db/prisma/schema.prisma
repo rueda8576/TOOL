@@ -217,7 +217,7 @@ model Project {
   createdBy User            @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Restrict)
   members   ProjectMember[]
   pinnedByUsers UserPinnedProject[]
-  repository ProjectRepository?
+  repositories ProjectRepository[]
   documents Document[]
   wikiPages WikiPage[]
   wikiAssets WikiAsset[]
@@ -252,11 +252,15 @@ model GitLabConnection {
 
 model ProjectRepository {
   id                String   @id @default(cuid())
-  projectId         String   @unique
+  projectId         String
   gitlabProjectId   String   @unique
+  name              String
+  description       String?
   pathWithNamespace String
   webUrl            String
   defaultBranch     String
+  visibility        String   @default("private")
+  lastActivityAt    DateTime @default(now())
   connectedByUserId String
   connectedAt       DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -264,6 +268,7 @@ model ProjectRepository {
   project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   connectedBy User    @relation("ProjectRepositoryConnector", fields: [connectedByUserId], references: [id], onDelete: Restrict)
 
+  @@index([projectId])
   @@index([pathWithNamespace])
 }
 

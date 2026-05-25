@@ -62,8 +62,14 @@ export type ProjectOverview = {
     };
     code: {
       connected: boolean;
-      pathWithNamespace: string | null;
-      defaultBranch: string | null;
+      repositoryCount: number;
+      latestRepository: {
+        id: string;
+        name: string;
+        pathWithNamespace: string;
+        defaultBranch: string;
+        lastActivityAt: string;
+      } | null;
       lastActivityAt: string | null;
     };
     tasks: {
@@ -266,9 +272,13 @@ export class ProjectsService {
           data: {
             projectId: createdProject.id,
             gitlabProjectId: provisionedRepository.gitlabProjectId,
+            name: provisionedRepository.name,
+            description: provisionedRepository.description,
             pathWithNamespace: provisionedRepository.pathWithNamespace,
             webUrl: provisionedRepository.webUrl,
             defaultBranch: provisionedRepository.defaultBranch,
+            visibility: provisionedRepository.visibility,
+            lastActivityAt: new Date(provisionedRepository.lastActivityAt),
             connectedByUserId: user.userId
           }
         });
@@ -455,12 +465,18 @@ export class ProjectsService {
         description: true,
         createdAt: true,
         updatedAt: true,
-        repository: {
+        repositories: {
           select: {
+            id: true,
+            name: true,
             pathWithNamespace: true,
             defaultBranch: true,
-            updatedAt: true
-          }
+            lastActivityAt: true
+          },
+          orderBy: [
+            { lastActivityAt: "desc" },
+            { name: "asc" }
+          ]
         }
       }
     });
@@ -657,13 +673,13 @@ export class ProjectsService {
     const publishedWikiPages = wikiPages.filter((page) => page.currentRevisionId !== null);
 
     const attention: ProjectOverviewAttentionItem[] = [];
-    if (!project.repository) {
+    if (project.repositories.length === 0) {
       attention.push({
         id: "repository-missing",
         severity: "danger",
         module: "code",
-        title: "Repository is not provisioned",
-        detail: "Code workspace needs a managed GitLab repository before project code can be traced.",
+        title: "No repositories are provisioned",
+        detail: "Code workspace needs at least one managed GitLab repository before project code can be traced.",
         href: moduleHref(projectId, "code"),
         date: null
       });
@@ -795,10 +811,18 @@ export class ProjectsService {
           }))
         },
         code: {
-          connected: Boolean(project.repository),
-          pathWithNamespace: project.repository?.pathWithNamespace ?? null,
-          defaultBranch: project.repository?.defaultBranch ?? null,
-          lastActivityAt: toIso(project.repository?.updatedAt)
+          connected: project.repositories.length > 0,
+          repositoryCount: project.repositories.length,
+          latestRepository: project.repositories[0]
+            ? {
+                id: project.repositories[0].id,
+                name: project.repositories[0].name,
+                pathWithNamespace: project.repositories[0].pathWithNamespace,
+                defaultBranch: project.repositories[0].defaultBranch,
+                lastActivityAt: project.repositories[0].lastActivityAt.toISOString()
+              }
+            : null,
+          lastActivityAt: toIso(project.repositories[0]?.lastActivityAt)
         },
         tasks: {
           open: openTasks.length,

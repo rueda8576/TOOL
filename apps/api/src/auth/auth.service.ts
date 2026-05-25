@@ -979,7 +979,7 @@ export class AuthService {
       }
     });
 
-    return repositories.map((repository) => repository.projectId);
+    return Array.from(new Set(repositories.map((repository) => repository.projectId)));
   }
 
   private async ensureUsernameAvailable(username: string, currentUserId?: string): Promise<void> {

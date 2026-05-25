@@ -398,7 +398,7 @@ describe("ProjectsService", () => {
       description: "Traceable doctoral archive",
       createdAt: new Date("2026-05-01T09:00:00.000Z"),
       updatedAt: new Date("2026-05-20T09:00:00.000Z"),
-      repository: null
+      repositories: []
     });
     prisma.document.findMany.mockResolvedValue([
       {
@@ -534,7 +534,12 @@ describe("ProjectsService", () => {
       publishedPages: 2,
       draftPages: 1
     });
-    expect(overview.modules.code.connected).toBe(false);
+    expect(overview.modules.code).toEqual({
+      connected: false,
+      repositoryCount: 0,
+      latestRepository: null,
+      lastActivityAt: null
+    });
     expect(overview.modules.tasks).toMatchObject({
       open: 2,
       inProgress: 1,
@@ -585,11 +590,13 @@ describe("ProjectsService", () => {
       description: null,
       createdAt: new Date("2026-05-01T09:00:00.000Z"),
       updatedAt: new Date("2026-05-20T09:00:00.000Z"),
-      repository: {
+      repositories: [{
+        id: "repo-read",
+        name: "Reader repository",
         pathWithNamespace: "atlasium/read",
         defaultBranch: "main",
-        updatedAt: new Date("2026-05-20T08:00:00.000Z")
-      }
+        lastActivityAt: new Date("2026-05-20T08:00:00.000Z")
+      }]
     });
     prisma.document.findMany.mockResolvedValue([]);
     prisma.wikiPage.findMany.mockResolvedValue([]);
@@ -619,6 +626,18 @@ describe("ProjectsService", () => {
       canWrite: false
     });
     expect(overview.modules.wiki.draftPages).toBe(0);
+    expect(overview.modules.code).toEqual({
+      connected: true,
+      repositoryCount: 1,
+      latestRepository: {
+        id: "repo-read",
+        name: "Reader repository",
+        pathWithNamespace: "atlasium/read",
+        defaultBranch: "main",
+        lastActivityAt: "2026-05-20T08:00:00.000Z"
+      },
+      lastActivityAt: "2026-05-20T08:00:00.000Z"
+    });
     expect(overview.attention.some((item) => item.module === "wiki")).toBe(false);
   });
 

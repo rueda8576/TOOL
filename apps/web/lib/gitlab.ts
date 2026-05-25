@@ -12,24 +12,26 @@ export type GitlabConnectionStatus = {
   webUrl?: string | null;
 };
 
+export type ProjectRepositorySummary = {
+  id: string;
+  gitlabProjectId: string;
+  name: string;
+  description: string | null;
+  webUrl: string;
+  sshCloneUrl: string;
+  httpCloneUrl: string;
+  pathWithNamespace: string;
+  defaultBranch: string;
+  visibility: string;
+  lastActivityAt: string;
+  connectedAt: string;
+  connectedByUserId: string;
+  managed: true;
+};
+
 export type ProjectRepositoryStatus =
   | { connected: false }
-  | {
-      connected: true;
-      gitlabProjectId: string;
-      name: string;
-      description: string | null;
-      webUrl: string;
-      sshCloneUrl: string;
-      httpCloneUrl: string;
-      pathWithNamespace: string;
-      defaultBranch: string;
-      visibility: string;
-      lastActivityAt: string;
-      connectedAt: string;
-      connectedByUserId: string;
-      managed: true;
-    };
+  | ({ connected: true } & ProjectRepositorySummary);
 
 export type RepositoryBranch = {
   name: string;
@@ -176,8 +178,12 @@ export async function getProjectRepositoryStatus(projectId: string, token: strin
   return authFetch<ProjectRepositoryStatus>(`/projects/${projectId}/repository`, { token });
 }
 
-export async function ensureProjectRepositoryAccess(projectId: string, token: string): Promise<ProjectRepositoryStatus> {
-  return authFetch<ProjectRepositoryStatus>(`/projects/${projectId}/repository/access/ensure`, {
+export async function listProjectRepositories(projectId: string, token: string): Promise<ProjectRepositorySummary[]> {
+  return authFetch<ProjectRepositorySummary[]>(`/projects/${projectId}/repositories`, { token });
+}
+
+export async function ensureProjectRepositoryAccess(projectId: string, repositoryId: string, token: string): Promise<ProjectRepositoryStatus> {
+  return authFetch<ProjectRepositoryStatus>(`/projects/${projectId}/repositories/${repositoryId}/access/ensure`, {
     token,
     init: {
       method: "POST"
@@ -188,9 +194,9 @@ export async function ensureProjectRepositoryAccess(projectId: string, token: st
 export async function createProjectRepository(
   projectId: string,
   token: string,
-  payload: { name?: string; path?: string } = {}
+  payload: { name: string; path?: string; description?: string }
 ): Promise<ProjectRepositoryStatus> {
-  return authFetch<ProjectRepositoryStatus>(`/projects/${projectId}/repository/create`, {
+  return authFetch<ProjectRepositoryStatus>(`/projects/${projectId}/repositories`, {
     token,
     init: {
       method: "POST",
@@ -199,12 +205,13 @@ export async function createProjectRepository(
   });
 }
 
-export async function listRepositoryBranches(projectId: string, token: string): Promise<RepositoryBranch[]> {
-  return authFetch<RepositoryBranch[]>(`/projects/${projectId}/repository/branches`, { token });
+export async function listRepositoryBranches(projectId: string, repositoryId: string, token: string): Promise<RepositoryBranch[]> {
+  return authFetch<RepositoryBranch[]>(`/projects/${projectId}/repositories/${repositoryId}/branches`, { token });
 }
 
 export async function listRepositoryCommits(
   projectId: string,
+  repositoryId: string,
   token: string,
   params?: { ref?: string }
 ): Promise<RepositoryCommit[]> {
@@ -213,11 +220,12 @@ export async function listRepositoryCommits(
     search.set("ref", params.ref.trim());
   }
   const suffix = search.toString().length > 0 ? `?${search.toString()}` : "";
-  return authFetch<RepositoryCommit[]>(`/projects/${projectId}/repository/commits${suffix}`, { token });
+  return authFetch<RepositoryCommit[]>(`/projects/${projectId}/repositories/${repositoryId}/commits${suffix}`, { token });
 }
 
 export async function getRepositoryTree(
   projectId: string,
+  repositoryId: string,
   token: string,
   params?: { ref?: string; path?: string }
 ): Promise<RepositoryTree> {
@@ -229,11 +237,12 @@ export async function getRepositoryTree(
     search.set("path", params.path.trim());
   }
   const suffix = search.toString().length > 0 ? `?${search.toString()}` : "";
-  return authFetch<RepositoryTree>(`/projects/${projectId}/repository/tree${suffix}`, { token });
+  return authFetch<RepositoryTree>(`/projects/${projectId}/repositories/${repositoryId}/tree${suffix}`, { token });
 }
 
 export async function getRepositoryFile(
   projectId: string,
+  repositoryId: string,
   token: string,
   params: { ref?: string; filePath: string }
 ): Promise<RepositoryFile> {
@@ -241,16 +250,17 @@ export async function getRepositoryFile(
   if (params.ref?.trim()) {
     search.set("ref", params.ref.trim());
   }
-  return authFetch<RepositoryFile>(`/projects/${projectId}/repository/file?${search.toString()}`, { token });
+  return authFetch<RepositoryFile>(`/projects/${projectId}/repositories/${repositoryId}/file?${search.toString()}`, { token });
 }
 
 export async function createRepositoryBranch(
   projectId: string,
+  repositoryId: string,
   token: string,
   payload: { name: string; sourceRef: string }
 ): Promise<{ name: string; webUrl: string | null; default: boolean }> {
   return authFetch<{ name: string; webUrl: string | null; default: boolean }>(
-    `/projects/${projectId}/repository/branches`,
+    `/projects/${projectId}/repositories/${repositoryId}/branches`,
     {
       token,
       init: {
@@ -263,10 +273,11 @@ export async function createRepositoryBranch(
 
 export async function createRepositoryMergeRequest(
   projectId: string,
+  repositoryId: string,
   token: string,
   payload: { sourceBranch: string; targetBranch: string; title: string; description?: string }
 ): Promise<CreatedRepositoryMergeRequest> {
-  return authFetch<CreatedRepositoryMergeRequest>(`/projects/${projectId}/repository/merge-requests`, {
+  return authFetch<CreatedRepositoryMergeRequest>(`/projects/${projectId}/repositories/${repositoryId}/merge-requests`, {
     token,
     init: {
       method: "POST",
@@ -277,6 +288,7 @@ export async function createRepositoryMergeRequest(
 
 export async function listRepositoryMergeRequests(
   projectId: string,
+  repositoryId: string,
   token: string,
   params?: { state?: RepositoryMergeRequestState }
 ): Promise<RepositoryMergeRequest[]> {
@@ -285,13 +297,14 @@ export async function listRepositoryMergeRequests(
     search.set("state", params.state);
   }
   const suffix = search.toString().length > 0 ? `?${search.toString()}` : "";
-  return authFetch<RepositoryMergeRequest[]>(`/projects/${projectId}/repository/merge-requests${suffix}`, {
+  return authFetch<RepositoryMergeRequest[]>(`/projects/${projectId}/repositories/${repositoryId}/merge-requests${suffix}`, {
     token
   });
 }
 
 export async function downloadRepositoryArchive(
   projectId: string,
+  repositoryId: string,
   token: string,
   params?: { ref?: string }
 ): Promise<{ blob: Blob; fileName: string }> {
@@ -300,7 +313,7 @@ export async function downloadRepositoryArchive(
     search.set("ref", params.ref.trim());
   }
   const suffix = search.toString().length > 0 ? `?${search.toString()}` : "";
-  const response = await authFetchResponse(`/projects/${projectId}/repository/archive${suffix}`, {
+  const response = await authFetchResponse(`/projects/${projectId}/repositories/${repositoryId}/archive${suffix}`, {
     token,
     init: {
       method: "GET",

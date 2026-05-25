@@ -1,5 +1,29 @@
 # Implementation TODO (v1 bootstrap)
 
+## Multi-Repository Code Workspace (2026-05-25)
+- [x] Update Prisma schema and migration for multiple managed repositories per project.
+- [x] Refactor GitLab repository service/controller routes for repository-scoped operations while keeping legacy wrappers.
+- [x] Update project overview, project lifecycle, auth/admin sync flows, and backend tests for multi-repository behavior.
+- [x] Update web GitLab helpers and Code UI with repository switcher, selected repository persistence, and New repository modal.
+- [x] Run database, API, web, static, and diff hygiene verification.
+
+### Review - Multi-Repository Code Workspace
+- Changed the data model from a singular `Project.repository` relation to `Project.repositories`, removed the project-level repository uniqueness constraint, and added repository list metadata for fast local summaries.
+- Added repository-scoped API routes under `/projects/:projectId/repositories/:repositoryId/...` while keeping legacy singular routes as sole-repository compatibility wrappers.
+- Moved repository creation to project write access, with managed private GitLab repositories initialized from Code using a project-key-prefixed path.
+- Updated lifecycle and sync flows so access sync, password/reconnect sync, project delete, and project restore operate across all managed repositories.
+- Updated Project Overview Code summary to report repository count and latest repository activity instead of assuming one default repository.
+- Updated the Code cockpit with a repository switcher, persisted active repository selection, and a `New repository` modal for writers; all files, commits, branches, merge requests, clone, Git access, and ZIP flows now use the active repository id.
+- Verification:
+  - `pnpm --filter @doctoral/db build` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/gitlab/gitlab.service.spec.ts src/projects/projects.service.spec.ts src/auth/auth.service.spec.ts src/admin/admin-users.service.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/gitlab.controller.http.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - Static audits for legacy singular repository assumptions and decorative/dead UI patterns passed
+  - `git diff --check` passed
+
 ## Code ZIP Download + Word Wrap (2026-05-25)
 - [x] Fix repository archive content negotiation so the Code `ZIP` action downloads archives without `406 Not Acceptable`.
 - [x] Add API coverage for ZIP-compatible GitLab archive `Accept` headers.

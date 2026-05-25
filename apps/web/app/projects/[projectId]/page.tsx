@@ -143,9 +143,9 @@ function buildModuleCards(projectId: string, overview: ProjectOverview): ModuleC
       label: "Code",
       href: moduleHref(projectId, "code"),
       icon: Code2,
-      metric: modules.code.connected ? "Repository ready" : "Repository missing",
-      detail: modules.code.pathWithNamespace ?? "Managed GitLab repository is not provisioned",
-      status: modules.code.defaultBranch ? `Default ${modules.code.defaultBranch}` : "Open Code to provision"
+      metric: modules.code.connected ? `${modules.code.repositoryCount} repositor${modules.code.repositoryCount === 1 ? "y" : "ies"}` : "No repositories",
+      detail: modules.code.latestRepository?.pathWithNamespace ?? "Managed GitLab repositories are not provisioned",
+      status: modules.code.latestRepository ? `Latest ${modules.code.latestRepository.defaultBranch}` : "Open Code to provision"
     },
     {
       id: "tasks",

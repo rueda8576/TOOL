@@ -37,9 +37,23 @@ export class GitlabController {
     return this.gitlabService.getRepositoryStatus(projectId, user);
   }
 
+  @Get("projects/:projectId/repositories")
+  listRepositories(@Param("projectId") projectId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.gitlabService.listRepositories(projectId, user);
+  }
+
   @Post("projects/:projectId/repository/access/ensure")
   ensureRepositoryAccess(@Param("projectId") projectId: string, @CurrentUser() user: AuthenticatedUser) {
     return this.gitlabService.ensureCurrentUserRepositoryAccess(projectId, user);
+  }
+
+  @Post("projects/:projectId/repositories/:repositoryId/access/ensure")
+  ensureScopedRepositoryAccess(
+    @Param("projectId") projectId: string,
+    @Param("repositoryId") repositoryId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    return this.gitlabService.ensureCurrentUserRepositoryAccess(projectId, user, repositoryId);
   }
 
   @Post("projects/:projectId/repository/link")
@@ -53,8 +67,16 @@ export class GitlabController {
   }
 
   @Post("projects/:projectId/repository/create")
-  @Roles("admin")
   createRepository(
+    @Param("projectId") projectId: string,
+    @Body() dto: CreateProjectRepositoryDto,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    return this.gitlabService.createRepository(projectId, dto, user);
+  }
+
+  @Post("projects/:projectId/repositories")
+  createRepositoryFromList(
     @Param("projectId") projectId: string,
     @Body() dto: CreateProjectRepositoryDto,
     @CurrentUser() user: AuthenticatedUser
@@ -73,6 +95,15 @@ export class GitlabController {
     return this.gitlabService.listBranches(projectId, user);
   }
 
+  @Get("projects/:projectId/repositories/:repositoryId/branches")
+  listScopedBranches(
+    @Param("projectId") projectId: string,
+    @Param("repositoryId") repositoryId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    return this.gitlabService.listBranches(projectId, user, repositoryId);
+  }
+
   @Get("projects/:projectId/repository/commits")
   listCommits(
     @Param("projectId") projectId: string,
@@ -80,6 +111,16 @@ export class GitlabController {
     @CurrentUser() user: AuthenticatedUser
   ) {
     return this.gitlabService.listCommits(projectId, query.ref, user);
+  }
+
+  @Get("projects/:projectId/repositories/:repositoryId/commits")
+  listScopedCommits(
+    @Param("projectId") projectId: string,
+    @Param("repositoryId") repositoryId: string,
+    @Query() query: ListRepositoryCommitsQueryDto,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    return this.gitlabService.listCommits(projectId, query.ref, user, repositoryId);
   }
 
   @Get("projects/:projectId/repository/tree")
@@ -91,6 +132,16 @@ export class GitlabController {
     return this.gitlabService.getRepositoryTree(projectId, query.path, query.ref, user);
   }
 
+  @Get("projects/:projectId/repositories/:repositoryId/tree")
+  getScopedTree(
+    @Param("projectId") projectId: string,
+    @Param("repositoryId") repositoryId: string,
+    @Query() query: ListRepositoryTreeQueryDto,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    return this.gitlabService.getRepositoryTree(projectId, query.path, query.ref, user, repositoryId);
+  }
+
   @Get("projects/:projectId/repository/file")
   getFile(
     @Param("projectId") projectId: string,
@@ -100,6 +151,16 @@ export class GitlabController {
     return this.gitlabService.getRepositoryFile(projectId, query.filePath, query.ref, user);
   }
 
+  @Get("projects/:projectId/repositories/:repositoryId/file")
+  getScopedFile(
+    @Param("projectId") projectId: string,
+    @Param("repositoryId") repositoryId: string,
+    @Query() query: GetRepositoryFileQueryDto,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    return this.gitlabService.getRepositoryFile(projectId, query.filePath, query.ref, user, repositoryId);
+  }
+
   @Get("projects/:projectId/repository/merge-requests")
   listMergeRequests(
     @Param("projectId") projectId: string,
@@ -107,6 +168,16 @@ export class GitlabController {
     @CurrentUser() user: AuthenticatedUser
   ) {
     return this.gitlabService.listMergeRequests(projectId, query.state, user);
+  }
+
+  @Get("projects/:projectId/repositories/:repositoryId/merge-requests")
+  listScopedMergeRequests(
+    @Param("projectId") projectId: string,
+    @Param("repositoryId") repositoryId: string,
+    @Query() query: ListRepositoryMergeRequestsQueryDto,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    return this.gitlabService.listMergeRequests(projectId, query.state, user, repositoryId);
   }
 
   @Get("projects/:projectId/repository/archive")
@@ -122,6 +193,20 @@ export class GitlabController {
     res.send(archive.buffer);
   }
 
+  @Get("projects/:projectId/repositories/:repositoryId/archive")
+  async getScopedRepositoryArchive(
+    @Param("projectId") projectId: string,
+    @Param("repositoryId") repositoryId: string,
+    @Query() query: GetRepositoryArchiveQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response
+  ): Promise<void> {
+    const archive = await this.gitlabService.getRepositoryArchive(projectId, query.ref, user, repositoryId);
+    res.setHeader("Content-Type", archive.contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${archive.fileName}"`);
+    res.send(archive.buffer);
+  }
+
   @Post("projects/:projectId/repository/branches")
   createBranch(
     @Param("projectId") projectId: string,
@@ -131,6 +216,16 @@ export class GitlabController {
     return this.gitlabService.createBranch(projectId, dto, user);
   }
 
+  @Post("projects/:projectId/repositories/:repositoryId/branches")
+  createScopedBranch(
+    @Param("projectId") projectId: string,
+    @Param("repositoryId") repositoryId: string,
+    @Body() dto: CreateRepositoryBranchDto,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    return this.gitlabService.createBranch(projectId, dto, user, repositoryId);
+  }
+
   @Post("projects/:projectId/repository/merge-requests")
   createMergeRequest(
     @Param("projectId") projectId: string,
@@ -138,5 +233,15 @@ export class GitlabController {
     @CurrentUser() user: AuthenticatedUser
   ) {
     return this.gitlabService.createMergeRequest(projectId, dto, user);
+  }
+
+  @Post("projects/:projectId/repositories/:repositoryId/merge-requests")
+  createScopedMergeRequest(
+    @Param("projectId") projectId: string,
+    @Param("repositoryId") repositoryId: string,
+    @Body() dto: CreateRepositoryMergeRequestDto,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    return this.gitlabService.createMergeRequest(projectId, dto, user, repositoryId);
   }
 }

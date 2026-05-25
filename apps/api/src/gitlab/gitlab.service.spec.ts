@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
   ServiceUnavailableException,
@@ -51,9 +52,13 @@ describe("GitlabService", () => {
     id: "repo-1",
     projectId: "project-1",
     gitlabProjectId: "123",
+    name: "Navigation",
+    description: null,
     pathWithNamespace: "atlasium/nav",
     webUrl: "https://git.atlasium.info/atlasium/nav",
     defaultBranch: "main",
+    visibility: "private",
+    lastActivityAt: new Date("2026-03-31T18:00:00.000Z"),
     connectedByUserId: "admin-1",
     connectedAt: new Date("2026-03-31T18:00:00.000Z"),
     updatedAt: new Date("2026-03-31T18:00:00.000Z"),
@@ -89,6 +94,9 @@ describe("GitlabService", () => {
         findMany: jest.fn()
       },
       projectRepository: {
+        create: jest.fn(),
+        findFirst: jest.fn(),
+        findMany: jest.fn(),
         findUnique: jest.fn(),
         deleteMany: jest.fn()
       }
@@ -414,6 +422,32 @@ describe("GitlabService", () => {
     );
   });
 
+  it("rejects legacy singular repository resolution when multiple repositories exist", async () => {
+    const { service, prisma } = makeServiceWithDeps();
+    prisma.projectRepository.findMany.mockResolvedValue([
+      repositoryRecord,
+      {
+        ...repositoryRecord,
+        id: "repo-2",
+        gitlabProjectId: "456",
+        name: "Experiments",
+        pathWithNamespace: "atlasium/experiments"
+      }
+    ]);
+
+    await expect(
+      service.getRepositoryStatus("project-1", {
+        userId: "reader-1",
+        globalRole: "reader"
+      } as any)
+    ).rejects.toEqual(
+      expect.objectContaining({
+        constructor: ConflictException,
+        message: "Multiple repositories exist for this project; use a repository-scoped endpoint"
+      })
+    );
+  });
+
   it("maps duplicate managed repository paths to a readable bad request", async () => {
     const service = makeService();
     jest.spyOn(service as any, "ensureManagedGroup").mockResolvedValue({ id: 3 });
@@ -433,18 +467,43 @@ describe("GitlabService", () => {
     );
   });
 
-  it("returns the existing repository status instead of reprovisioning an already connected repository", async () => {
-    const service = makeService();
-    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+  it("allows project writers to create an additional managed repository", async () => {
+    const { service, prisma, accessService } = makeServiceWithDeps();
+    prisma.project.findFirst.mockResolvedValue({
+      id: "project-1",
+      key: "NAV",
+      name: "Navigation"
+    });
+    jest.spyOn(service, "provisionManagedRemoteRepository").mockResolvedValue({
+      gitlabProjectId: "gl-2",
+      name: "Analysis",
+      description: "Analysis workspace",
+      pathWithNamespace: "atlasium/nav-analysis",
+      webUrl: "https://git.atlasium.info/atlasium/nav-analysis",
+      defaultBranch: "main",
+      visibility: "private",
+      lastActivityAt: "2026-04-06T10:00:00.000Z"
+    });
+    jest.spyOn(service, "registerManagedRepository").mockResolvedValue({
+      ...repositoryRecord,
+      id: "repo-2",
+      gitlabProjectId: "gl-2",
+      name: "Analysis",
+      description: "Analysis workspace",
+      pathWithNamespace: "atlasium/nav-analysis",
+      webUrl: "https://git.atlasium.info/atlasium/nav-analysis"
+    } as any);
+    jest.spyOn(service, "syncProjectRepositoryAccess").mockResolvedValue(undefined);
     const getRepositoryStatusSpy = jest.spyOn(service, "getRepositoryStatus").mockResolvedValue({
       connected: true,
-      gitlabProjectId: "123",
-      name: "Navigation",
-      description: null,
-      webUrl: repositoryRecord.webUrl,
-      sshCloneUrl: "git@git.atlasium.info:atlasium/nav.git",
-      httpCloneUrl: "https://git.atlasium.info/atlasium/nav.git",
-      pathWithNamespace: repositoryRecord.pathWithNamespace,
+      id: "repo-2",
+      gitlabProjectId: "gl-2",
+      name: "Analysis",
+      description: "Analysis workspace",
+      webUrl: "https://git.atlasium.info/atlasium/nav-analysis",
+      sshCloneUrl: "git@git.atlasium.info:atlasium/nav-analysis.git",
+      httpCloneUrl: "https://git.atlasium.info/atlasium/nav-analysis.git",
+      pathWithNamespace: "atlasium/nav-analysis",
       defaultBranch: "main",
       visibility: "private",
       lastActivityAt: "2026-04-06T10:00:00.000Z",
@@ -456,24 +515,30 @@ describe("GitlabService", () => {
     await expect(
       service.createRepository(
         "project-1",
-        {} as any,
+        { name: "Analysis", description: "Analysis workspace" },
         {
-          userId: "admin-1",
-          globalRole: "admin"
+          userId: "editor-1",
+          globalRole: "editor"
         } as any
       )
     ).resolves.toEqual(
       expect.objectContaining({
         connected: true,
-        gitlabProjectId: "123"
+        gitlabProjectId: "gl-2"
       })
     );
 
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("editor-1", "editor", "project-1");
+    expect(service.provisionManagedRemoteRepository).toHaveBeenCalledWith("NAV", "Analysis", {
+      path: "nav-analysis",
+      description: "Analysis workspace"
+    });
     expect(getRepositoryStatusSpy).toHaveBeenCalledWith(
       "project-1",
       expect.objectContaining({
-        userId: "admin-1"
-      })
+        userId: "editor-1"
+      }),
+      "repo-2"
     );
   });
 
@@ -485,7 +550,7 @@ describe("GitlabService", () => {
     await expect(
       service.createRepository(
         "missing-project",
-        {} as any,
+        { name: "Navigation" },
         {
           userId: "admin-1",
           globalRole: "admin"
@@ -524,7 +589,7 @@ describe("GitlabService", () => {
     await expect(
       service.createRepository(
         "project-1",
-        {} as any,
+        { name: "Navigation" },
         {
           userId: "admin-1",
           globalRole: "admin"
@@ -553,7 +618,7 @@ describe("GitlabService", () => {
       visibility: "private",
       lastActivityAt: "2026-04-06T10:00:00.000Z"
     });
-    jest.spyOn(service, "registerManagedRepository").mockResolvedValue(undefined);
+    jest.spyOn(service, "registerManagedRepository").mockResolvedValue(repositoryRecord as any);
     jest.spyOn(service, "syncProjectRepositoryAccess").mockRejectedValue(new Error("sync failed"));
     const deleteManagedRemoteRepositorySpy = jest
       .spyOn(service as any, "deleteManagedRemoteRepository")
@@ -562,7 +627,7 @@ describe("GitlabService", () => {
     await expect(
       service.createRepository(
         "project-1",
-        {} as any,
+        { name: "Navigation" },
         {
           userId: "admin-1",
           globalRole: "admin"
@@ -572,7 +637,7 @@ describe("GitlabService", () => {
 
     expect(prisma.projectRepository.deleteMany).toHaveBeenCalledWith({
       where: {
-        projectId: "project-1"
+        id: "repo-1"
       }
     });
     expect(deleteManagedRemoteRepositorySpy).toHaveBeenCalledWith("gl-2");
@@ -580,7 +645,7 @@ describe("GitlabService", () => {
 
   it("returns without touching GitLab when archiving or unarchiving a project with no repository record", async () => {
     const service = makeService();
-    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(null);
+    jest.spyOn(service as any, "findRepositoryRecords").mockResolvedValue([]);
 
     await expect(service.archiveManagedRepository("project-1")).resolves.toBeUndefined();
     await expect(service.unarchiveManagedRepository("project-1")).resolves.toBeUndefined();
@@ -590,7 +655,7 @@ describe("GitlabService", () => {
 
   it("ignores missing GitLab projects during archive and unarchive reconciliation", async () => {
     const service = makeService();
-    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest.spyOn(service as any, "findRepositoryRecords").mockResolvedValue([repositoryRecord]);
 
     fetchSpy
       .mockResolvedValueOnce(jsonResponse(404, { message: "404 Project Not Found" }) as Response)
@@ -1086,7 +1151,7 @@ describe("GitlabService", () => {
 
   it("skips direct project membership creation when inherited group access already satisfies the desired role", async () => {
     const service = makeService();
-    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest.spyOn(service as any, "findRepositoryRecords").mockResolvedValue([repositoryRecord]);
     jest.spyOn(service as any, "buildDesiredMembers").mockResolvedValue(new Map([["1", 40]]));
 
     fetchSpy
@@ -1104,7 +1169,7 @@ describe("GitlabService", () => {
 
   it("adds a direct project member when inherited access is missing or insufficient", async () => {
     const service = makeService();
-    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest.spyOn(service as any, "findRepositoryRecords").mockResolvedValue([repositoryRecord]);
     jest.spyOn(service as any, "buildDesiredMembers").mockResolvedValue(new Map([["7", 40]]));
 
     fetchSpy
@@ -1132,6 +1197,7 @@ describe("GitlabService", () => {
     const syncSpy = jest.spyOn(service, "syncProjectRepositoryAccess").mockResolvedValue(undefined);
     const statusSpy = jest.spyOn(service, "getRepositoryStatus").mockResolvedValue({
       connected: true,
+      id: "repo-1",
       gitlabProjectId: "123",
       name: "Navigation",
       description: null,
@@ -1155,12 +1221,12 @@ describe("GitlabService", () => {
     });
 
     expect(syncSpy).toHaveBeenCalledWith("project-1");
-    expect(statusSpy).toHaveBeenCalledWith("project-1", user);
+    expect(statusSpy).toHaveBeenCalledWith("project-1", user, "repo-1");
   });
 
   it("updates an existing direct project member when the direct access is too low", async () => {
     const service = makeService();
-    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest.spyOn(service as any, "findRepositoryRecords").mockResolvedValue([repositoryRecord]);
     jest.spyOn(service as any, "buildDesiredMembers").mockResolvedValue(new Map([["5", 30]]));
 
     fetchSpy
@@ -1186,7 +1252,7 @@ describe("GitlabService", () => {
 
   it("maps GitLab membership sync errors to a service-availability error instead of leaking a raw 500", async () => {
     const service = makeService();
-    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest.spyOn(service as any, "findRepositoryRecords").mockResolvedValue([repositoryRecord]);
     jest.spyOn(service as any, "buildDesiredMembers").mockResolvedValue(new Map([["1", 40]]));
 
     fetchSpy

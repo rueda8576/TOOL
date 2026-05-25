@@ -665,7 +665,7 @@ export class AdminUsersService {
       }
     });
 
-    return repositories.map((repository) => repository.projectId);
+    return Array.from(new Set(repositories.map((repository) => repository.projectId)));
   }
 
   private mapUserSummary(user: UserSummaryRecord): AdminUserSummary {
