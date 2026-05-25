@@ -56,6 +56,7 @@
 - When adding keyboard shortcuts, include both `Ctrl` and `Cmd` variants and persist key layout preferences (e.g., tree collapsed state) so users keep a stable workspace across reloads.
 - In grid/flex workspaces that render code or file paths, make shrinkable panes explicit with `minmax(0, 1fr)` on grid tracks and `min-width: 0` on the content panel; otherwise long `pre/code` content can expand the whole page instead of staying inside a local scroller.
 - In desktop workspaces with navigation trees (`Pages`, file trees, etc.), do not rely on horizontal scrolling to survive long labels; pair a resizable sidebar with truncation and overflow containment so navigation stays stable while the main panel remains readable.
+- In dense technical modules like `Code`, keep repository/access metadata in a compact cockpit and move clone/setup details into a drawer or modal so the primary workspace remains above the fold.
 
 ## Shared storage path consistency
 - Never rely on a relative `STORAGE_ROOT` interpreted from each package cwd in a monorepo: API and worker may resolve different directories and break compile/file workflows.

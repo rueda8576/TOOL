@@ -1,12 +1,25 @@
 "use client";
 
-import { Code2, Download, ExternalLink, FileCode2, GitBranch, GitCommitHorizontal, GitPullRequest } from "lucide-react";
+import {
+  Code2,
+  Copy,
+  Download,
+  ExternalLink,
+  File,
+  FileCode2,
+  Folder,
+  GitBranch,
+  GitCommitHorizontal,
+  GitPullRequest,
+  Plus,
+  X
+} from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell, openAccountSettings } from "../../../../components/app-shell";
 import { ProjectSubtitle } from "../../../../components/project-subtitle";
-import { LoadingState } from "../../../../components/ui";
+import { EmptyState, IconButton, LoadingState, StatusLine } from "../../../../components/ui";
 import { LoginResponse } from "../../../../lib/client-api";
 import {
   createProjectRepository,
@@ -46,14 +59,6 @@ function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
   }
 }
 
-function parentPath(path: string): string {
-  const trimmed = path.trim();
-  if (!trimmed) return "";
-  const segments = trimmed.split("/").filter(Boolean);
-  segments.pop();
-  return segments.join("/");
-}
-
 function relativeDate(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const minutes = Math.floor(diff / 60000);
@@ -91,6 +96,27 @@ function fileExtBadge(filename: string): string {
   return map[ext] ?? (ext.toUpperCase().slice(0, 4) || "FILE");
 }
 
+function formatBytes(size: number): string {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  const units = ["KB", "MB", "GB"];
+  let value = size / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+const TAB_LABELS: Record<CodeTab, string> = {
+  files: "Files",
+  commits: "Commits",
+  branches: "Branches",
+  "merge-requests": "Merge Requests"
+};
+
 export default function ProjectCodePage({ params }: { params: { projectId: string } }): JSX.Element {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
@@ -126,6 +152,8 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [success, setSuccess] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<CodeTab>("files");
   const [showMRModal, setShowMRModal] = useState(false);
+  const [showBranchModal, setShowBranchModal] = useState(false);
+  const [cloneDrawerOpen, setCloneDrawerOpen] = useState(false);
   const [gitUsername, setGitUsername] = useState<string | null>(null);
 
   const canWrite = access?.canWrite ?? false;
@@ -385,6 +413,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       if (nextRepository.connected) {
         await loadRepositoryContent(token, nextRepository, { ref: created.name, path: browserPath });
       }
+      setShowBranchModal(false);
       setSuccess(`Branch ${created.name} created.`);
     } catch (branchError) {
       setError((branchError as Error).message || "Unable to create the branch.");
@@ -438,151 +467,59 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
 
   return (
     <AppShell title="Code" subtitle={<ProjectSubtitle projectId={params.projectId} suffix="Code" />} projectId={params.projectId}>
-      <div className="stack-lg">
+      <div className="code-page">
         {loading ? <LoadingState title="Loading Code workspace" detail="Checking repository and GitLab connection state." /> : null}
-        {error ? <p className="alert alert-error">{error}</p> : null}
-        {success ? <p className="alert alert-success">{success}</p> : null}
+        {error ? <StatusLine tone="error">{error}</StatusLine> : null}
+        {success ? <StatusLine tone="success">{success}</StatusLine> : null}
 
-        {/* Repository not provisioned */}
         {!loading && !repositoryConnected ? (
-          <section className="panel stack-lg">
-            <div className="stack-sm">
-              <h2 className="section-heading">Managed repository not provisioned yet</h2>
+          <section className="panel code-provision-panel">
+            <div className="stack-xs">
+              <p className="eyebrow">Repository cockpit</p>
+              <h2 className="section-heading">Managed repository not provisioned</h2>
               <p>
                 {isAdmin
-                  ? "Atlasium provisions one managed GitLab repository per project. Provision it here if the automatic setup did not complete."
+                  ? "Atlasium can provision the managed GitLab repository for this project now."
                   : "An administrator has not provisioned the managed GitLab repository for this project yet."}
               </p>
             </div>
             {isAdmin ? (
-              <section className="panel panel-subtle stack-md">
-                <div className="stack-xs">
-                  <h3 className="section-heading">Provision managed repository</h3>
-                  <p>This will create the GitLab repository inside the Atlasium-managed group and register it with this project.</p>
-                </div>
-                <form className="form-grid" onSubmit={(event) => void onCreateRepository(event)}>
-                  <button className="button" type="submit" disabled={creatingRepository}>
-                    {creatingRepository ? "Provisioning..." : "Provision repository"}
-                  </button>
-                </form>
-              </section>
+              <form onSubmit={(event) => void onCreateRepository(event)}>
+                <button className="button" type="submit" disabled={creatingRepository}>
+                  {creatingRepository ? "Provisioning..." : "Provision repository"}
+                </button>
+              </form>
             ) : null}
           </section>
         ) : null}
 
-        {/* Connected repository */}
         {!loading && connectedRepository ? (
           <>
-            {/* Compact overview card */}
-            <section className="panel code-overview-card">
-              <div className="stack-xs code-overview-info">
-                <p className="eyebrow code-workspace-kicker">
-                  <Code2 size={15} aria-hidden="true" />
-                  Repository workspace
-                </p>
-                <h2 className="section-heading">{connectedRepository.name}</h2>
-                <code className="code-overview-namespace">{connectedRepository.pathWithNamespace}</code>
-                {connectedRepository.description ? (
-                  <p>{connectedRepository.description}</p>
-                ) : (
-                  <p className="text-muted">No repository description.</p>
-                )}
-                <div className="button-row">
+            <section className="panel code-cockpit">
+              <div className="code-cockpit-row code-cockpit-summary">
+                <div className="code-cockpit-title">
+                  <p className="eyebrow">
+                    <Code2 size={15} aria-hidden="true" />
+                    Repository cockpit
+                  </p>
+                  <div className="code-cockpit-heading">
+                    <h2>{connectedRepository.name}</h2>
+                    <code>{connectedRepository.pathWithNamespace}</code>
+                  </div>
+                </div>
+                <div className="code-cockpit-state" aria-label="Repository state">
+                  <span className={gitlabConnected ? "code-state-pill code-state-live" : "code-state-pill code-state-warning"}>
+                    {gitlabConnected ? "GitLab API connected" : connection?.reconnectRequired ? "GitLab reconnect required" : "GitLab API disconnected"}
+                  </span>
                   <span className="badge">{connectedRepository.visibility}</span>
                   {connectedRepository.managed ? <span className="badge">Managed</span> : null}
-                  <span className="badge">Default: {connectedRepository.defaultBranch}</span>
+                  <span className="badge">Default {connectedRepository.defaultBranch}</span>
                 </div>
               </div>
 
-              <div className="code-overview-side stack-md">
-                <div className="stack-sm">
-                  <div className="code-clone-row">
-                    <span className="code-clone-label">SSH</span>
-                    <input
-                      className="input code-clone-input"
-                      value={connectedRepository.sshCloneUrl}
-                      readOnly
-                      aria-label="SSH clone URL"
-                    />
-                    <button
-                      className="button button-secondary code-clone-copy"
-                      type="button"
-                      onClick={() => void onCopyCloneUrl(connectedRepository.sshCloneUrl, "ssh")}
-                    >
-                      {copiedCloneType === "ssh" ? "Copied" : "Copy"}
-                    </button>
-                  </div>
-                  <div className="code-clone-row">
-                    <span className="code-clone-label code-clone-label-secondary">HTTPS</span>
-                    <input
-                      className="input code-clone-input"
-                      value={connectedRepository.httpCloneUrl}
-                      readOnly
-                      aria-label="HTTPS clone URL"
-                    />
-                    <button
-                      className="button button-secondary code-clone-copy"
-                      type="button"
-                      onClick={() => void onCopyCloneUrl(connectedRepository.httpCloneUrl, "https")}
-                    >
-                      {copiedCloneType === "https" ? "Copied" : "Copy"}
-                    </button>
-                  </div>
-                  <p className="text-muted code-clone-guidance">
-                    SSH recommended. HTTPS can use your GitLab username and Atlasium password after enablement; PAT remains the fallback.{" "}
-                    <button type="button" className="inline-link-button" onClick={() => openAccountSettings("git")}>
-                      Manage Git access
-                    </button>
-                  </p>
-                  <div className="code-https-help">
-                    <p className="eyebrow">Windows HTTPS login</p>
-                    <code>{`git clone ${connectedRepository.httpCloneUrl.replace("https://", `https://${gitUsername || "<gitlab-username>"}@`)}`}</code>
-                    <code>Enter your Atlasium password in Git Credential Manager</code>
-                  </div>
-                </div>
-                <div className="button-row">
-                  <button
-                    className="button button-secondary"
-                    type="button"
-                    onClick={() => void onOpenInGitlab()}
-                    disabled={openingGitlab}
-                  >
-                    <ExternalLink size={16} aria-hidden="true" />
-                    {openingGitlab ? "Opening..." : "Open in GitLab"}
-                  </button>
-                  <button
-                    className="button button-secondary"
-                    type="button"
-                    onClick={() => void onDownloadArchive()}
-                    disabled={downloadingArchive || !gitlabConnected}
-                    title={!gitlabConnected ? "Connect GitLab API access to download ZIP archives" : undefined}
-                  >
-                    <Download size={16} aria-hidden="true" />
-                    {downloadingArchive ? "Downloading..." : "Download ZIP"}
-                  </button>
-                </div>
-              </div>
-            </section>
-
-            {/* GitLab not connected banner */}
-            {!gitlabConnected ? (
-              <p className="alert alert-info">
-                {connectStateMessage}{" "}
-                <button type="button" className="inline-link-button" onClick={() => openAccountSettings("git")}>
-                  Connect account
-                </button>
-              </p>
-            ) : (
-              <>
-                {/* Tab navigation */}
+              <div className="code-cockpit-row code-cockpit-controls">
                 <nav className="code-tabs" aria-label="Repository sections">
                   {(["files", "commits", "branches", "merge-requests"] as CodeTab[]).map((tab) => {
-                    const labels: Record<CodeTab, string> = {
-                      files: "Files",
-                      commits: "Commits",
-                      branches: "Branches",
-                      "merge-requests": "Merge Requests",
-                    };
                     const icons: Record<CodeTab, JSX.Element> = {
                       files: <FileCode2 size={16} aria-hidden="true" />,
                       commits: <GitCommitHorizontal size={16} aria-hidden="true" />,
@@ -591,7 +528,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     };
                     const counts: Partial<Record<CodeTab, number>> = {
                       branches: branches.length || undefined,
-                      "merge-requests": mergeRequests.length || undefined,
+                      "merge-requests": mergeRequests.length || undefined
                     };
                     return (
                       <button
@@ -601,16 +538,15 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                         onClick={() => setActiveTab(tab)}
                       >
                         {icons[tab]}
-                        {labels[tab]}
+                        {TAB_LABELS[tab]}
                         {counts[tab] ? <span className="code-tab-count">{counts[tab]}</span> : null}
                       </button>
                     );
                   })}
                 </nav>
 
-                {/* Branch selector — shared for Files and Commits tabs */}
-                {(activeTab === "files" || activeTab === "commits") && branches.length > 0 ? (
-                  <div className="code-ref-bar">
+                <div className="code-cockpit-context">
+                  {(activeTab === "files" || activeTab === "commits") && branches.length > 0 ? (
                     <label className="code-ref-label">
                       Branch
                       <select
@@ -629,20 +565,94 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                         ))}
                       </select>
                     </label>
-                  </div>
-                ) : null}
+                  ) : null}
+                  {activeTab === "files" ? <code className="code-current-path">/{browserPath || ""}</code> : null}
+                  {activeTab === "merge-requests" ? (
+                    <label className="code-filter-label">
+                      State
+                      <select
+                        className="input code-ref-select"
+                        value={mergeRequestFilter}
+                        onChange={(event) => setMergeRequestFilter(event.target.value as RepositoryMergeRequestState)}
+                      >
+                        <option value="opened">Opened</option>
+                        <option value="merged">Merged</option>
+                        <option value="closed">Closed</option>
+                        <option value="all">All</option>
+                      </select>
+                    </label>
+                  ) : null}
+                </div>
 
-                {/* ── FILES TAB ── */}
+                <div className="code-cockpit-actions">
+                  <button className="button button-secondary" type="button" onClick={() => setCloneDrawerOpen(true)}>
+                    <Copy size={16} aria-hidden="true" />
+                    Clone
+                  </button>
+                  <button className="button button-secondary" type="button" onClick={() => void onOpenInGitlab()} disabled={openingGitlab}>
+                    <ExternalLink size={16} aria-hidden="true" />
+                    {openingGitlab ? "Opening..." : "Open GitLab"}
+                  </button>
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    onClick={() => void onDownloadArchive()}
+                    disabled={downloadingArchive || !gitlabConnected}
+                    title={!gitlabConnected ? "Connect GitLab API access to download ZIP archives" : undefined}
+                  >
+                    <Download size={16} aria-hidden="true" />
+                    {downloadingArchive ? "Downloading..." : "ZIP"}
+                  </button>
+                  {activeTab === "branches" && canWrite ? (
+                    <button className="button" type="button" onClick={() => setShowBranchModal(true)}>
+                      <Plus size={16} aria-hidden="true" />
+                      New branch
+                    </button>
+                  ) : null}
+                  {activeTab === "merge-requests" && canWrite ? (
+                    <button className="button" type="button" onClick={() => setShowMRModal(true)}>
+                      <Plus size={16} aria-hidden="true" />
+                      Create MR
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              {connectedRepository.description ? <p className="code-cockpit-description">{connectedRepository.description}</p> : null}
+            </section>
+
+            {!gitlabConnected ? (
+              <section className="panel code-connect-required">
+                <EmptyState
+                  title="GitLab API access required"
+                  detail={connectStateMessage ?? "Connect GitLab API access before browsing repository content."}
+                  action={
+                    <button type="button" className="button" onClick={() => openAccountSettings("git")}>
+                      Connect account
+                    </button>
+                  }
+                />
+              </section>
+            ) : (
+              <>
                 {activeTab === "files" ? (
-                  <div className="code-files-layout">
-                    {/* File tree panel */}
-                    <div className="panel code-file-tree-panel stack-sm">
-                      {/* Breadcrumb */}
+                  <div className="code-workbench-layout">
+                    <aside className="panel code-workbench-tree">
+                      <div className="code-workbench-tree-header">
+                        <div>
+                          <p className="eyebrow">Files</p>
+                          <strong>{tree?.ref ?? currentBrowseRef}</strong>
+                        </div>
+                        {contentLoading ? <span className="code-inline-status">Loading</span> : null}
+                      </div>
                       <div className="code-breadcrumb">
                         <button
                           type="button"
                           className="code-breadcrumb-btn"
-                          onClick={() => { setBrowserPath(""); setSelectedFile(null); }}
+                          onClick={() => {
+                            setBrowserPath("");
+                            setSelectedFile(null);
+                          }}
                           aria-label="Repository root"
                         >
                           /
@@ -653,101 +663,92 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                             <button
                               type="button"
                               className={`code-breadcrumb-btn${i === breadcrumbSegments.length - 1 ? " active" : ""}`}
-                              onClick={() => { setBrowserPath(path); setSelectedFile(null); }}
+                              onClick={() => {
+                                setBrowserPath(path);
+                                setSelectedFile(null);
+                              }}
                             >
                               {label}
                             </button>
                           </span>
                         ))}
                       </div>
-
-                      {contentLoading && !tree ? (
-                        <p className="alert alert-info">Loading...</p>
-                      ) : null}
-                      {contentError ? <p className="alert alert-error">{contentError}</p> : null}
-
+                      {contentError ? <StatusLine tone="error">{contentError}</StatusLine> : null}
                       <div className="code-tree-list">
                         {tree?.entries.map((entry) => (
                           <button
                             key={entry.id}
                             type="button"
-                            className={`code-tree-entry${entry.type === "tree" ? " is-dir" : ""}`}
+                            className={[
+                              "code-tree-entry",
+                              entry.type === "tree" ? "is-dir" : "",
+                              selectedFile?.filePath === entry.path ? "is-selected" : ""
+                            ].filter(Boolean).join(" ")}
                             onClick={() => void onOpenEntry(entry)}
                           >
                             <span className="code-entry-icon" aria-hidden="true">
-                              {entry.type === "tree" ? "▸" : ""}
+                              {entry.type === "tree" ? <Folder size={15} /> : <File size={15} />}
                             </span>
                             <span className="code-entry-name">{entry.name}</span>
-                            {entry.type === "blob" ? (
-                              <span className="code-entry-badge">{fileExtBadge(entry.name)}</span>
-                            ) : null}
+                            {entry.type === "blob" ? <span className="code-entry-badge">{fileExtBadge(entry.name)}</span> : null}
                           </button>
                         ))}
-                        {tree && tree.entries.length === 0 ? (
-                          <p className="text-muted code-empty-folder">This folder is empty.</p>
-                        ) : null}
+                        {tree && tree.entries.length === 0 ? <EmptyState title="Empty folder" detail="This repository folder does not contain files." /> : null}
                       </div>
-                    </div>
+                    </aside>
 
-                    {/* File viewer panel */}
-                    <div className="panel code-file-viewer-panel">
-                      {contentLoading && selectedFile === null ? (
-                        <p className="alert alert-info">Loading file...</p>
-                      ) : selectedFile ? (
+                    <section className="panel code-workbench-viewer">
+                      {selectedFile ? (
                         <>
                           <div className="code-viewer-header">
-                            <code className="code-viewer-path">{selectedFile.filePath}</code>
+                            <div className="code-viewer-title">
+                              <code className="code-viewer-path">{selectedFile.filePath}</code>
+                              <span>
+                                {selectedFile.binary ? "Binary" : "Text"} file - {formatBytes(selectedFile.size)} - {selectedFile.ref}
+                              </span>
+                            </div>
+                            <span className="code-entry-badge">{fileExtBadge(selectedFile.fileName)}</span>
                           </div>
                           {selectedFile.binary ? (
-                            <p className="alert alert-info">Binary file — preview not supported.</p>
+                            <EmptyState title="Binary preview unavailable" detail="Open the repository in GitLab to inspect this file." />
                           ) : (
                             <pre className="code-file-content">{selectedFile.content}</pre>
                           )}
                         </>
+                      ) : contentLoading ? (
+                        <LoadingState title="Loading repository files" detail="Preparing the file tree and preview surface." />
                       ) : (
-                        <div className="code-viewer-empty">
-                          <p className="text-muted">Select a file from the tree to view its contents.</p>
-                        </div>
+                        <EmptyState title="Select a file" detail="Choose a file from the tree to inspect its contents in this workspace." />
                       )}
-                    </div>
+                    </section>
                   </div>
                 ) : null}
 
-                {/* ── COMMITS TAB ── */}
                 {activeTab === "commits" ? (
-                  <section className="panel stack-md">
-                    {contentLoading && commits.length === 0 ? (
-                      <p className="alert alert-info">Loading commits...</p>
-                    ) : null}
-                    {commits.length === 0 && !contentLoading ? (
-                      <p className="text-muted">No commits available for this branch.</p>
-                    ) : null}
+                  <section className="panel code-mode-panel">
+                    <div className="code-mode-header">
+                      <div>
+                        <p className="eyebrow">Commits</p>
+                        <h3 className="section-heading">Recent history</h3>
+                      </div>
+                      {contentLoading ? <span className="code-inline-status">Loading</span> : null}
+                    </div>
+                    {commits.length === 0 && !contentLoading ? <EmptyState title="No commits available" detail="This branch does not expose commits through GitLab yet." /> : null}
                     <div className="code-commit-list">
                       {commits.map((commit) => (
                         <article key={commit.id} className="code-commit-row">
-                          <div className="code-commit-avatar" aria-hidden="true">
-                            {authorInitials(commit.authorName)}
-                          </div>
+                          <div className="code-commit-avatar" aria-hidden="true">{authorInitials(commit.authorName)}</div>
                           <div className="code-commit-body stack-xs">
                             <strong className="code-commit-title">{commit.title}</strong>
                             <p className="text-muted code-commit-meta">
                               {commit.authorName}
-                              <span className="code-commit-dot">·</span>
+                              <span className="code-commit-dot">-</span>
                               {relativeDate(commit.authoredDate)}
                             </p>
                           </div>
                           <div className="code-commit-actions">
                             <code className="code-short-id">{commit.shortId}</code>
-                            {commit.webUrl ? (
-                              <a
-                                className="button button-secondary"
-                                href={commit.webUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Open
-                              </a>
-                            ) : null}
+                            {commit.webUrl ? <a className="button button-secondary" href={commit.webUrl} target="_blank" rel="noreferrer">Open</a> : null}
                           </div>
                         </article>
                       ))}
@@ -755,13 +756,15 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                   </section>
                 ) : null}
 
-                {/* ── BRANCHES TAB ── */}
                 {activeTab === "branches" ? (
-                  <section className="panel stack-lg">
-                    {contentLoading && branches.length === 0 ? (
-                      <p className="alert alert-info">Loading branches...</p>
-                    ) : null}
-
+                  <section className="panel code-mode-panel">
+                    <div className="code-mode-header">
+                      <div>
+                        <p className="eyebrow">Branches</p>
+                        <h3 className="section-heading">Repository refs</h3>
+                      </div>
+                      {contentLoading ? <span className="code-inline-status">Loading</span> : null}
+                    </div>
                     <div className="code-branch-list">
                       {branches.map((branch) => (
                         <div key={branch.name} className="code-branch-row">
@@ -770,219 +773,179 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                             <div className="button-row">
                               {branch.default ? <span className="badge">Default</span> : null}
                               {branch.protected ? <span className="badge">Protected</span> : null}
+                              {branch.canPush ? <span className="badge">Writable</span> : null}
                             </div>
                           </div>
-                          {branch.webUrl ? (
-                            <a className="button button-secondary" href={branch.webUrl} target="_blank" rel="noreferrer">
-                              Open
-                            </a>
-                          ) : null}
+                          {branch.webUrl ? <a className="button button-secondary" href={branch.webUrl} target="_blank" rel="noreferrer">Open</a> : null}
                         </div>
                       ))}
-                      {branches.length === 0 && !contentLoading ? (
-                        <p className="text-muted">No branches found.</p>
-                      ) : null}
+                      {branches.length === 0 && !contentLoading ? <EmptyState title="No branches found" detail="GitLab did not return repository branches for this project." /> : null}
                     </div>
-
-                    {canWrite ? (
-                      <div className="panel panel-subtle stack-md">
-                        <h3 className="section-heading">Create branch</h3>
-                        <form className="form-grid" onSubmit={(event) => void onCreateBranch(event)}>
-                          <label>
-                            Branch name
-                            <input
-                              className="input"
-                              value={newBranchName}
-                              onChange={(event) => setNewBranchName(event.target.value)}
-                              placeholder="feature/my-branch"
-                              required
-                            />
-                          </label>
-                          <label>
-                            From ref
-                            <select
-                              className="input"
-                              value={currentBranchSourceRef}
-                              onChange={(event) => setNewBranchSourceRef(event.target.value)}
-                            >
-                              {branches.map((branch) => (
-                                <option key={branch.name} value={branch.name}>
-                                  {branch.name}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <button className="button" type="submit" disabled={creatingBranch}>
-                            {creatingBranch ? "Creating..." : "Create branch"}
-                          </button>
-                        </form>
-                      </div>
-                    ) : null}
+                    {!canWrite ? <StatusLine tone="info">Reader role can browse repository content but cannot create branches.</StatusLine> : null}
                   </section>
                 ) : null}
 
-                {/* ── MERGE REQUESTS TAB ── */}
                 {activeTab === "merge-requests" ? (
-                  <section className="stack-md">
-                    <div className="code-mr-toolbar">
-                      <label className="code-filter-label">
-                        State
-                        <select
-                          className="input"
-                          value={mergeRequestFilter}
-                          onChange={(event) => setMergeRequestFilter(event.target.value as RepositoryMergeRequestState)}
-                        >
-                          <option value="opened">Opened</option>
-                          <option value="merged">Merged</option>
-                          <option value="closed">Closed</option>
-                          <option value="all">All</option>
-                        </select>
-                      </label>
-                      {canWrite ? (
-                        <button
-                          className="button"
-                          type="button"
-                          onClick={() => setShowMRModal(true)}
-                        >
-                          + Create MR
-                        </button>
-                      ) : null}
+                  <section className="panel code-mode-panel">
+                    <div className="code-mode-header">
+                      <div>
+                        <p className="eyebrow">Merge requests</p>
+                        <h3 className="section-heading">Review queue</h3>
+                      </div>
+                      {mergeRequestsLoading ? <span className="code-inline-status">Loading</span> : null}
                     </div>
-
-                    {mergeRequestsError ? <p className="alert alert-error">{mergeRequestsError}</p> : null}
-
-                    <div className="panel stack-md">
-                      {mergeRequestsLoading && mergeRequests.length === 0 ? (
-                        <p className="alert alert-info">Loading merge requests...</p>
-                      ) : null}
-
-                      <div className="code-mr-list">
-                        {mergeRequests.map((mr) => (
-                          <article key={mr.id} className="code-mr-row">
-                            <div className="code-mr-number text-muted">!{mr.iid}</div>
-                            <div className="code-mr-body stack-xs">
-                              <strong>{mr.title}</strong>
-                              <div className="button-row">
-                                <span className={`badge code-mr-state-${mr.state}`}>{mr.state}</span>
-                                {mr.draft ? <span className="badge">Draft</span> : null}
-                              </div>
-                              <p className="text-muted code-mr-meta">
-                                <span className="code-mr-branches">
-                                  {mr.sourceBranch} → {mr.targetBranch}
-                                </span>
-                                <span className="code-commit-dot">·</span>
-                                {mr.author ? mr.author.name : "Unknown"}
-                                <span className="code-commit-dot">·</span>
-                                {relativeDate(mr.updatedAt)}
-                              </p>
+                    {mergeRequestsError ? <StatusLine tone="error">{mergeRequestsError}</StatusLine> : null}
+                    <div className="code-mr-list">
+                      {mergeRequests.map((mr) => (
+                        <article key={mr.id} className="code-mr-row">
+                          <div className="code-mr-number text-muted">!{mr.iid}</div>
+                          <div className="code-mr-body stack-xs">
+                            <strong>{mr.title}</strong>
+                            <div className="button-row">
+                              <span className={`badge code-mr-state-${mr.state}`}>{mr.state}</span>
+                              {mr.draft ? <span className="badge">Draft</span> : null}
                             </div>
-                            <a className="button button-secondary" href={mr.webUrl} target="_blank" rel="noreferrer">
-                              Open
-                            </a>
-                          </article>
-                        ))}
-                        {!mergeRequestsLoading && mergeRequests.length === 0 ? (
-                          <p className="text-muted">No merge requests for the selected state.</p>
-                        ) : null}
-                      </div>
-
-                      {!canWrite ? (
-                        <p className="alert alert-info">
-                          Reader role can browse repository content but cannot create branches or merge requests.
-                        </p>
-                      ) : null}
+                            <p className="text-muted code-mr-meta">
+                              <span className="code-mr-branches">{mr.sourceBranch} - {mr.targetBranch}</span>
+                              <span className="code-commit-dot">-</span>
+                              {mr.author ? mr.author.name : "Unknown"}
+                              <span className="code-commit-dot">-</span>
+                              {relativeDate(mr.updatedAt)}
+                            </p>
+                          </div>
+                          <a className="button button-secondary" href={mr.webUrl} target="_blank" rel="noreferrer">Open</a>
+                        </article>
+                      ))}
+                      {!mergeRequestsLoading && mergeRequests.length === 0 ? <EmptyState title="No merge requests" detail="No merge requests match the selected state." /> : null}
                     </div>
+                    {!canWrite ? <StatusLine tone="info">Reader role can browse repository content but cannot create merge requests.</StatusLine> : null}
                   </section>
-                ) : null}
-
-                {/* ── CREATE MR MODAL ── */}
-                {showMRModal ? (
-                  <div
-                    className="code-mr-modal-backdrop"
-                    onClick={() => setShowMRModal(false)}
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label="Create merge request"
-                  >
-                    <div className="panel code-mr-modal" onClick={(e) => e.stopPropagation()}>
-                      <div className="code-mr-modal-header">
-                        <h3 className="section-heading">Open merge request</h3>
-                        <button
-                          type="button"
-                          className="button button-ghost code-mr-modal-close"
-                          onClick={() => setShowMRModal(false)}
-                          aria-label="Close"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                      <form className="form-grid" onSubmit={(event) => void onCreateMergeRequest(event)}>
-                        <label>
-                          Source branch
-                          <select
-                            className="input"
-                            value={currentMergeRequestSourceBranch}
-                            onChange={(event) => setMergeRequestSourceBranch(event.target.value)}
-                          >
-                            {branches.map((branch) => (
-                              <option key={branch.name} value={branch.name}>
-                                {branch.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Target branch
-                          <select
-                            className="input"
-                            value={currentMergeRequestTargetBranch}
-                            onChange={(event) => setMergeRequestTargetBranch(event.target.value)}
-                          >
-                            {branches.map((branch) => (
-                              <option key={branch.name} value={branch.name}>
-                                {branch.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          Title
-                          <input
-                            className="input"
-                            value={mergeRequestTitle}
-                            onChange={(event) => setMergeRequestTitle(event.target.value)}
-                            placeholder="Brief description of the changes"
-                            required
-                          />
-                        </label>
-                        <label>
-                          Description
-                          <textarea
-                            className="input textarea-sm"
-                            value={mergeRequestDescription}
-                            onChange={(event) => setMergeRequestDescription(event.target.value)}
-                            rows={4}
-                            placeholder="Optional — explain what this MR does and why."
-                          />
-                        </label>
-                        <div className="code-mr-modal-footer">
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            onClick={() => setShowMRModal(false)}
-                          >
-                            Cancel
-                          </button>
-                          <button className="button" type="submit" disabled={creatingMergeRequest}>
-                            {creatingMergeRequest ? "Creating..." : "Open merge request"}
-                          </button>
-                        </div>
-                      </form>
-                    </div>
-                  </div>
                 ) : null}
               </>
             )}
+
+            {cloneDrawerOpen ? (
+              <div className="code-clone-drawer-backdrop" role="presentation" onClick={() => setCloneDrawerOpen(false)}>
+                <aside className="code-clone-drawer" role="dialog" aria-modal="true" aria-label="Clone repository" onClick={(event) => event.stopPropagation()}>
+                  <div className="code-clone-drawer-header">
+                    <div>
+                      <p className="eyebrow">Repository access</p>
+                      <h2 className="section-heading">Clone</h2>
+                    </div>
+                    <IconButton label="Close clone drawer" onClick={() => setCloneDrawerOpen(false)}>
+                      <X size={16} aria-hidden="true" />
+                    </IconButton>
+                  </div>
+                  <div className="code-clone-drawer-body">
+                    <div className="code-clone-row">
+                      <span className="code-clone-label">SSH</span>
+                      <input className="input code-clone-input" value={connectedRepository.sshCloneUrl} readOnly aria-label="SSH clone URL" />
+                      <button className="button button-secondary code-clone-copy" type="button" onClick={() => void onCopyCloneUrl(connectedRepository.sshCloneUrl, "ssh")}>
+                        {copiedCloneType === "ssh" ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                    <div className="code-clone-row">
+                      <span className="code-clone-label code-clone-label-secondary">HTTPS</span>
+                      <input className="input code-clone-input" value={connectedRepository.httpCloneUrl} readOnly aria-label="HTTPS clone URL" />
+                      <button className="button button-secondary code-clone-copy" type="button" onClick={() => void onCopyCloneUrl(connectedRepository.httpCloneUrl, "https")}>
+                        {copiedCloneType === "https" ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                    <StatusLine tone="info">
+                      SSH is recommended. HTTPS can use your GitLab username and Atlasium password after enablement; PAT remains the fallback.
+                    </StatusLine>
+                    <div className="code-https-help">
+                      <p className="eyebrow">Windows HTTPS login</p>
+                      <code>{`git clone ${connectedRepository.httpCloneUrl.replace("https://", `https://${gitUsername || "<gitlab-username>"}@`)}`}</code>
+                      <code>Enter your Atlasium password in Git Credential Manager</code>
+                    </div>
+                    <button type="button" className="button button-secondary" onClick={() => openAccountSettings("git")}>
+                      Manage Git access
+                    </button>
+                  </div>
+                </aside>
+              </div>
+            ) : null}
+
+            {showBranchModal ? (
+              <div className="code-mr-modal-backdrop" onClick={() => setShowBranchModal(false)} role="dialog" aria-modal="true" aria-label="Create branch">
+                <div className="panel code-mr-modal" onClick={(event) => event.stopPropagation()}>
+                  <div className="code-mr-modal-header">
+                    <h3 className="section-heading">Create branch</h3>
+                    <IconButton label="Close create branch" onClick={() => setShowBranchModal(false)}>
+                      <X size={16} aria-hidden="true" />
+                    </IconButton>
+                  </div>
+                  <form className="form-grid" onSubmit={(event) => void onCreateBranch(event)}>
+                    <label>
+                      Branch name
+                      <input className="input" value={newBranchName} onChange={(event) => setNewBranchName(event.target.value)} placeholder="feature/my-branch" required />
+                    </label>
+                    <label>
+                      From ref
+                      <select className="input" value={currentBranchSourceRef} onChange={(event) => setNewBranchSourceRef(event.target.value)}>
+                        {branches.map((branch) => (
+                          <option key={branch.name} value={branch.name}>{branch.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="code-mr-modal-footer">
+                      <button type="button" className="button button-secondary" onClick={() => setShowBranchModal(false)}>Cancel</button>
+                      <button className="button" type="submit" disabled={creatingBranch}>{creatingBranch ? "Creating..." : "Create branch"}</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            ) : null}
+
+            {showMRModal ? (
+              <div className="code-mr-modal-backdrop" onClick={() => setShowMRModal(false)} role="dialog" aria-modal="true" aria-label="Create merge request">
+                <div className="panel code-mr-modal" onClick={(event) => event.stopPropagation()}>
+                  <div className="code-mr-modal-header">
+                    <h3 className="section-heading">Open merge request</h3>
+                    <IconButton label="Close merge request" onClick={() => setShowMRModal(false)}>
+                      <X size={16} aria-hidden="true" />
+                    </IconButton>
+                  </div>
+                  <form className="form-grid" onSubmit={(event) => void onCreateMergeRequest(event)}>
+                    <label>
+                      Source branch
+                      <select className="input" value={currentMergeRequestSourceBranch} onChange={(event) => setMergeRequestSourceBranch(event.target.value)}>
+                        {branches.map((branch) => (
+                          <option key={branch.name} value={branch.name}>{branch.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Target branch
+                      <select className="input" value={currentMergeRequestTargetBranch} onChange={(event) => setMergeRequestTargetBranch(event.target.value)}>
+                        {branches.map((branch) => (
+                          <option key={branch.name} value={branch.name}>{branch.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Title
+                      <input className="input" value={mergeRequestTitle} onChange={(event) => setMergeRequestTitle(event.target.value)} placeholder="Brief description of the changes" required />
+                    </label>
+                    <label>
+                      Description
+                      <textarea
+                        className="input textarea-sm"
+                        value={mergeRequestDescription}
+                        onChange={(event) => setMergeRequestDescription(event.target.value)}
+                        rows={4}
+                        placeholder="Optional - explain what this MR does and why."
+                      />
+                    </label>
+                    <div className="code-mr-modal-footer">
+                      <button type="button" className="button button-secondary" onClick={() => setShowMRModal(false)}>Cancel</button>
+                      <button className="button" type="submit" disabled={creatingMergeRequest}>{creatingMergeRequest ? "Creating..." : "Open merge request"}</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            ) : null}
           </>
         ) : null}
       </div>

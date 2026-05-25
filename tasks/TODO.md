@@ -1,5 +1,27 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Code Repository Cockpit (2026-05-25)
+- [x] Replace the large Code repository overview card with a compact two-row repository cockpit.
+- [x] Move SSH/HTTPS clone and Git access guidance into a Clone drawer/modal.
+- [x] Keep Files, Commits, Branches, and Merge Requests as cockpit modes with contextual controls/actions.
+- [x] Strengthen Files mode into a denser IDE-like workbench with selected-file state and stable viewer header.
+- [x] Move branch/MR creation into focused modal surfaces and reduce large alert feedback.
+- [x] Run web type-check, build, static audits, and diff hygiene checks.
+
+### Review - Atlasium Code Repository Cockpit
+- Replaced the large `Repository workspace` card with a two-row repository cockpit: compact repository identity/status, mode tabs, contextual branch/MR controls, and primary actions.
+- Moved SSH/HTTPS clone URLs, Windows HTTPS guidance, and `Manage Git access` into a dedicated Clone drawer.
+- Reworked Files into a denser workbench with a stable file tree, active selected-file state, file metadata header, contained code scrolling, and stronger empty/binary/loading states.
+- Moved branch creation into a modal, kept MR creation modal-based, and moved branch/MR contextual actions into the cockpit.
+- Reduced Code page feedback from large alert stacks to compact `StatusLine`/`EmptyState` surfaces where possible.
+- Added a reusable lesson for dense technical modules in `tasks/LESSONS.md`.
+- Verification:
+  - `rg -n "Repository workspace|code-overview-card|code-overview-side" apps/web/app/projects/[projectId]/code/page.tsx apps/web/app/globals.css` returned no matches
+  - `rg -n "window\\.confirm|href=\"#\"|✨|sparkle|purple|violet" apps/web/app/projects/[projectId]/code/page.tsx apps/web/app/globals.css` returned no matches
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - `git diff --check` passed
+
 ## Atlasium Project Overview Command Center (2026-05-25)
 - [x] Add `GET /projects/:projectId/overview` with local-data aggregation for project, access, attention, module summaries, and provenance activity.
 - [x] Add focused `ProjectsService.getProjectOverview` tests for access, soft-deleted data, attention ordering, reader behavior, and unknown audit actions.
