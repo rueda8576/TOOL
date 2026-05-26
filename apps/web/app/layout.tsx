@@ -17,10 +17,16 @@ export const metadata: Metadata = {
   },
   description:
     "Atlasium is a doctoral research workspace for documents, wiki knowledge, managed code, meetings, tasks, and traceable project collaboration.",
+  manifest: "/site.webmanifest",
   icons: {
-    icon: "/atlasium-icon.svg",
-    shortcut: "/atlasium-icon.svg",
-    apple: "/atlasium-icon.svg"
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon-48x48.png", sizes: "48x48", type: "image/png" },
+      { url: "/favicon-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/atlasium-icon.svg", type: "image/svg+xml" }
+    ],
+    shortcut: "/favicon.ico",
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }]
   },
   openGraph: {
     title: "Atlasium - Doctoral research workspace",

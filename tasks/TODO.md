@@ -1,5 +1,24 @@
 # Implementation TODO (v1 bootstrap)
 
+## Google Search Favicon Fix (2026-05-26)
+- [x] Inspect current Atlasium metadata and favicon assets.
+- [x] Add crawler-friendly favicon files and explicit metadata links.
+- [x] Verify generated metadata/assets with web build checks.
+- [x] Document results and expected Google recrawl behavior.
+
+### Review - Google Search Favicon Fix
+- Current production still serves only `/atlasium-icon.svg` in metadata and returns `404` for `/favicon.ico` and `/favicon-48x48.png`, matching the missing-search-logo symptom.
+- Added stable crawler-friendly favicon assets: `/favicon.ico`, `/favicon-48x48.png`, `/favicon-192x192.png`, `/apple-touch-icon.png`, and `/site.webmanifest`.
+- Updated Next metadata so the generated home page includes `shortcut icon`, ICO/PNG `icon`, SVG fallback, Apple touch icon, and manifest links.
+- Google may take several days to several weeks to refresh the search result after deployment; request indexing for `https://atlasium.info/` in Search Console to accelerate recrawl.
+- Verification:
+  - Asset inspection confirmed PNG dimensions `48x48`, `192x192`, `180x180`, and ICO entries `16x16`, `32x32`, `48x48`.
+  - Visual inspection confirmed the generated 192px icon is correctly scaled and centered.
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - Generated Next HTML contains `/site.webmanifest`, `/favicon.ico`, `/favicon-48x48.png`, `/favicon-192x192.png`, `/atlasium-icon.svg`, and `/apple-touch-icon.png`.
+  - `git diff --check` passed
+
 ## Code Image Preview For Repository Files (2026-05-25)
 - [x] Add repository raw-file API routes for scoped and legacy Code file access.
 - [x] Implement GitLab raw-file service support with existing repository read permissions.
