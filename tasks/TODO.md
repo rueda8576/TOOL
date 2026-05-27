@@ -1,5 +1,22 @@
 # Implementation TODO (v1 bootstrap)
 
+## Fix GitLab Binary Response Mock Coverage Failure (2026-05-27)
+- [x] Register the scoped CI coverage fix for GitLab binary request failures.
+- [x] Make binary GitLab error header reads defensive and update the low-level fetch mock.
+- [x] Run focused Jest, coverage, API type-check, diff hygiene, and document results.
+
+### Review - Fix GitLab Binary Response Mock Coverage Failure
+- Made binary GitLab error metadata extraction tolerant of minimal mocked `Response` objects without changing real fetch behavior.
+- Updated the low-level binary failure test to use the shared response helper so it includes the expanded response shape.
+- Captured the fetch mock contract lesson in `tasks/LESSONS.md`.
+- Verification:
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/gitlab/gitlab.service.spec.ts -t "supports empty JSON responses and binary GitLab request failures"` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/gitlab/gitlab.service.spec.ts -t "archive|binary GitLab request failures"` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/api test:coverage` passed unit and HTTP coverage, then local integration coverage could not run because this WSL has no Docker and no Postgres at `localhost:5432`; the original CI unit failure is fixed.
+  - `git diff --check` passed
+  - Commit message: `test(api): fix gitlab binary response mock`
+
 ## Harden Code ZIP Archive Downloads (2026-05-27)
 - [x] Register the scoped plan for diagnosing and hardening Code ZIP archive downloads.
 - [x] Add API-side archive diagnostics, multi-strategy GitLab archive attempts, and fallback ZIP generation.

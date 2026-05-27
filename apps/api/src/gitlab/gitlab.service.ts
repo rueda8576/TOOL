@@ -1774,9 +1774,9 @@ export class GitlabService {
     if (!response.ok) {
       const text = await response.text();
       throw new GitlabApiError(response.status, text, text || `GitLab API error (${response.status})`, {
-        contentType: response.headers.get("content-type"),
-        requestId: response.headers.get("x-request-id"),
-        gitlabMeta: response.headers.get("x-gitlab-meta"),
+        contentType: response.headers?.get("content-type") ?? null,
+        requestId: response.headers?.get("x-request-id") ?? null,
+        gitlabMeta: response.headers?.get("x-gitlab-meta") ?? null,
         path
       });
     }

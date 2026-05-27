@@ -208,6 +208,7 @@
   - read-access tests must mock whatever the current access helper now needs (`currentRevisionId`, `getProjectAccess`, etc.), not the previous helper contract
 
 ## Backend testing
+- When production code starts reading additional `Response` fields, update low-level fetch mocks to satisfy the expanded response contract; otherwise tests can fail with mock-shape `TypeError`s before the intended error mapping is exercised.
 - When expanding internal service return shapes that feed required Prisma fields, update integration mocks in the same change and add defensive normalization before database writes so stale partial mocks cannot create invalid required values.
 - In PNPM workspace scripts, avoid relying on `pnpm run <script> -- --coverage ...` for Jest in CI; forwarded args can be treated as test patterns and produce `No tests found`. Prefer dedicated coverage scripts or `pnpm exec jest ...`.
 - For Nest HTTP/controller tests that should exercise real auth/role wiring, keep the real `JwtAuthGuard` and `RolesGuard` in the module and mock `SessionAuthService.authenticateToken`; replacing the guard itself hides route metadata and role regressions.

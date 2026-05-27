@@ -2339,13 +2339,7 @@ describe("GitlabService", () => {
           text: async () => ""
         } as Response
       )
-      .mockResolvedValueOnce(
-        {
-          ok: false,
-          status: 404,
-          text: async () => "404 Project Not Found"
-        } as Response
-      );
+      .mockResolvedValueOnce(jsonResponse(404, { message: "404 Project Not Found" }) as Response);
 
     await expect((service as any).executeGitlabRequest("token", "/noop")).resolves.toBeUndefined();
     await expect((service as any).executeGitlabBinaryRequest("token", "/archive")).rejects.toMatchObject({
