@@ -1,5 +1,17 @@
 import { authFetch } from "./client-api";
 
+export type MeetingAutomationStatus = "queued" | "running" | "completed" | "failed" | "stale";
+
+export type MeetingAutomationSummary = {
+  id: string;
+  status: MeetingAutomationStatus;
+  createdTaskCount: number;
+  createdActionCount: number;
+  errorMessage: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+};
+
 export type MeetingListItem = {
   id: string;
   projectId: string;
@@ -11,6 +23,7 @@ export type MeetingListItem = {
   toDiscussMarkdown: string | null;
   toDoMarkdown: string | null;
   actionsCount: number;
+  automation: MeetingAutomationSummary | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -30,9 +43,9 @@ export type UpdateMeetingInput = {
   title?: string;
   scheduledAt?: string;
   location?: string;
-  doneMarkdown?: string;
-  toDiscussMarkdown?: string;
-  toDoMarkdown?: string;
+  doneMarkdown?: string | null;
+  toDiscussMarkdown?: string | null;
+  toDoMarkdown?: string | null;
 };
 
 export type MeetingsViewMode = "list" | "calendar";
@@ -87,6 +100,15 @@ export async function deleteMeeting(meetingId: string, token: string): Promise<{
     token,
     init: {
       method: "DELETE"
+    }
+  });
+}
+
+export async function retryMeetingAutomation(meetingId: string, token: string): Promise<MeetingRecord> {
+  return authFetch<MeetingRecord>(`/meetings/${meetingId}/automation/retry`, {
+    token,
+    init: {
+      method: "POST"
     }
   });
 }

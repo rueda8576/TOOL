@@ -68,6 +68,14 @@ enum MeetingActionStatus {
   CANCELED
 }
 
+enum MeetingAutomationStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  STALE
+}
+
 enum NotificationChannel {
   EMAIL
   IN_APP
@@ -128,6 +136,7 @@ model User {
   createdMeetings        Meeting[]              @relation("MeetingCreator")
   meetingAttendeeEntries MeetingAttendee[]
   ownedMeetingActions    MeetingAction[]        @relation("MeetingActionOwner")
+  meetingAutomationRuns  MeetingAutomationRun[] @relation("MeetingAutomationRequester")
   notificationPreference NotificationPreference?
   notificationEvents     NotificationEvent[]    @relation("NotificationRecipient")
   uploadedFiles          FileObject[]           @relation("FileUploader")
@@ -223,6 +232,7 @@ model Project {
   wikiAssets WikiAsset[]
   tasks     Task[]
   meetings  Meeting[]
+  meetingAutomationRuns MeetingAutomationRun[]
   invites   Invite[]
   inviteProjects InviteProject[]
   auditLogs AuditLog[]
@@ -508,6 +518,7 @@ model Task {
   parentTaskId String?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
+  completedAt  DateTime?
   deletedAt    DateTime?
 
   project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -523,6 +534,7 @@ model Task {
 
   @@index([projectId, status])
   @@index([projectId, dueDate])
+  @@index([projectId, completedAt])
 }
 
 model TaskDependency {
@@ -570,6 +582,7 @@ model Meeting {
   createdBy User              @relation("MeetingCreator", fields: [createdById], references: [id], onDelete: Restrict)
   attendees MeetingAttendee[]
   actions   MeetingAction[]
+  automationRuns MeetingAutomationRun[]
 
   @@index([projectId, scheduledAt])
 }
@@ -597,14 +610,45 @@ model MeetingAction {
   ownerId      String?
   dueDate      DateTime?
   linkedTaskId String?
+  automationRunId String?
+  aiSourceHash String? @unique
+  aiSourceText String?
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 
   meeting    Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   owner      User?   @relation("MeetingActionOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   linkedTask Task?   @relation(fields: [linkedTaskId], references: [id], onDelete: SetNull)
+  automationRun MeetingAutomationRun? @relation(fields: [automationRunId], references: [id], onDelete: SetNull)
 
   @@index([meetingId])
+  @@index([linkedTaskId])
+  @@index([automationRunId])
+}
+
+model MeetingAutomationRun {
+  id                 String                  @id @default(cuid())
+  meetingId          String
+  projectId          String
+  requestedById      String?
+  status             MeetingAutomationStatus @default(QUEUED)
+  inputHash          String
+  queueJobId         String?
+  errorMessage       String?
+  createdTaskCount   Int                     @default(0)
+  createdActionCount Int                     @default(0)
+  startedAt          DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  meeting     Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  requestedBy User?   @relation("MeetingAutomationRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  actions     MeetingAction[]
+
+  @@index([meetingId, createdAt])
+  @@index([projectId, status])
 }
 
 model NotificationPreference {

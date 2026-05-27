@@ -52,6 +52,14 @@ export class MeetingsController {
     return this.meetingsService.deleteMeeting(meetingId, user);
   }
 
+  @Post("meetings/:meetingId/automation/retry")
+  retryAutomation(
+    @Param("meetingId") meetingId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<MeetingRecordResponse> {
+    return this.meetingsService.retryAutomation(meetingId, user);
+  }
+
   @Post("meetings/:meetingId/actions")
   createAction(
     @Param("meetingId") meetingId: string,

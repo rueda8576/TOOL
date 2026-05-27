@@ -2224,6 +2224,13 @@ body.documents-workspace-dragging * {
   margin-top: 0.58rem;
 }
 
+.task-source-badge {
+  text-decoration: none;
+  color: var(--info);
+  border-color: color-mix(in srgb, var(--info) 38%, var(--line));
+  background: color-mix(in srgb, var(--info) 10%, transparent);
+}
+
 .task-context-menu {
   position: fixed;
   z-index: 1000;
@@ -2397,6 +2404,41 @@ body.documents-workspace-dragging * {
   display: flex;
   flex-wrap: wrap;
   gap: 0.48rem;
+}
+
+.meeting-automation-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.42rem;
+}
+
+.automation-badge {
+  border: 0;
+  margin-left: 0;
+}
+
+.automation-badge-queued,
+.automation-badge-running {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 11%, transparent);
+}
+
+.automation-badge-completed {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.automation-badge-failed,
+.automation-badge-stale {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 11%, transparent);
+}
+
+.meeting-automation-error {
+  color: var(--danger);
+  font-size: 0.8rem;
 }
 
 .meetings-calendar-layout {

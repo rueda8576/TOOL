@@ -13,7 +13,16 @@ const EnvSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().default("no-reply@example.com"),
-  BACKUP_RETENTION_DAYS: z.coerce.number().int().positive().default(30)
+  BACKUP_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_MODEL: z.string().default("gpt-5.5"),
+  OPENAI_BASE_URL: z.preprocess((value) => (value === "" ? undefined : value), z.string().url().optional()),
+  OPENAI_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
+  AI_MAX_INPUT_CHARS: z.coerce.number().int().positive().default(50_000),
+  AI_MEETING_AUTOMATION_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false")
 });
 
 export type WorkerEnv = z.infer<typeof EnvSchema>;

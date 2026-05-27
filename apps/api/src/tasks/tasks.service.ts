@@ -149,32 +149,68 @@ export class TasksService {
         startDate: true,
         dueDate: true,
         parentTaskId: true,
+        completedAt: true,
+        meetingActions: {
+          where: {
+            meeting: {
+              deletedAt: null
+            }
+          },
+          orderBy: {
+            createdAt: "desc"
+          },
+          take: 1,
+          select: {
+            id: true,
+            title: true,
+            meeting: {
+              select: {
+                id: true,
+                title: true,
+                scheduledAt: true
+              }
+            }
+          }
+        },
         createdAt: true,
         updatedAt: true
       }
     });
 
-    return tasks.map((task) => ({
-      id: task.id,
-      projectId: task.projectId,
-      title: task.title,
-      description: task.description,
-      status: mapStatusValue(task.status),
-      priority: mapPriorityValue(task.priority),
-      assigneeId: task.assigneeId,
-      assignee: task.assignee
-        ? {
-            id: task.assignee.id,
-            name: task.assignee.name,
-            email: task.assignee.email
-          }
-        : null,
-      startDate: task.startDate?.toISOString() ?? null,
-      dueDate: task.dueDate?.toISOString() ?? null,
-      parentTaskId: task.parentTaskId,
-      createdAt: task.createdAt.toISOString(),
-      updatedAt: task.updatedAt.toISOString()
-    }));
+    return tasks.map((task) => {
+      const sourceAction = task.meetingActions[0] ?? null;
+      return {
+        id: task.id,
+        projectId: task.projectId,
+        title: task.title,
+        description: task.description,
+        status: mapStatusValue(task.status),
+        priority: mapPriorityValue(task.priority),
+        assigneeId: task.assigneeId,
+        assignee: task.assignee
+          ? {
+              id: task.assignee.id,
+              name: task.assignee.name,
+              email: task.assignee.email
+            }
+          : null,
+        startDate: task.startDate?.toISOString() ?? null,
+        dueDate: task.dueDate?.toISOString() ?? null,
+        parentTaskId: task.parentTaskId,
+        completedAt: task.completedAt?.toISOString() ?? null,
+        sourceMeeting: sourceAction
+          ? {
+              meetingId: sourceAction.meeting.id,
+              meetingTitle: sourceAction.meeting.title,
+              scheduledDate: sourceAction.meeting.scheduledAt.toISOString().slice(0, 10),
+              actionId: sourceAction.id,
+              actionTitle: sourceAction.title
+            }
+          : null,
+        createdAt: task.createdAt.toISOString(),
+        updatedAt: task.updatedAt.toISOString()
+      };
+    });
   }
 
   async createTask(projectId: string, dto: CreateTaskDto, user: AuthenticatedUser): Promise<{
@@ -204,17 +240,19 @@ export class TasksService {
 
     await this.ensureAssigneeIsProjectMember(projectId, dto.assigneeId);
 
+    const status = mapStatus(dto.status);
     const task = await this.prisma.task.create({
       data: {
         projectId,
         title: dto.title,
         description: dto.description,
-        status: mapStatus(dto.status),
+        status,
         priority: mapPriority(dto.priority),
         assigneeId: dto.assigneeId,
         startDate: dto.startDate ? new Date(dto.startDate) : null,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         parentTaskId: dto.parentTaskId,
+        completedAt: status === TaskStatus.DONE ? new Date() : null,
         createdById: user.userId
       },
       select: {
@@ -256,7 +294,9 @@ export class TasksService {
       },
       select: {
         id: true,
-        projectId: true
+        projectId: true,
+        status: true,
+        completedAt: true
       }
     });
 
@@ -267,16 +307,23 @@ export class TasksService {
     await this.accessService.ensureProjectWritable(user.userId, user.globalRole, task.projectId);
     await this.ensureAssigneeIsProjectMember(task.projectId, dto.assigneeId);
 
+    const nextStatus = dto.status ? mapStatus(dto.status) : undefined;
+    const shouldSetCompletedAt =
+      nextStatus === TaskStatus.DONE && task.status !== TaskStatus.DONE;
+    const shouldClearCompletedAt =
+      nextStatus !== undefined && nextStatus !== TaskStatus.DONE && task.status === TaskStatus.DONE;
+
     const updated = await this.prisma.task.update({
       where: { id: taskId },
       data: {
         title: dto.title,
         description: dto.description,
-        status: dto.status ? mapStatus(dto.status) : undefined,
+        status: nextStatus,
         priority: dto.priority ? mapPriority(dto.priority) : undefined,
         assigneeId: dto.assigneeId,
         startDate: dto.startDate ? new Date(dto.startDate) : undefined,
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+        completedAt: shouldSetCompletedAt ? new Date() : shouldClearCompletedAt ? null : undefined
       },
       select: {
         id: true,

@@ -15,6 +15,7 @@ import {
   listProjectMeetings,
   MeetingListItem,
   MeetingsViewMode,
+  retryMeetingAutomation,
   updateMeeting
 } from "../../../../lib/meetings";
 
@@ -131,6 +132,26 @@ function withDefaultListSeed(content: string | null): string {
   return content;
 }
 
+function hasMeaningfulMarkdown(content: string): boolean {
+  return content
+    .split("\n")
+    .some((line) => {
+      const withoutMarker = line
+        .replace(/^\s*[-+*]\s*(?:\[(?: |x|X)\]\s*)?/, "")
+        .replace(/^\s*\d+\.\s*/, "")
+        .trim();
+      return withoutMarker.length > 0;
+    });
+}
+
+function normalizeMarkdownForCreate(content: string): string | undefined {
+  return hasMeaningfulMarkdown(content) ? content : undefined;
+}
+
+function normalizeMarkdownForUpdate(content: string): string | null {
+  return hasMeaningfulMarkdown(content) ? content : null;
+}
+
 type ListMarkerInfo = {
   indent: string;
   marker: string;
@@ -217,6 +238,29 @@ function renderMarkdownSection(label: string, content: string | null): JSX.Eleme
   );
 }
 
+function renderAutomationStatus(meeting: MeetingListItem): JSX.Element | null {
+  if (!meeting.automation) {
+    return null;
+  }
+
+  const statusLabel: Record<typeof meeting.automation.status, string> = {
+    queued: "AI queued",
+    running: "AI running",
+    completed: `AI created ${meeting.automation.createdTaskCount}`,
+    failed: "AI failed",
+    stale: "AI stale"
+  };
+
+  return (
+    <div className="meeting-automation-status">
+      <span className={`badge automation-badge automation-badge-${meeting.automation.status}`}>
+        {statusLabel[meeting.automation.status]}
+      </span>
+      {meeting.automation.errorMessage ? <span className="meeting-automation-error">{meeting.automation.errorMessage}</span> : null}
+    </div>
+  );
+}
+
 function transformSelectedLines(
   value: string,
   selectionStart: number,
@@ -277,6 +321,7 @@ export default function ProjectMeetingsPage({
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [activeMeetingActionId, setActiveMeetingActionId] = useState<string | null>(null);
+  const [activeAutomationRetryId, setActiveAutomationRetryId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<MeetingsViewMode>("list");
   const [showForm, setShowForm] = useState(false);
   const [formMode, setFormMode] = useState<MeetingFormMode>("create");
@@ -631,9 +676,9 @@ export default function ProjectMeetingsPage({
             title: trimmedTitle,
             scheduledAt: toIsoFromDay(dateInput),
             location: trimmedLocation,
-            doneMarkdown,
-            toDiscussMarkdown,
-            toDoMarkdown
+            doneMarkdown: normalizeMarkdownForUpdate(doneMarkdown),
+            toDiscussMarkdown: normalizeMarkdownForUpdate(toDiscussMarkdown),
+            toDoMarkdown: normalizeMarkdownForUpdate(toDoMarkdown)
           });
           setSuccess("Minute updated successfully.");
         } else {
@@ -641,9 +686,9 @@ export default function ProjectMeetingsPage({
             title: trimmedTitle,
             scheduledAt: toIsoFromDay(dateInput),
             location: trimmedLocation.length > 0 ? trimmedLocation : undefined,
-            doneMarkdown: doneMarkdown.trim().length > 0 ? doneMarkdown : undefined,
-            toDiscussMarkdown: toDiscussMarkdown.trim().length > 0 ? toDiscussMarkdown : undefined,
-            toDoMarkdown: toDoMarkdown.trim().length > 0 ? toDoMarkdown : undefined
+            doneMarkdown: normalizeMarkdownForCreate(doneMarkdown),
+            toDiscussMarkdown: normalizeMarkdownForCreate(toDiscussMarkdown),
+            toDoMarkdown: normalizeMarkdownForCreate(toDoMarkdown)
           });
           setSuccess("Minute created successfully.");
         }
@@ -706,6 +751,32 @@ export default function ProjectMeetingsPage({
       setError((deleteError as Error).message);
     } finally {
       setActiveMeetingActionId(null);
+    }
+  };
+
+  const retryAutomation = async (meetingId: string): Promise<void> => {
+    if (!token) {
+      setError("Missing session token. Please sign in again.");
+      return;
+    }
+
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
+      return;
+    }
+
+    setActiveAutomationRetryId(meetingId);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      await retryMeetingAutomation(meetingId, token);
+      setSuccess("AI task extraction queued.");
+      await loadMeetings(token);
+    } catch (retryError) {
+      setError((retryError as Error).message);
+    } finally {
+      setActiveAutomationRetryId(null);
     }
   };
 
@@ -863,6 +934,7 @@ export default function ProjectMeetingsPage({
                         {meeting.location ? `Location: ${meeting.location}` : "Location: not set"} | Actions:{" "}
                         {meeting.actionsCount}
                       </p>
+                      {renderAutomationStatus(meeting)}
                       {renderMarkdownSection("Done", meeting.doneMarkdown)}
                       {renderMarkdownSection("To discuss", meeting.toDiscussMarkdown)}
                       {renderMarkdownSection("To do", meeting.toDoMarkdown)}
@@ -872,6 +944,18 @@ export default function ProjectMeetingsPage({
                         <button className="button button-secondary" type="button" onClick={() => openEditForm(meeting)}>
                           Edit
                         </button>
+                        {meeting.automation?.status === "failed" || meeting.automation?.status === "stale" ? (
+                          <button
+                            className="button button-secondary"
+                            type="button"
+                            onClick={() => {
+                              void retryAutomation(meeting.id);
+                            }}
+                            disabled={activeAutomationRetryId === meeting.id}
+                          >
+                            {activeAutomationRetryId === meeting.id ? "Retrying..." : "Retry AI"}
+                          </button>
+                        ) : null}
                         <button
                           className="button button-danger"
                           type="button"
@@ -953,6 +1037,7 @@ export default function ProjectMeetingsPage({
                   <div key={meeting.id} className="list-item">
                     <strong>{meeting.title}</strong>
                     <p>{meeting.location ? `Location: ${meeting.location}` : "Location: not set"}</p>
+                    {renderAutomationStatus(meeting)}
                     {renderMarkdownSection("Done", meeting.doneMarkdown)}
                     {renderMarkdownSection("To discuss", meeting.toDiscussMarkdown)}
                     {renderMarkdownSection("To do", meeting.toDoMarkdown)}
@@ -961,6 +1046,18 @@ export default function ProjectMeetingsPage({
                         <button className="button button-secondary" type="button" onClick={() => openEditForm(meeting)}>
                           Edit
                         </button>
+                        {meeting.automation?.status === "failed" || meeting.automation?.status === "stale" ? (
+                          <button
+                            className="button button-secondary"
+                            type="button"
+                            onClick={() => {
+                              void retryAutomation(meeting.id);
+                            }}
+                            disabled={activeAutomationRetryId === meeting.id}
+                          >
+                            {activeAutomationRetryId === meeting.id ? "Retrying..." : "Retry AI"}
+                          </button>
+                        ) : null}
                         <button
                           className="button button-danger"
                           type="button"

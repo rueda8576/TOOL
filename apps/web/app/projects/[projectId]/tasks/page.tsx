@@ -518,6 +518,15 @@ export default function ProjectTasksPage({
                     {task.dueDate ? (
                       <span className="badge">Due: {new Date(task.dueDate).toLocaleDateString()}</span>
                     ) : null}
+                    {task.sourceMeeting ? (
+                      <a
+                        className="badge task-source-badge"
+                        href={`/projects/${params.projectId}/meetings?view=calendar&date=${task.sourceMeeting.scheduledDate}`}
+                        title={task.sourceMeeting.meetingTitle}
+                      >
+                        From meeting
+                      </a>
+                    ) : null}
                   </div>
                 </div>
               ))}

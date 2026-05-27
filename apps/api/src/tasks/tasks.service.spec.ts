@@ -93,6 +93,8 @@ describe("TasksService", () => {
         startDate,
         dueDate: null,
         parentTaskId: null,
+        completedAt: null,
+        meetingActions: [],
         createdAt,
         updatedAt
       }
@@ -136,6 +138,8 @@ describe("TasksService", () => {
         startDate: startDate.toISOString(),
         dueDate: null,
         parentTaskId: null,
+        completedAt: null,
+        sourceMeeting: null,
         createdAt: createdAt.toISOString(),
         updatedAt: updatedAt.toISOString()
       }
@@ -228,6 +232,7 @@ describe("TasksService", () => {
           assigneeId: "user-2",
           startDate: new Date("2026-04-06T09:00:00.000Z"),
           dueDate: new Date("2026-04-08T18:00:00.000Z"),
+          completedAt: null,
           createdById: "user-1"
         })
       })
@@ -400,7 +405,9 @@ describe("TasksService", () => {
     const { service, prisma, queueService, auditService } = makeService();
     prisma.task.findFirst.mockResolvedValue({
       id: "task-1",
-      projectId: "project-1"
+      projectId: "project-1",
+      status: TaskStatus.TODO,
+      completedAt: null
     });
     prisma.projectMember.findUnique.mockResolvedValue({ userId: "user-2" });
     prisma.task.update.mockResolvedValue({
@@ -440,7 +447,8 @@ describe("TasksService", () => {
         priority: TaskPriority.CRITICAL,
         assigneeId: "user-2",
         startDate: new Date("2026-04-08T09:00:00.000Z"),
-        dueDate: new Date("2026-04-10T09:00:00.000Z")
+        dueDate: new Date("2026-04-10T09:00:00.000Z"),
+        completedAt: expect.any(Date)
       },
       select: {
         id: true,
@@ -486,7 +494,9 @@ describe("TasksService", () => {
     const { service, prisma } = makeService();
     prisma.task.findFirst.mockResolvedValue({
       id: "task-1",
-      projectId: "project-1"
+      projectId: "project-1",
+      status: TaskStatus.TODO,
+      completedAt: null
     });
     prisma.projectMember.findUnique.mockResolvedValue(null);
 
@@ -509,7 +519,9 @@ describe("TasksService", () => {
     const { service, prisma, queueService } = makeService();
     prisma.task.findFirst.mockResolvedValue({
       id: "task-1",
-      projectId: "project-1"
+      projectId: "project-1",
+      status: TaskStatus.TODO,
+      completedAt: null
     });
     prisma.task.update.mockResolvedValue({
       id: "task-1",

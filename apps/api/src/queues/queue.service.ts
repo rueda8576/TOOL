@@ -13,6 +13,11 @@ type EmailJobPayload = {
   };
 };
 
+export type MeetingAutomationJobPayload = {
+  runId: string;
+  meetingId: string;
+};
+
 @Injectable()
 export class QueueService implements OnModuleDestroy {
   private readonly logger = new Logger(QueueService.name);
@@ -22,6 +27,7 @@ export class QueueService implements OnModuleDestroy {
   private readonly compileQueue = new Queue("latex-compile", { connection: this.queueConnection });
   private readonly emailQueue = new Queue("email-notifications", { connection: this.queueConnection });
   private readonly backupQueue = new Queue("backups", { connection: this.queueConnection });
+  private readonly meetingAiQueue = new Queue("ai-meeting", { connection: this.queueConnection });
 
   async enqueueCompile(payload: { documentVersionId: string; compileJobId: string }, opts?: JobsOptions): Promise<string> {
     const job = await this.compileQueue.add("compile", payload, {
@@ -61,8 +67,26 @@ export class QueueService implements OnModuleDestroy {
     return job.id?.toString() ?? "";
   }
 
+  async enqueueMeetingAutomation(payload: MeetingAutomationJobPayload, opts?: JobsOptions): Promise<string> {
+    const job = await this.meetingAiQueue.add("extract-tasks", payload, {
+      attempts: 3,
+      backoff: { type: "exponential", delay: 10_000 },
+      jobId: payload.runId,
+      removeOnComplete: 200,
+      removeOnFail: 200,
+      ...opts
+    });
+
+    return job.id?.toString() ?? "";
+  }
+
   async onModuleDestroy(): Promise<void> {
-    await Promise.all([this.compileQueue.close(), this.emailQueue.close(), this.backupQueue.close()]);
+    await Promise.all([
+      this.compileQueue.close(),
+      this.emailQueue.close(),
+      this.backupQueue.close(),
+      this.meetingAiQueue.close()
+    ]);
     this.logger.log("Queue connections closed");
   }
 }

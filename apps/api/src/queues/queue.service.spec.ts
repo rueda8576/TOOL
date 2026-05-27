@@ -90,6 +90,25 @@ describe("QueueService", () => {
     );
   });
 
+  it("enqueues meeting automation jobs with idempotent run ids", async () => {
+    const { service, queues } = await loadService();
+    queues.get("ai-meeting")!.add.mockResolvedValue({ id: "run-1" });
+
+    await expect(service.enqueueMeetingAutomation({ runId: "run-1", meetingId: "meeting-1" })).resolves.toBe("run-1");
+
+    expect(queues.get("ai-meeting")!.add).toHaveBeenCalledWith(
+      "extract-tasks",
+      { runId: "run-1", meetingId: "meeting-1" },
+      expect.objectContaining({
+        attempts: 3,
+        backoff: { type: "exponential", delay: 10000 },
+        jobId: "run-1",
+        removeOnComplete: 200,
+        removeOnFail: 200
+      })
+    );
+  });
+
   it("closes all queues on module destroy", async () => {
     const { service, queues } = await loadService();
 
@@ -98,5 +117,6 @@ describe("QueueService", () => {
     expect(queues.get("latex-compile")!.close).toHaveBeenCalledTimes(1);
     expect(queues.get("email-notifications")!.close).toHaveBeenCalledTimes(1);
     expect(queues.get("backups")!.close).toHaveBeenCalledTimes(1);
+    expect(queues.get("ai-meeting")!.close).toHaveBeenCalledTimes(1);
   });
 });

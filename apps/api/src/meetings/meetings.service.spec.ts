@@ -8,6 +8,7 @@ describe("MeetingsService", () => {
     prisma: any;
     accessService: any;
     auditService: any;
+    queueService: any;
   } => {
     const prisma: any = {
       meeting: {
@@ -21,8 +22,13 @@ describe("MeetingsService", () => {
         update: jest.fn(),
         create: jest.fn()
       },
+      meetingAutomationRun: {
+        create: jest.fn(),
+        update: jest.fn()
+      },
       task: {
-        findFirst: jest.fn()
+        findFirst: jest.fn(),
+        findMany: jest.fn()
       }
     };
 
@@ -35,11 +41,16 @@ describe("MeetingsService", () => {
       log: jest.fn()
     };
 
+    const queueService: any = {
+      enqueueMeetingAutomation: jest.fn()
+    };
+
     return {
-      service: new MeetingsService(prisma, accessService, auditService),
+      service: new MeetingsService(prisma, accessService, auditService, queueService),
       prisma,
       accessService,
-      auditService
+      auditService,
+      queueService
     };
   };
 
@@ -81,10 +92,11 @@ describe("MeetingsService", () => {
   });
 
   it("normalizes day-only scheduledAt and returns scheduledDate on create", async () => {
-    const { service, prisma } = makeService();
+    const { service, prisma, queueService } = makeService();
     const createdAt = new Date("2026-02-22T09:00:00.000Z");
     const updatedAt = new Date("2026-02-22T09:00:00.000Z");
 
+    prisma.meeting.findFirst.mockResolvedValue(null);
     prisma.meeting.create.mockResolvedValue({
       id: "meeting-1",
       projectId: "project-1",
@@ -97,6 +109,25 @@ describe("MeetingsService", () => {
       createdAt,
       updatedAt
     });
+    prisma.meetingAutomationRun.create.mockResolvedValue({
+      id: "run-1",
+      status: "QUEUED",
+      createdTaskCount: 0,
+      createdActionCount: 0,
+      errorMessage: null,
+      completedAt: null,
+      updatedAt
+    });
+    prisma.meetingAutomationRun.update.mockResolvedValue({
+      id: "run-1",
+      status: "QUEUED",
+      createdTaskCount: 0,
+      createdActionCount: 0,
+      errorMessage: null,
+      completedAt: null,
+      updatedAt
+    });
+    queueService.enqueueMeetingAutomation.mockResolvedValue("run-1");
 
     const result = await service.createMeeting(
       "project-1",
@@ -116,8 +147,96 @@ describe("MeetingsService", () => {
 
     const createCall = prisma.meeting.create.mock.calls[0][0];
     expect(createCall.data.scheduledAt.toISOString()).toBe("2026-02-22T12:00:00.000Z");
+    expect(queueService.enqueueMeetingAutomation).toHaveBeenCalledWith({
+      runId: "run-1",
+      meetingId: "meeting-1"
+    });
     expect(result.scheduledDate).toBe("2026-02-22");
     expect(result.scheduledAt).toBe("2026-02-22T12:00:00.000Z");
+    expect(result.automation?.status).toBe("queued");
+  });
+
+  it("appends completed project tasks to DONE when a previous minute exists", async () => {
+    const { service, prisma } = makeService();
+    const createdAt = new Date("2026-02-22T09:00:00.000Z");
+    const updatedAt = new Date("2026-02-22T09:00:00.000Z");
+    prisma.meeting.findFirst.mockResolvedValue({
+      scheduledAt: new Date("2026-02-15T12:00:00.000Z")
+    });
+    prisma.task.findMany.mockResolvedValue([
+      {
+        title: "Finish protocol",
+        completedAt: new Date("2026-02-20T10:00:00.000Z"),
+        assignee: { name: "Alice" }
+      }
+    ]);
+    prisma.meeting.create.mockImplementation(async (args: any) => ({
+      id: "meeting-1",
+      projectId: "project-1",
+      title: args.data.title,
+      scheduledAt: args.data.scheduledAt,
+      location: null,
+      doneMarkdown: args.data.doneMarkdown,
+      toDiscussMarkdown: null,
+      toDoMarkdown: null,
+      createdAt,
+      updatedAt
+    }));
+
+    const result = await service.createMeeting(
+      "project-1",
+      {
+        title: "Minutes 2026-02-22",
+        scheduledAt: "2026-02-22",
+        doneMarkdown: "- Manual note",
+        toDoMarkdown: "- "
+      },
+      {
+        userId: "user-1",
+        email: "user-1@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(result.doneMarkdown).toContain("- Manual note");
+    expect(result.doneMarkdown).toContain("### Completed tasks since previous minute");
+    expect(result.doneMarkdown).toContain("- [x] Finish protocol");
+  });
+
+  it("does not queue automation for placeholder-only TO DO markdown", async () => {
+    const { service, prisma, queueService } = makeService();
+    const createdAt = new Date("2026-02-22T09:00:00.000Z");
+    const updatedAt = new Date("2026-02-22T09:00:00.000Z");
+    prisma.meeting.findFirst.mockResolvedValue(null);
+    prisma.meeting.create.mockResolvedValue({
+      id: "meeting-1",
+      projectId: "project-1",
+      title: "Minutes 2026-02-22",
+      scheduledAt: new Date("2026-02-22T12:00:00.000Z"),
+      location: null,
+      doneMarkdown: null,
+      toDiscussMarkdown: null,
+      toDoMarkdown: null,
+      createdAt,
+      updatedAt
+    });
+
+    await service.createMeeting(
+      "project-1",
+      {
+        title: "Minutes 2026-02-22",
+        scheduledAt: "2026-02-22",
+        toDoMarkdown: "- "
+      },
+      {
+        userId: "user-1",
+        email: "user-1@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(prisma.meetingAutomationRun.create).not.toHaveBeenCalled();
+    expect(queueService.enqueueMeetingAutomation).not.toHaveBeenCalled();
   });
 
   it("updates title/date/location/agenda/notes", async () => {
@@ -174,6 +293,155 @@ describe("MeetingsService", () => {
     );
     expect(auditService.log).toHaveBeenCalledWith(expect.objectContaining({ action: "meeting.update" }));
     expect(result.scheduledDate).toBe("2026-02-25");
+  });
+
+  it("normalizes placeholder-only markdown sections to empty on update", async () => {
+    const { service, prisma } = makeService();
+    const createdAt = new Date("2026-02-20T08:00:00.000Z");
+    const updatedAt = new Date("2026-02-23T11:00:00.000Z");
+
+    prisma.meeting.findFirst.mockResolvedValue({
+      id: "meeting-1",
+      projectId: "project-1"
+    });
+    prisma.meeting.update.mockImplementation(async (args: any) => ({
+      id: "meeting-1",
+      projectId: "project-1",
+      title: "Updated minute",
+      scheduledAt: new Date("2026-02-25T12:00:00.000Z"),
+      location: "Room B",
+      doneMarkdown: args.data.doneMarkdown,
+      toDiscussMarkdown: args.data.toDiscussMarkdown,
+      toDoMarkdown: args.data.toDoMarkdown,
+      createdAt,
+      updatedAt
+    }));
+
+    const result = await service.updateMeeting(
+      "meeting-1",
+      {
+        doneMarkdown: "- ",
+        toDiscussMarkdown: "1. ",
+        toDoMarkdown: "- [ ] "
+      },
+      {
+        userId: "user-1",
+        email: "user-1@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(prisma.meeting.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          doneMarkdown: null,
+          toDiscussMarkdown: null,
+          toDoMarkdown: null
+        })
+      })
+    );
+    expect(result.doneMarkdown).toBeNull();
+    expect(result.toDiscussMarkdown).toBeNull();
+    expect(result.toDoMarkdown).toBeNull();
+  });
+
+  it("queues a new automation run when retrying a failed run", async () => {
+    const { service, prisma, queueService, auditService } = makeService();
+    const createdAt = new Date("2026-02-20T08:00:00.000Z");
+    const updatedAt = new Date("2026-02-23T11:00:00.000Z");
+
+    prisma.meeting.findFirst.mockResolvedValue({
+      id: "meeting-1",
+      projectId: "project-1",
+      title: "Minutes 2026-02-20",
+      scheduledAt: new Date("2026-02-20T12:00:00.000Z"),
+      location: null,
+      doneMarkdown: null,
+      toDiscussMarkdown: null,
+      toDoMarkdown: "- Prepare protocol",
+      createdAt,
+      updatedAt,
+      automationRuns: [
+        {
+          id: "failed-run",
+          status: "FAILED",
+          createdTaskCount: 0,
+          createdActionCount: 0,
+          errorMessage: "OpenAI failed",
+          completedAt: new Date("2026-02-20T12:05:00.000Z"),
+          updatedAt
+        }
+      ]
+    });
+    prisma.meetingAutomationRun.create.mockResolvedValue({
+      id: "run-2",
+      status: "QUEUED",
+      createdTaskCount: 0,
+      createdActionCount: 0,
+      errorMessage: null,
+      completedAt: null,
+      updatedAt
+    });
+    prisma.meetingAutomationRun.update.mockResolvedValue({
+      id: "run-2",
+      status: "QUEUED",
+      createdTaskCount: 0,
+      createdActionCount: 0,
+      errorMessage: null,
+      completedAt: null,
+      updatedAt
+    });
+    queueService.enqueueMeetingAutomation.mockResolvedValue("run-2");
+
+    const result = await service.retryAutomation("meeting-1", {
+      userId: "user-1",
+      email: "user-1@example.com",
+      globalRole: "editor"
+    });
+
+    expect(queueService.enqueueMeetingAutomation).toHaveBeenCalledWith({
+      runId: "run-2",
+      meetingId: "meeting-1"
+    });
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "meeting.ai.extract_queued",
+        metadata: expect.objectContaining({
+          retriedRunId: "failed-run"
+        })
+      })
+    );
+    expect(result.automation?.status).toBe("queued");
+  });
+
+  it("rejects automation retry when there is no failed or stale run", async () => {
+    const { service, prisma, queueService } = makeService();
+    const createdAt = new Date("2026-02-20T08:00:00.000Z");
+    const updatedAt = new Date("2026-02-23T11:00:00.000Z");
+
+    prisma.meeting.findFirst.mockResolvedValue({
+      id: "meeting-1",
+      projectId: "project-1",
+      title: "Minutes 2026-02-20",
+      scheduledAt: new Date("2026-02-20T12:00:00.000Z"),
+      location: null,
+      doneMarkdown: null,
+      toDiscussMarkdown: null,
+      toDoMarkdown: "- Prepare protocol",
+      createdAt,
+      updatedAt,
+      automationRuns: []
+    });
+
+    await expect(
+      service.retryAutomation("meeting-1", {
+        userId: "user-1",
+        email: "user-1@example.com",
+        globalRole: "editor"
+      })
+    ).rejects.toThrow("No failed or stale automation run to retry");
+
+    expect(queueService.enqueueMeetingAutomation).not.toHaveBeenCalled();
   });
 
   it("soft deletes meeting and writes audit log", async () => {

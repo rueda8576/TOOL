@@ -21,13 +21,13 @@ export class UpdateMeetingDto {
 
   @IsOptional()
   @IsString()
-  doneMarkdown?: string;
+  doneMarkdown?: string | null;
 
   @IsOptional()
   @IsString()
-  toDiscussMarkdown?: string;
+  toDiscussMarkdown?: string | null;
 
   @IsOptional()
   @IsString()
-  toDoMarkdown?: string;
+  toDoMarkdown?: string | null;
 }

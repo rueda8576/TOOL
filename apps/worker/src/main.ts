@@ -7,6 +7,7 @@ import { processBackupJob } from "./jobs/backup.job";
 import { processDueReminderJob } from "./jobs/due-reminder.job";
 import { processEmailJob } from "./jobs/email.job";
 import { processLatexCompileJob } from "./jobs/latex-compile.job";
+import { processMeetingAutomationJob } from "./jobs/meeting-automation.job";
 
 const env = getEnv();
 const logger = {
@@ -68,11 +69,23 @@ const reminderWorker = new Worker(
   }
 );
 
+const meetingAiWorker = new Worker(
+  "ai-meeting",
+  async (job) => {
+    await processMeetingAutomationJob(prisma, emailQueue, job);
+  },
+  {
+    connection: queueConnection,
+    concurrency: 1
+  }
+);
+
 for (const [name, worker] of [
   ["latex-compile", compileWorker],
   ["email-notifications", emailWorker],
   ["backups", backupWorker],
-  ["task-reminders", reminderWorker]
+  ["task-reminders", reminderWorker],
+  ["ai-meeting", meetingAiWorker]
 ] as const) {
   worker.on("completed", (job) => {
     logger.log(`[${name}] completed job ${job.id}`);
@@ -85,7 +98,13 @@ for (const [name, worker] of [
 
 const shutdown = async (): Promise<void> => {
   logger.log("Shutting down workers...");
-  await Promise.all([compileWorker.close(), emailWorker.close(), backupWorker.close(), reminderWorker.close()]);
+  await Promise.all([
+    compileWorker.close(),
+    emailWorker.close(),
+    backupWorker.close(),
+    reminderWorker.close(),
+    meetingAiWorker.close()
+  ]);
   await Promise.all([emailQueue.close(), backupQueue.close(), reminderQueue.close()]);
   await prisma.$disconnect();
   process.exit(0);

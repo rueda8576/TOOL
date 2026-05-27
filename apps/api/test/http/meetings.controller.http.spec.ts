@@ -15,6 +15,7 @@ describe("MeetingsController HTTP", () => {
       createMeeting: jest.fn(),
       updateMeeting: jest.fn(),
       deleteMeeting: jest.fn(),
+      retryAutomation: jest.fn(),
       createAction: jest.fn(),
       linkActionToTask: jest.fn()
     };
@@ -72,6 +73,44 @@ describe("MeetingsController HTTP", () => {
       title: "Follow up",
       linkedTaskId: null
     });
+  });
+
+  it("binds automation retry params and current user", async () => {
+    meetingsService.retryAutomation.mockResolvedValue({
+      id: "meeting-1",
+      projectId: "project-1",
+      title: "Minutes",
+      scheduledAt: "2026-02-22T12:00:00.000Z",
+      scheduledDate: "2026-02-22",
+      location: null,
+      doneMarkdown: null,
+      toDiscussMarkdown: null,
+      toDoMarkdown: "- Follow up",
+      automation: {
+        id: "run-1",
+        status: "queued",
+        createdTaskCount: 0,
+        createdActionCount: 0,
+        errorMessage: null,
+        completedAt: null,
+        updatedAt: "2026-02-22T12:00:00.000Z"
+      },
+      createdAt: "2026-02-22T12:00:00.000Z",
+      updatedAt: "2026-02-22T12:00:00.000Z"
+    });
+
+    const response = await request(app.getHttpServer())
+      .post("/meetings/meeting-1/automation/retry")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .send()
+      .expect(201);
+
+    expect(meetingsService.retryAutomation).toHaveBeenCalledWith("meeting-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+    expect(response.body.automation).toEqual(expect.objectContaining({ id: "run-1", status: "queued" }));
   });
 
   it("binds action-task linking params and DTO", async () => {

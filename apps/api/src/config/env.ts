@@ -27,7 +27,11 @@ const EnvSchema = z.object({
   API_PORT: z.coerce.number().int().default(4000),
   STORAGE_ROOT: z.string().default("./storage"),
   PDF_UPLOAD_LIMIT_BYTES: z.coerce.number().int().positive().default(1_073_741_824),
-  LATEX_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000)
+  LATEX_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  AI_MEETING_AUTOMATION_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value !== "false")
 });
 
 export type AppEnv = z.infer<typeof EnvSchema>;

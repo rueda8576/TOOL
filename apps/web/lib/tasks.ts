@@ -21,6 +21,14 @@ export type TaskListItem = {
   startDate: string | null;
   dueDate: string | null;
   parentTaskId: string | null;
+  completedAt: string | null;
+  sourceMeeting: {
+    meetingId: string;
+    meetingTitle: string;
+    scheduledDate: string;
+    actionId: string;
+    actionTitle: string;
+  } | null;
   createdAt: string;
   updatedAt: string;
 };

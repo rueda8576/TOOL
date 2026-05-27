@@ -1,5 +1,35 @@
 # Implementation TODO (v1 bootstrap)
 
+## Meetings Tasks AI Automation (2026-05-27)
+- [x] Register the implementation plan for automatic AI task creation from minutes.
+- [x] Add Prisma schema/migration support for task completion timestamps, meeting automation runs, and meeting-action provenance.
+- [x] Wire API meeting creation, retry endpoint, queueing, task provenance, and completed-task DONE enrichment.
+- [x] Add worker OpenAI extraction job with structured output validation and idempotent task/action creation.
+- [x] Update Meetings and Tasks UI for automation status, retry, provenance, and placeholder Markdown normalization.
+- [x] Run focused tests, type-checks, builds, diff hygiene, and document results.
+
+### Review - Meetings Tasks AI Automation
+- Added `Task.completedAt`, meeting automation run tracking, and meeting-action AI provenance/idempotency fields with migration/backfill support.
+- Meeting creation now appends completed project tasks to DONE from the previous non-deleted minute window, normalizes placeholder Markdown, creates queued AI runs, and exposes automation state plus retry.
+- Worker now consumes `ai-meeting`, calls OpenAI Responses API with strict JSON schema output, validates assignees/dates/lengths, and creates linked `MeetingAction` + `Task` records idempotently in a transaction.
+- Meetings UI now shows AI status/count/error with retry for writers; Tasks UI shows linked “From meeting” provenance.
+- Verification:
+  - `pnpm --filter @doctoral/db db:generate` passed
+  - `DATABASE_URL='postgresql://postgres:postgres@localhost:5432/doctoral_platform?schema=public' pnpm --filter @doctoral/db exec prisma validate` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/worker exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/meetings/meetings.service.spec.ts src/tasks/tasks.service.spec.ts src/queues/queue.service.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/meetings/meetings.service.spec.ts` passed after the nullable placeholder and retry-status updates
+  - `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/meetings.controller.http.spec.ts test/http/tasks.controller.http.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/meetings.controller.http.spec.ts` passed after the nullable placeholder update
+  - `pnpm --filter @doctoral/worker exec jest --config jest.config.ts --runInBand src/jobs/meeting-automation.job.spec.ts` passed
+  - `pnpm --filter @doctoral/api build` passed
+  - `pnpm --filter @doctoral/worker build` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - `git diff --check` passed
+  - Commit message: `feat(meetings): automate task creation from minutes`
+
 ## Fix GitLab Binary Response Mock Coverage Failure (2026-05-27)
 - [x] Register the scoped CI coverage fix for GitLab binary request failures.
 - [x] Make binary GitLab error header reads defensive and update the low-level fetch mock.
