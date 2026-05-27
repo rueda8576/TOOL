@@ -42,18 +42,12 @@ function parseStoredUser(rawValue: string | null): StoredAtlasiumUser | null {
 }
 
 export function AppShell({
-  title,
-  subtitle,
   projectId,
-  hideHeader = false,
   fullWidth = false,
   onBeforeShellNavigate,
   children
 }: {
-  title: string;
-  subtitle?: React.ReactNode;
   projectId?: string;
-  hideHeader?: boolean;
   fullWidth?: boolean;
   onBeforeShellNavigate?: (target: ShellNavigateTarget) => boolean | Promise<boolean>;
   children: React.ReactNode;
@@ -305,12 +299,6 @@ export function AppShell({
       </header>
       <main className="shell-content content">
         <div className={fullWidth ? "content-inner content-inner-fluid" : "content-inner"}>
-          {!hideHeader ? (
-            <header className="content-header">
-              <h1>{title}</h1>
-              {subtitle ? <p>{subtitle}</p> : null}
-            </header>
-          ) : null}
           {children}
         </div>
       </main>

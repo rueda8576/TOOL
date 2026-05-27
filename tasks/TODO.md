@@ -1,5 +1,24 @@
 # Implementation TODO (v1 bootstrap)
 
+## Remove AppShell Page Headers (2026-05-27)
+- [x] Register the scoped plan for removing repeated shell page headers.
+- [x] Remove `AppShell` title/subtitle/hideHeader props and header rendering.
+- [x] Update all `AppShell` callsites and remove unused `ProjectSubtitle` references.
+- [x] Remove obsolete `content-header` CSS.
+- [x] Run static audits, web type-check, production build, diff hygiene, and document results.
+
+### Review - Remove AppShell Page Headers
+- Removed repeated shell page headings and subtitles from `AppShell`, leaving the top navigation as the only persistent shell chrome.
+- Removed title/subtitle/hideHeader props from all `AppShell` callsites across global and project pages.
+- Deleted the now-unused `ProjectSubtitle` component.
+- Removed obsolete `content-header` CSS and mobile overrides.
+- Verification:
+  - Static audit confirmed no `content-header`, `hideHeader`, `ProjectSubtitle`, `project-subtitle`, or title/subtitle `AppShell` props remain.
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - `git diff --check` passed
+  - Commit message: `style(web): remove shell page headers`
+
 ## Atlasium Horizontal Topbar Shell (2026-05-27)
 - [x] Register the implementation plan for migrating the project sidebar to a sticky horizontal topbar.
 - [x] Refactor `AppShell` from a collapsible left sidebar to a measured sticky topbar with guarded shell navigation.

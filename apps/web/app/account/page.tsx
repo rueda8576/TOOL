@@ -5,7 +5,7 @@ import { AccountSettingsSurface } from "../../components/account-settings-surfac
 
 export default function AccountPage(): JSX.Element {
   return (
-    <AppShell title="Account" subtitle="Manage your Atlasium identity, security, notifications, and GitLab developer access.">
+    <AppShell>
       <AccountSettingsSurface />
     </AppShell>
   );

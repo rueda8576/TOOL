@@ -5,7 +5,6 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useSta
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
-import { ProjectSubtitle } from "../../../../components/project-subtitle";
 import { LoadingState } from "../../../../components/ui";
 import {
   createDocumentVersionUpload,
@@ -278,11 +277,7 @@ export default function ProjectDocumentsPage({
   };
 
   return (
-    <AppShell
-      title="Documents"
-      subtitle={<ProjectSubtitle projectId={params.projectId} suffix="Manage document list, uploads, and LaTeX workflows." />}
-      projectId={params.projectId}
-    >
+    <AppShell projectId={params.projectId}>
       <section className="panel documents-page-toolbar">
         <div className="task-toolbar-row">
           <h3 className="section-heading">Document library</h3>

@@ -692,7 +692,7 @@ export default function ProjectsPage(): JSX.Element {
     : "Pinned projects always stay at the top.";
 
   return (
-    <AppShell title="Projects" subtitle="Browse workspaces and manage access.">
+    <AppShell>
       <section className="panel projects-directory-panel">
         <div className="projects-toolbar-row">
           <div>

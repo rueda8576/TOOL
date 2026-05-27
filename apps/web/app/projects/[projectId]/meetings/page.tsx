@@ -6,7 +6,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { AppShell } from "../../../../components/app-shell";
-import { ProjectSubtitle } from "../../../../components/project-subtitle";
 import { LoadingState } from "../../../../components/ui";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
@@ -711,11 +710,7 @@ export default function ProjectMeetingsPage({
   };
 
   return (
-    <AppShell
-      title="Meetings"
-      subtitle={<ProjectSubtitle projectId={params.projectId} suffix="Minutes organized by date with list and calendar views." />}
-      projectId={params.projectId}
-    >
+    <AppShell projectId={params.projectId}>
       <section className="panel meetings-toolbar">
         <div className="meetings-toolbar-row">
           <div className="meetings-view-toggle">

@@ -19,7 +19,6 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "../../../components/app-shell";
-import { ProjectSubtitle } from "../../../components/project-subtitle";
 import { Alert, Badge, EmptyState, LoadingState } from "../../../components/ui";
 import {
   getProjectOverview,
@@ -230,11 +229,7 @@ export default function ProjectDetailPage({
   const nextMeetings = overview?.modules.meetings.next ?? [];
 
   return (
-    <AppShell
-      title="Project overview"
-      subtitle={<ProjectSubtitle projectId={params.projectId} />}
-      projectId={params.projectId}
-    >
+    <AppShell projectId={params.projectId}>
       <section className="overview-command-center">
         {error ? <Alert tone="error">{error}</Alert> : null}
         {loading ? <LoadingState title="Loading project overview" detail="Collecting project state, attention items, module summaries, and provenance." /> : null}

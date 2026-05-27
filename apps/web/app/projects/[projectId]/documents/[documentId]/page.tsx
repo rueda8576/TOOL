@@ -1468,9 +1468,7 @@ export default function DocumentDetailPage({
 
   return (
     <AppShell
-      title="Documents"
       projectId={params.projectId}
-      hideHeader
       fullWidth
       onBeforeShellNavigate={requestShellNavigation}
     >

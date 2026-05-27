@@ -10,7 +10,6 @@ import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 
 import { AppShell } from "./app-shell";
-import { ProjectSubtitle } from "./project-subtitle";
 import { LoadingState } from "./ui";
 import { WikiHistoryDiff } from "./wiki-history-diff";
 import { API_BASE_URL, LoginResponse } from "../lib/client-api";
@@ -2496,8 +2495,6 @@ export function WikiHub({
 
   return (
     <AppShell
-      title="Wiki"
-      subtitle={<ProjectSubtitle projectId={projectId} suffix="Knowledge hub." />}
       projectId={projectId}
       fullWidth
       onBeforeShellNavigate={requestShellNavigation}

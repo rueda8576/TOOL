@@ -4,7 +4,6 @@ import { DragEvent, FormEvent, MouseEvent, useCallback, useEffect, useMemo, useS
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
-import { ProjectSubtitle } from "../../../../components/project-subtitle";
 import { LoadingState } from "../../../../components/ui";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
@@ -358,11 +357,7 @@ export default function ProjectTasksPage({
   };
 
   return (
-    <AppShell
-      title="Tasks"
-      subtitle={<ProjectSubtitle projectId={params.projectId} suffix="Create and track work items." />}
-      projectId={params.projectId}
-    >
+    <AppShell projectId={params.projectId}>
       <section className="panel task-toolbar">
         <div className="task-toolbar-row">
           <h3 className="section-heading">Board</h3>

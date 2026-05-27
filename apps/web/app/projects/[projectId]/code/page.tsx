@@ -19,7 +19,6 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell, openAccountSettings } from "../../../../components/app-shell";
-import { ProjectSubtitle } from "../../../../components/project-subtitle";
 import { EmptyState, IconButton, LoadingState, StatusLine } from "../../../../components/ui";
 import { LoginResponse } from "../../../../lib/client-api";
 import {
@@ -627,7 +626,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     : [];
 
   return (
-    <AppShell title="Code" subtitle={<ProjectSubtitle projectId={params.projectId} suffix="Code" />} projectId={params.projectId}>
+    <AppShell projectId={params.projectId}>
       <div className="code-page">
         {loading ? <LoadingState title="Loading Code workspace" detail="Checking repository and GitLab connection state." /> : null}
         {error ? <StatusLine tone="error">{error}</StatusLine> : null}

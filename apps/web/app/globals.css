@@ -372,40 +372,6 @@ textarea {
   margin: 0;
 }
 
-.content-header {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-  padding: 1.25rem 1.35rem;
-  position: relative;
-}
-
-.content-header::before {
-  content: "";
-  position: absolute;
-  left: 1.35rem;
-  right: 1.35rem;
-  top: 0;
-  height: 3px;
-  background: var(--brand);
-}
-
-.content-header h1 {
-  margin: 0;
-  color: var(--text-strong);
-  font-family: var(--font-heading), sans-serif;
-  font-size: clamp(1.7rem, 2.4vw, 2.28rem);
-  letter-spacing: 0;
-}
-
-.content-header p {
-  margin: 0.45rem 0 0;
-  color: var(--text-muted);
-  max-width: 72ch;
-  line-height: 1.45;
-}
-
 .home-shell {
   min-height: 100vh;
   width: min(980px, calc(100% - 2rem));
@@ -3377,10 +3343,6 @@ body.wiki-layout-dragging * {
   }
 
   .content {
-    padding: 1rem;
-  }
-
-  .content-header {
     padding: 1rem;
   }
 
