@@ -100,7 +100,15 @@ export function UserMenu({
             <Shield size={16} aria-hidden="true" />
             Security
           </button>
-          <button type="button" role="menuitem" className="user-menu-danger" onClick={onSignOut}>
+          <button
+            type="button"
+            role="menuitem"
+            className="user-menu-danger"
+            onClick={() => {
+              setOpen(false);
+              onSignOut();
+            }}
+          >
             <LogOut size={16} aria-hidden="true" />
             Sign out
           </button>

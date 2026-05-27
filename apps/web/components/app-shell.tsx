@@ -7,12 +7,11 @@ import {
   FileText,
   FolderKanban,
   LayoutDashboard,
-  ListChecks,
-  PanelLeftClose
+  ListChecks
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { AccountDrawer } from "./account-drawer";
 import { AccountSettingsTab } from "./account-settings-surface";
@@ -21,8 +20,14 @@ import { StoredAtlasiumUser, UserMenu } from "./user-menu";
 import { ProjectSummary } from "../lib/api";
 import { authFetch } from "../lib/client-api";
 
-const APP_SIDEBAR_COLLAPSED_STORAGE_KEY = "atlasium_shell_sidebar_collapsed";
 const OPEN_ACCOUNT_SETTINGS_EVENT = "atlasium:open-account-settings";
+
+export type ShellNavigateReason = "module" | "exit-project" | "sign-out";
+
+export type ShellNavigateTarget = {
+  href: string;
+  reason: ShellNavigateReason;
+};
 
 function parseStoredUser(rawValue: string | null): StoredAtlasiumUser | null {
   if (!rawValue) {
@@ -42,7 +47,7 @@ export function AppShell({
   projectId,
   hideHeader = false,
   fullWidth = false,
-  onExitProjectRequest,
+  onBeforeShellNavigate,
   children
 }: {
   title: string;
@@ -50,23 +55,20 @@ export function AppShell({
   projectId?: string;
   hideHeader?: boolean;
   fullWidth?: boolean;
-  onExitProjectRequest?: () => boolean | Promise<boolean>;
+  onBeforeShellNavigate?: (target: ShellNavigateTarget) => boolean | Promise<boolean>;
   children: React.ReactNode;
 }): JSX.Element {
   const router = useRouter();
   const pathname = usePathname();
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const topbarRef = useRef<HTMLElement | null>(null);
   const [exitBusy, setExitBusy] = useState(false);
   const [brandTitle, setBrandTitle] = useState("Atlasium");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [sidebarPreferenceLoaded, setSidebarPreferenceLoaded] = useState(false);
   const [storedUser, setStoredUser] = useState<StoredAtlasiumUser | null>(null);
   const [accountDrawerOpen, setAccountDrawerOpen] = useState(false);
   const [accountDrawerTab, setAccountDrawerTab] = useState<AccountSettingsTab>("profile");
 
   useEffect(() => {
-    const storedPreference = localStorage.getItem(APP_SIDEBAR_COLLAPSED_STORAGE_KEY);
-    setSidebarCollapsed(storedPreference === "true");
-    setSidebarPreferenceLoaded(true);
     setStoredUser(parseStoredUser(localStorage.getItem("doctoral_user")));
   }, []);
 
@@ -94,14 +96,6 @@ export function AppShell({
       window.removeEventListener("atlasium:user-updated", onUserUpdated);
     };
   }, []);
-
-  useEffect(() => {
-    if (!sidebarPreferenceLoaded) {
-      return;
-    }
-
-    localStorage.setItem(APP_SIDEBAR_COLLAPSED_STORAGE_KEY, sidebarCollapsed ? "true" : "false");
-  }, [sidebarCollapsed, sidebarPreferenceLoaded]);
 
   useEffect(() => {
     let active = true;
@@ -139,6 +133,27 @@ export function AppShell({
       active = false;
     };
   }, [projectId]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    const topbar = topbarRef.current;
+    if (!shell || !topbar) {
+      return;
+    }
+
+    const updateTopbarHeight = (): void => {
+      shell.style.setProperty("--shell-topbar-height", `${Math.ceil(topbar.getBoundingClientRect().height)}px`);
+    };
+
+    updateTopbarHeight();
+    const resizeObserver = new ResizeObserver(updateTopbarHeight);
+    resizeObserver.observe(topbar);
+    window.addEventListener("resize", updateTopbarHeight);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", updateTopbarHeight);
+    };
+  }, []);
 
   const navLinks = projectId
     ? [
@@ -188,13 +203,50 @@ export function AppShell({
     setAccountDrawerOpen(true);
   }, []);
 
-  const signOut = useCallback((): void => {
+  const requestShellNavigation = useCallback(
+    async (target: ShellNavigateTarget): Promise<boolean> => {
+      if (!onBeforeShellNavigate) {
+        return true;
+      }
+      try {
+        return await onBeforeShellNavigate(target);
+      } catch {
+        return false;
+      }
+    },
+    [onBeforeShellNavigate]
+  );
+
+  const signOut = useCallback(async (): Promise<void> => {
+    const canNavigate = await requestShellNavigation({ href: "/login", reason: "sign-out" });
+    if (!canNavigate) {
+      return;
+    }
     localStorage.removeItem("doctoral_token");
     localStorage.removeItem("doctoral_user");
     setStoredUser(null);
     setAccountDrawerOpen(false);
     router.replace("/login");
-  }, [router]);
+  }, [requestShellNavigation, router]);
+
+  const onShellNavClick = useCallback(
+    async (event: MouseEvent<HTMLAnchorElement>, href: string, active: boolean): Promise<void> => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      event.preventDefault();
+      if (active || href === pathname) {
+        return;
+      }
+
+      const canNavigate = await requestShellNavigation({ href, reason: "module" });
+      if (canNavigate) {
+        router.push(href);
+      }
+    },
+    [pathname, requestShellNavigation, router]
+  );
 
   const onExitProject = useCallback(async (): Promise<void> => {
     if (!projectId || exitBusy) {
@@ -203,14 +255,7 @@ export function AppShell({
 
     setExitBusy(true);
     try {
-      let shouldExit = true;
-      if (onExitProjectRequest) {
-        try {
-          shouldExit = await onExitProjectRequest();
-        } catch {
-          shouldExit = false;
-        }
-      }
+      const shouldExit = await requestShellNavigation({ href: "/projects", reason: "exit-project" });
       if (!shouldExit) {
         return;
       }
@@ -218,38 +263,30 @@ export function AppShell({
     } finally {
       setExitBusy(false);
     }
-  }, [exitBusy, onExitProjectRequest, projectId, router]);
+  }, [exitBusy, projectId, requestShellNavigation, router]);
 
   return (
-    <div className={sidebarCollapsed ? "shell shell-sidebar-collapsed" : "shell"}>
-      <aside className="sidebar">
-        <div className="sidebar-topbar">
-          <div className="brand">
-            <AtlasiumMark size="sm" className="brand-mark" />
-            <div>
-              {projectId ? <p className="brand-kicker">Project archive</p> : <p className="brand-kicker">Atlasium</p>}
-              <p className="brand-title">{brandTitle}</p>
-            </div>
+    <div className="shell" ref={shellRef}>
+      <header className="shell-topbar" ref={topbarRef}>
+        <div className="shell-brand">
+          <AtlasiumMark size="sm" className="brand-mark" />
+          <div>
+            {projectId ? <p className="brand-kicker">Project archive</p> : <p className="brand-kicker">Atlasium</p>}
+            <p className="brand-title">{brandTitle}</p>
           </div>
-          <button
-            type="button"
-            className="sidebar-toggle-button icon-button"
-            onClick={() => setSidebarCollapsed(true)}
-            aria-label="Hide navigation menu"
-            title="Hide navigation menu"
-          >
-            <PanelLeftClose size={16} aria-hidden="true" />
-          </button>
         </div>
-        <nav className="nav-links">
+        <nav className="shell-nav" aria-label={projectId ? "Project navigation" : "Workspace navigation"}>
           {navLinks.map((item) => {
             const Icon = item.icon;
             return (
               <Link
                 key={item.href}
-                className={item.active ? "nav-link nav-link-active" : "nav-link"}
+                className={item.active ? "shell-nav-link shell-nav-link-active" : "shell-nav-link"}
                 href={item.href}
                 aria-current={item.active ? "page" : undefined}
+                onClick={(event) => {
+                  void onShellNavClick(event, item.href, item.active);
+                }}
               >
                 <Icon size={17} aria-hidden="true" />
                 <span>{item.label}</span>
@@ -257,29 +294,17 @@ export function AppShell({
             );
           })}
         </nav>
-        <div className="sidebar-footer">
-          <UserMenu user={storedUser} onOpenAccount={openAccountDrawer} onSignOut={signOut} />
+        <div className="shell-actions">
           {projectId ? (
-            <button type="button" className="nav-exit-button" onClick={() => void onExitProject()} disabled={exitBusy}>
+            <button type="button" className="shell-exit-button" onClick={() => void onExitProject()} disabled={exitBusy}>
               {exitBusy ? "Exiting..." : "Exit project"}
             </button>
           ) : null}
+          <UserMenu user={storedUser} onOpenAccount={openAccountDrawer} onSignOut={() => void signOut()} />
         </div>
-      </aside>
-      <main className="content">
+      </header>
+      <main className="shell-content content">
         <div className={fullWidth ? "content-inner content-inner-fluid" : "content-inner"}>
-          {sidebarCollapsed ? (
-            <div className="shell-sidebar-reopen-row">
-              <button
-                type="button"
-                className="button button-secondary shell-sidebar-reopen-button"
-                onClick={() => setSidebarCollapsed(false)}
-                aria-label="Show navigation menu"
-              >
-                Show menu
-              </button>
-            </div>
-          ) : null}
           {!hideHeader ? (
             <header className="content-header">
               <h1>{title}</h1>

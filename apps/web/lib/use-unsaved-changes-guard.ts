@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect } from "react";
 
+export type GuardedShellNavigationTarget = {
+  href: string;
+  reason: "module" | "exit-project" | "sign-out";
+};
+
 export function useUnsavedChangesGuard({
   isDirty,
   confirmMessage,
@@ -13,7 +18,7 @@ export function useUnsavedChangesGuard({
   confirmExit?: (options: { title: string; message: string; confirmLabel?: string; destructive?: boolean }) => Promise<boolean>;
   enabled?: boolean;
 }): {
-  requestExitProject: () => Promise<boolean>;
+  requestShellNavigation: (target?: GuardedShellNavigationTarget) => Promise<boolean>;
 } {
   const shouldGuard = enabled && isDirty;
 
@@ -33,7 +38,7 @@ export function useUnsavedChangesGuard({
     };
   }, [shouldGuard]);
 
-  const requestExitProject = useCallback(async (): Promise<boolean> => {
+  const requestShellNavigation = useCallback(async (_target?: GuardedShellNavigationTarget): Promise<boolean> => {
     if (!shouldGuard) {
       return true;
     }
@@ -48,5 +53,5 @@ export function useUnsavedChangesGuard({
     });
   }, [confirmExit, confirmMessage, shouldGuard]);
 
-  return { requestExitProject };
+  return { requestShellNavigation };
 }

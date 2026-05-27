@@ -1,5 +1,26 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Horizontal Topbar Shell (2026-05-27)
+- [x] Register the implementation plan for migrating the project sidebar to a sticky horizontal topbar.
+- [x] Refactor `AppShell` from a collapsible left sidebar to a measured sticky topbar with guarded shell navigation.
+- [x] Update unsaved-change guard integration for shell navigation, project exit, sign out, documents back navigation, and wiki internal page changes.
+- [x] Replace sidebar-oriented CSS with shell topbar CSS and adjust dense workspace offsets/heights.
+- [x] Run static audits, web type-check, production build, diff hygiene, and document results.
+
+### Review - Atlasium Horizontal Topbar Shell
+- Replaced the collapsible left sidebar with a sticky horizontal shell topbar containing brand, scrollable module navigation, project exit, and the user menu.
+- Removed the persisted sidebar collapsed state and sidebar-specific CSS/classes from the active web code.
+- Added measured `--shell-topbar-height` support so Wiki, Code, and Documents dense workspaces account for the sticky topbar.
+- Expanded guarded navigation from project exit only to shell module links, sign out, Documents `Back to documents`, and Wiki internal page changes.
+- Updated `UserMenu` to open downward from the topbar and close before sign out guard handling.
+- Verification:
+  - Static audit confirmed old sidebar shell classes/state are absent from `apps/web/app`, `apps/web/components`, and `apps/web/lib`.
+  - Static audit confirmed no demo project links, `href="#"`, `window.confirm`, decorative purple/violet/sparkle references were introduced.
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - `git diff --check` passed
+  - Commit message: `refactor(web): migrate shell navigation to sticky topbar`
+
 ## Atlasium Username Settings Copy (2026-05-27)
 - [x] Register the scoped plan for the Profile account username copy change.
 - [x] Update the Profile username field from Git username wording to Atlasium username wording.

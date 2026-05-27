@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   ChangeEvent,
   FormEvent,
@@ -912,11 +911,19 @@ export default function DocumentDetailPage({
     [destroyFileCollaboration, destroyPresenceCollaboration]
   );
 
-  const { requestExitProject } = useUnsavedChangesGuard({
+  const { requestShellNavigation } = useUnsavedChangesGuard({
     isDirty: hasUnsavedLatexChanges,
-    confirmMessage: "You have unsaved LaTeX changes. Exit project anyway?",
+    confirmMessage: "You have unsaved LaTeX changes. Leave this document anyway?",
     confirmExit: confirm
   });
+
+  const navigateBackToDocuments = useCallback(async (): Promise<void> => {
+    const href = `/projects/${params.projectId}/documents`;
+    const canNavigate = await requestShellNavigation({ href, reason: "module" });
+    if (canNavigate) {
+      router.push(href);
+    }
+  }, [params.projectId, requestShellNavigation, router]);
 
   useEffect(() => {
     if ((compileStatus === "failed" || compileStatus === "timeout") && compileLog) {
@@ -1465,7 +1472,7 @@ export default function DocumentDetailPage({
       projectId={params.projectId}
       hideHeader
       fullWidth
-      onExitProjectRequest={requestExitProject}
+      onBeforeShellNavigate={requestShellNavigation}
     >
       <section className="documents-detail-topbar">
         <div className="documents-detail-meta">
@@ -1534,9 +1541,9 @@ export default function DocumentDetailPage({
               {deletingDocument ? "Deleting..." : "Delete"}
             </button>
           ) : null}
-          <Link className="button button-secondary" href={`/projects/${params.projectId}/documents`}>
+          <button className="button button-secondary" type="button" onClick={() => void navigateBackToDocuments()}>
             Back to documents
-          </Link>
+          </button>
         </div>
       </section>
 

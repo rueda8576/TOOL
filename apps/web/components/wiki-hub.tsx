@@ -971,9 +971,9 @@ export function WikiHub({
     }
     return draftTitle !== lastSavedSnapshotRef.current.title || draftContent !== lastSavedSnapshotRef.current.content;
   }, [draftContent, draftTitle, isEditing, isRealtimeActive]);
-  const { requestExitProject } = useUnsavedChangesGuard({
+  const { requestShellNavigation } = useUnsavedChangesGuard({
     isDirty,
-    confirmMessage: "You have unsaved wiki draft changes. Exit project anyway?",
+    confirmMessage: "You have unsaved wiki draft changes. Leave this page anyway?",
     confirmExit: confirm
   });
 
@@ -1213,9 +1213,14 @@ export function WikiHub({
   );
 
   const openPath = useCallback(
-    (path: string, updateUrl = true): void => {
+    async (path: string, updateUrl = true): Promise<void> => {
       const normalized = normalizePath(path);
       if (!normalized) {
+        return;
+      }
+      const href = `/projects/${projectId}/wiki/${encodeWikiPath(normalized)}`;
+      const canNavigate = await requestShellNavigation({ href, reason: "module" });
+      if (!canNavigate) {
         return;
       }
       setSelectedPath(normalized);
@@ -1225,10 +1230,10 @@ export function WikiHub({
       setSuccess(null);
       setError(null);
       if (updateUrl) {
-        router.push(`/projects/${projectId}/wiki/${encodeWikiPath(normalized)}`);
+        router.push(href);
       }
     },
-    [projectId, router]
+    [projectId, requestShellNavigation, router]
   );
 
   useEffect(() => {
@@ -2467,7 +2472,7 @@ export function WikiHub({
           className={isActive ? "wiki-tree-page wiki-tree-page-active" : "wiki-tree-page"}
           data-wiki-sidebar-item="page"
           style={{ paddingLeft: `${0.8 + depth * 0.8}rem` }}
-          onClick={() => openPath(node.path)}
+          onClick={() => void openPath(node.path)}
           title={`/${node.path}`}
         >
           <span className="wiki-tree-row-content" data-wiki-sidebar-measure>
@@ -2495,7 +2500,7 @@ export function WikiHub({
       subtitle={<ProjectSubtitle projectId={projectId} suffix="Knowledge hub." />}
       projectId={projectId}
       fullWidth
-      onExitProjectRequest={requestExitProject}
+      onBeforeShellNavigate={requestShellNavigation}
     >
       <div
         ref={wikiLayoutRef}
@@ -2791,7 +2796,7 @@ export function WikiHub({
                 <ul className="list">
                   {searchResults.map((result) => (
                     <li key={`${result.pageId}-${result.path}`} className="list-item wiki-search-item" data-wiki-sidebar-item="search-result">
-                      <button type="button" className="link-button" onClick={() => openPath(result.path)} data-wiki-sidebar-measure>
+                      <button type="button" className="link-button" onClick={() => void openPath(result.path)} data-wiki-sidebar-measure>
                         <strong>{result.title}</strong>
                       </button>
                       <p className="wiki-page-path">/{result.path}</p>
@@ -2920,7 +2925,7 @@ export function WikiHub({
                               className="link-button"
                               onClick={() => {
                                 if (link.path) {
-                                  openPath(link.path);
+                                  void openPath(link.path);
                                 }
                               }}
                             >
@@ -2943,7 +2948,7 @@ export function WikiHub({
                     <ul className="list">
                       {pageDetail.backlinks.map((backlink) => (
                         <li key={backlink.fromPageId} className="list-item">
-                          <button type="button" className="link-button" onClick={() => openPath(backlink.fromPath)}>
+                          <button type="button" className="link-button" onClick={() => void openPath(backlink.fromPath)}>
                             {backlink.fromTitle}
                           </button>
                           <p className="wiki-page-path">/{backlink.fromPath}</p>
