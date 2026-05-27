@@ -472,6 +472,10 @@ textarea {
   padding: 1rem 1.05rem;
 }
 
+.module-entry-panel {
+  border-top: 3px solid var(--brand);
+}
+
 .panel h2,
 .panel h3,
 .panel h4 {
@@ -3898,7 +3902,6 @@ body.wiki-layout-dragging * {
   display: grid;
   gap: var(--space-3);
   padding: 0.82rem 0.9rem;
-  border-top: 3px solid var(--brand);
 }
 
 .code-cockpit-row {

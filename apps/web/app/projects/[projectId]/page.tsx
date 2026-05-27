@@ -236,7 +236,7 @@ export default function ProjectDetailPage({
 
         {!loading && overview ? (
           <>
-            <section className="overview-command-band panel">
+            <section className="overview-command-band panel module-entry-panel">
               <div className="overview-command-main">
                 <p className="eyebrow">Atlasium project archive</p>
                 <h2>{overview.project.key} - {overview.project.name}</h2>

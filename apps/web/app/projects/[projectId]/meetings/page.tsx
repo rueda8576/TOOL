@@ -711,7 +711,7 @@ export default function ProjectMeetingsPage({
 
   return (
     <AppShell projectId={params.projectId}>
-      <section className="panel meetings-toolbar">
+      <section className="panel module-entry-panel meetings-toolbar">
         <div className="meetings-toolbar-row">
           <div className="meetings-view-toggle">
             <button

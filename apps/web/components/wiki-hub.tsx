@@ -2510,7 +2510,7 @@ export function WikiHub({
           .trim()}
         style={wikiLayoutStyle}
       >
-        <aside ref={wikiSidebarRef} className="wiki-sidebar panel">
+        <aside ref={wikiSidebarRef} className="wiki-sidebar panel module-entry-panel">
           <div className="wiki-sidebar-toolbar">
             <h3 className="section-heading">Pages</h3>
             {canWrite ? (
@@ -2827,7 +2827,7 @@ export function WikiHub({
           </div>
         ) : null}
 
-        <section className="wiki-main panel">
+        <section className="wiki-main panel module-entry-panel">
           <div className="wiki-main-header">
             <div>
               <h2 className="section-heading">{pageDetail?.page.title ?? "Wiki page"}</h2>

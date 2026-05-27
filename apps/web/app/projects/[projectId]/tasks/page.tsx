@@ -358,7 +358,7 @@ export default function ProjectTasksPage({
 
   return (
     <AppShell projectId={params.projectId}>
-      <section className="panel task-toolbar">
+      <section className="panel module-entry-panel task-toolbar">
         <div className="task-toolbar-row">
           <h3 className="section-heading">Board</h3>
           {canWrite ? (

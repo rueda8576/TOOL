@@ -633,7 +633,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
         {success ? <StatusLine tone="success">{success}</StatusLine> : null}
 
         {!loading && !repositoryConnected ? (
-          <section className="panel code-provision-panel">
+          <section className="panel module-entry-panel code-provision-panel">
             <div className="stack-xs">
               <p className="eyebrow">Repository cockpit</p>
               <h2 className="section-heading">No repositories yet</h2>
@@ -654,7 +654,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
 
         {!loading && connectedRepository ? (
           <>
-            <section className="panel code-cockpit">
+            <section className="panel module-entry-panel code-cockpit">
               <div className="code-cockpit-row code-cockpit-summary">
                 <div className="code-cockpit-title">
                   <p className="eyebrow">

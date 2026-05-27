@@ -1,5 +1,23 @@
 # Implementation TODO (v1 bootstrap)
 
+## Restore Module Entry Accent (2026-05-27)
+- [x] Register the scoped plan for restoring the amber entry line on module panels.
+- [x] Add a shared module entry panel accent class.
+- [x] Apply the accent to Overview, Wiki, Documents, Code, Tasks, and Meetings first panels.
+- [x] Run static audits, web type-check, production build, diff hygiene, and document results.
+
+### Review - Restore Module Entry Accent
+- Added shared `.module-entry-panel` styling for the amber top border.
+- Applied the shared accent to Overview, Wiki side/main panes, Documents, Tasks, Meetings, Code cockpit, and Code no-repository state.
+- Removed the Code-only amber border declaration from `.code-cockpit`.
+- Verification:
+  - Static audit confirmed no `content-header`, `hideHeader`, `ProjectSubtitle`, `project-subtitle`, or title/subtitle `AppShell` props returned.
+  - Static audit confirmed `.module-entry-panel` is used on all intended module entry panels and owns the only `border-top: 3px solid var(--brand)` rule.
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - `git diff --check` passed
+  - Commit message: `style(web): restore module entry accent`
+
 ## Remove AppShell Page Headers (2026-05-27)
 - [x] Register the scoped plan for removing repeated shell page headers.
 - [x] Remove `AppShell` title/subtitle/hideHeader props and header rendering.

@@ -278,7 +278,7 @@ export default function ProjectDocumentsPage({
 
   return (
     <AppShell projectId={params.projectId}>
-      <section className="panel documents-page-toolbar">
+      <section className="panel module-entry-panel documents-page-toolbar">
         <div className="task-toolbar-row">
           <h3 className="section-heading">Document library</h3>
           {canWrite ? (
