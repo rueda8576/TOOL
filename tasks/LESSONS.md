@@ -32,6 +32,7 @@
 ## Collaboration preferences
 - After every implemented change, always provide the user with the exact commit message to use.
 - Commit messages must use the conventional `type(scope): subject` format, not a free-form sentence.
+- When adding a new file to a package with a coverage gate, run the exact coverage gate locally, not only the focused spec/type-check/build; `collectCoverageFrom` can fail CI even when every test passes.
 
 ## Tasks UX defaults
 - Task boards should prioritize reading state first: keep create/edit forms collapsed by default and open them explicitly via actions like `New task` or `Edit`.

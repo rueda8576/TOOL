@@ -44,7 +44,7 @@ describe("processMeetingAutomationJob", () => {
   };
 
   const makePrisma = (params: {
-    run: Record<string, unknown>;
+    run: Record<string, unknown> | null;
     meeting: Record<string, unknown> | null;
     members?: Array<Record<string, unknown>>;
     existingAction?: Record<string, unknown> | null;
@@ -86,6 +86,15 @@ describe("processMeetingAutomationJob", () => {
       tx
     };
   };
+
+  const makeMeeting = (overrides: Record<string, unknown> = {}) => ({
+    id: "meeting-1",
+    projectId: "project-1",
+    createdById: "creator-1",
+    updatedAt: new Date("2026-05-20T10:00:00.000Z"),
+    toDoMarkdown: "- Prepare protocol",
+    ...overrides
+  });
 
   afterEach(() => {
     jest.resetModules();
@@ -210,6 +219,200 @@ describe("processMeetingAutomationJob", () => {
     });
   });
 
+  it("returns without work when the automation run no longer exists", async () => {
+    const { processMeetingAutomationJob } = await loadJob();
+    const { prisma } = makePrisma({
+      run: null,
+      meeting: null
+    });
+    const emailQueue = {
+      add: jest.fn()
+    };
+
+    await processMeetingAutomationJob(prisma as never, emailQueue as never, {
+      data: { runId: "missing-run", meetingId: "meeting-1" }
+    } as never);
+
+    expect(prisma.meetingAutomationRun.update).not.toHaveBeenCalled();
+    expect(prisma.meeting.findFirst).not.toHaveBeenCalled();
+    expect(responsesCreate).not.toHaveBeenCalled();
+    expect(emailQueue.add).not.toHaveBeenCalled();
+  });
+
+  it("marks runs failed when meeting automation is disabled", async () => {
+    const { processMeetingAutomationJob } = await loadJob({
+      AI_MEETING_AUTOMATION_ENABLED: false
+    });
+    const meeting = makeMeeting();
+    const { prisma } = makePrisma({
+      run: {
+        id: "run-1",
+        status: MeetingAutomationStatus.QUEUED,
+        inputHash: makeInputHash(meeting),
+        requestedById: null,
+        startedAt: null
+      },
+      meeting
+    });
+    const emailQueue = {
+      add: jest.fn()
+    };
+
+    await processMeetingAutomationJob(prisma as never, emailQueue as never, {
+      data: { runId: "run-1", meetingId: "meeting-1" }
+    } as never);
+
+    expect(prisma.meeting.findFirst).not.toHaveBeenCalled();
+    expect(responsesCreate).not.toHaveBeenCalled();
+    expect(prisma.meetingAutomationRun.update).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({
+        status: MeetingAutomationStatus.FAILED,
+        errorMessage: "Meeting AI automation is disabled",
+        completedAt: expect.any(Date)
+      })
+    });
+  });
+
+  it.each([MeetingAutomationStatus.COMPLETED, MeetingAutomationStatus.STALE])(
+    "returns without work when the run is already %s",
+    async (status) => {
+      const { processMeetingAutomationJob } = await loadJob();
+      const meeting = makeMeeting();
+      const { prisma } = makePrisma({
+        run: {
+          id: "run-1",
+          status,
+          inputHash: makeInputHash(meeting),
+          requestedById: null,
+          startedAt: null
+        },
+        meeting
+      });
+      const emailQueue = {
+        add: jest.fn()
+      };
+
+      await processMeetingAutomationJob(prisma as never, emailQueue as never, {
+        data: { runId: "run-1", meetingId: "meeting-1" }
+      } as never);
+
+      expect(prisma.meetingAutomationRun.update).not.toHaveBeenCalled();
+      expect(prisma.meeting.findFirst).not.toHaveBeenCalled();
+      expect(responsesCreate).not.toHaveBeenCalled();
+      expect(emailQueue.add).not.toHaveBeenCalled();
+    }
+  );
+
+  it("marks runs stale when the meeting was deleted before processing", async () => {
+    const { processMeetingAutomationJob } = await loadJob();
+    const meeting = makeMeeting();
+    const { prisma } = makePrisma({
+      run: {
+        id: "run-1",
+        status: MeetingAutomationStatus.QUEUED,
+        inputHash: makeInputHash(meeting),
+        requestedById: null,
+        startedAt: null
+      },
+      meeting: null
+    });
+    const emailQueue = {
+      add: jest.fn()
+    };
+
+    await processMeetingAutomationJob(prisma as never, emailQueue as never, {
+      data: { runId: "run-1", meetingId: "meeting-1" }
+    } as never);
+
+    expect(responsesCreate).not.toHaveBeenCalled();
+    expect(emailQueue.add).not.toHaveBeenCalled();
+    expect(prisma.meetingAutomationRun.update).toHaveBeenLastCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({
+        status: MeetingAutomationStatus.STALE,
+        errorMessage: "Meeting no longer exists",
+        completedAt: expect.any(Date)
+      })
+    });
+  });
+
+  it.each([
+    ["null", null],
+    ["placeholder", "- [ ] "]
+  ])("marks runs completed with zero counts for %s TO DO markdown", async (_label, toDoMarkdown) => {
+    const { processMeetingAutomationJob } = await loadJob();
+    const meeting = makeMeeting({ toDoMarkdown });
+    const { prisma } = makePrisma({
+      run: {
+        id: "run-1",
+        status: MeetingAutomationStatus.QUEUED,
+        inputHash: makeInputHash(meeting),
+        requestedById: null,
+        startedAt: null
+      },
+      meeting
+    });
+    const emailQueue = {
+      add: jest.fn()
+    };
+
+    await processMeetingAutomationJob(prisma as never, emailQueue as never, {
+      data: { runId: "run-1", meetingId: "meeting-1" }
+    } as never);
+
+    expect(responsesCreate).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(emailQueue.add).not.toHaveBeenCalled();
+    expect(prisma.meetingAutomationRun.update).toHaveBeenLastCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({
+        status: MeetingAutomationStatus.COMPLETED,
+        createdTaskCount: 0,
+        createdActionCount: 0,
+        completedAt: expect.any(Date)
+      })
+    });
+  });
+
+  it("marks runs failed and rethrows when the OpenAI key is missing", async () => {
+    const { processMeetingAutomationJob, openAiConstructor } = await loadJob({
+      OPENAI_API_KEY: ""
+    });
+    const meeting = makeMeeting();
+    const { prisma } = makePrisma({
+      run: {
+        id: "run-1",
+        status: MeetingAutomationStatus.QUEUED,
+        inputHash: makeInputHash(meeting),
+        requestedById: null,
+        startedAt: null
+      },
+      meeting
+    });
+    const emailQueue = {
+      add: jest.fn()
+    };
+
+    await expect(
+      processMeetingAutomationJob(prisma as never, emailQueue as never, {
+        data: { runId: "run-1", meetingId: "meeting-1" }
+      } as never)
+    ).rejects.toThrow("OPENAI_API_KEY is required for meeting automation");
+
+    expect(openAiConstructor).not.toHaveBeenCalled();
+    expect(responsesCreate).not.toHaveBeenCalled();
+    expect(emailQueue.add).not.toHaveBeenCalled();
+    expect(prisma.meetingAutomationRun.update).toHaveBeenLastCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({
+        status: MeetingAutomationStatus.FAILED,
+        errorMessage: "OPENAI_API_KEY is required for meeting automation",
+        completedAt: expect.any(Date)
+      })
+    });
+  });
+
   it("marks malformed OpenAI output as failed and lets BullMQ retry", async () => {
     const { processMeetingAutomationJob } = await loadJob();
     const meeting = {
@@ -251,6 +454,163 @@ describe("processMeetingAutomationJob", () => {
       })
     });
     expect(emailQueue.add).not.toHaveBeenCalled();
+  });
+
+  it("creates unassigned and name-assigned tasks with validation fallbacks", async () => {
+    const { processMeetingAutomationJob } = await loadJob();
+    const meeting = makeMeeting({
+      toDoMarkdown: "- Unassigned low task\n- Bob owns critical task\n- Medium task"
+    });
+    const { prisma, tx } = makePrisma({
+      run: {
+        id: "run-1",
+        status: MeetingAutomationStatus.QUEUED,
+        inputHash: makeInputHash(meeting),
+        requestedById: null,
+        startedAt: new Date("2026-05-20T10:01:00.000Z")
+      },
+      meeting,
+      members: [
+        {
+          userId: "user-3",
+          user: {
+            name: "Bob",
+            email: "bob@example.com"
+          }
+        }
+      ]
+    });
+    const emailQueue = {
+      add: jest.fn().mockResolvedValue(undefined)
+    };
+    responsesCreate.mockResolvedValue({
+      output_text: JSON.stringify({
+        tasks: [
+          {
+            sourceText: "",
+            title: "Unassigned low task",
+            description: "",
+            assigneeEmail: "nobody@example.com",
+            assigneeName: "",
+            dueDate: "not-a-date",
+            priority: "low"
+          },
+          {
+            sourceText: "Bob owns critical task",
+            title: "Bob owns critical task",
+            description: "Critical description",
+            assigneeEmail: "",
+            assigneeName: "Bob",
+            dueDate: "2026-02-31",
+            priority: "critical"
+          },
+          {
+            sourceText: "Medium task",
+            title: "Medium task",
+            description: "",
+            assigneeEmail: "",
+            assigneeName: "",
+            dueDate: "",
+            priority: "medium"
+          }
+        ]
+      })
+    });
+
+    await processMeetingAutomationJob(prisma as never, emailQueue as never, {
+      data: { runId: "run-1", meetingId: "meeting-1" }
+    } as never);
+
+    expect(tx.task.create).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({
+        title: "Unassigned low task",
+        description: null,
+        priority: TaskPriority.LOW,
+        assigneeId: null,
+        dueDate: null,
+        createdById: "creator-1"
+      }),
+      select: { id: true }
+    });
+    expect(tx.meetingAction.create).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({
+        title: "Unassigned low task",
+        description: null,
+        ownerId: null,
+        aiSourceText: "Unassigned low task"
+      }),
+      select: { id: true }
+    });
+    expect(tx.task.create).toHaveBeenNthCalledWith(2, {
+      data: expect.objectContaining({
+        title: "Bob owns critical task",
+        description: "Critical description",
+        priority: TaskPriority.CRITICAL,
+        assigneeId: "user-3",
+        dueDate: null,
+        createdById: "creator-1"
+      }),
+      select: { id: true }
+    });
+    expect(tx.task.create).toHaveBeenNthCalledWith(3, {
+      data: expect.objectContaining({
+        title: "Medium task",
+        priority: TaskPriority.MEDIUM,
+        assigneeId: null,
+        dueDate: null
+      }),
+      select: { id: true }
+    });
+    expect(tx.notificationEvent.create).toHaveBeenCalledTimes(1);
+    expect(emailQueue.add).toHaveBeenCalledTimes(1);
+    expect(prisma.meetingAutomationRun.update).toHaveBeenLastCalledWith({
+      where: { id: "run-1" },
+      data: expect.objectContaining({
+        status: MeetingAutomationStatus.COMPLETED,
+        createdTaskCount: 3,
+        createdActionCount: 3
+      })
+    });
+  });
+
+  it("trims parsed OpenAI task fields, truncates long titles, and drops blank titles", async () => {
+    const { __private__ } = await loadJob();
+    const boundedSource = ` ${"s".repeat(998)} `;
+    const longTitle = ` ${"t".repeat(250)} `;
+    const boundedDescription = ` ${"d".repeat(4_998)} `;
+
+    const parsed = __private__.parseOpenAiTasks(
+      JSON.stringify({
+        tasks: [
+          {
+            sourceText: boundedSource,
+            title: longTitle,
+            description: boundedDescription,
+            assigneeEmail: " ALICE@EXAMPLE.COM ",
+            assigneeName: " Alice ",
+            dueDate: "2026-06-01",
+            priority: "medium"
+          },
+          {
+            sourceText: "blank title source",
+            title: "   ",
+            description: "",
+            assigneeEmail: "",
+            assigneeName: "",
+            dueDate: "",
+            priority: "medium"
+          }
+        ]
+      })
+    );
+
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].sourceText).toHaveLength(998);
+    expect(parsed[0].title).toHaveLength(200);
+    expect(parsed[0].description).toHaveLength(4_998);
+    expect(parsed[0].assigneeEmail).toBe("alice@example.com");
+    expect(parsed[0].assigneeName).toBe("Alice");
+    expect(parsed[0].dueDate).toBe("2026-06-01");
   });
 
   it("skips duplicate extracted items on retry by source hash", async () => {

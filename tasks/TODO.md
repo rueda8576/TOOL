@@ -1,5 +1,20 @@
 # Implementation TODO (v1 bootstrap)
 
+## Worker Meeting Automation Coverage Gate Fix (2026-05-27)
+- [x] Register the scoped CI fix for the worker coverage gate regression.
+- [x] Add focused meeting automation edge-case coverage without lowering thresholds or excluding files.
+- [x] Run worker focused spec, exact coverage gate, type-check, diff hygiene, and document results.
+
+### Review - Worker Meeting Automation Coverage Gate Fix
+- Added meeting automation worker tests for missing runs, disabled automation, completed/stale runs, deleted meetings, empty TO DO, missing OpenAI key, assignee/name matching, unassigned tasks, invalid due dates, priority mapping, source/title fallback, creator fallback, and parser trimming.
+- Kept production code, coverage thresholds, and coverage exclusions unchanged.
+- Verification:
+  - `pnpm --filter @doctoral/worker exec jest --config jest.config.ts --runInBand src/jobs/meeting-automation.job.spec.ts` passed
+  - `pnpm --filter @doctoral/worker test:coverage:gate` passed with statements `99.7%`, branches `96.93%`, functions `97.82%`, lines `99.69%`
+  - `pnpm --filter @doctoral/worker exec tsc -p tsconfig.json --noEmit` passed
+  - `git diff --check` passed
+  - Commit message: `test(worker): cover meeting automation edge cases`
+
 ## Meetings Tasks AI Automation (2026-05-27)
 - [x] Register the implementation plan for automatic AI task creation from minutes.
 - [x] Add Prisma schema/migration support for task completion timestamps, meeting automation runs, and meeting-action provenance.
