@@ -1,5 +1,27 @@
 # Implementation TODO (v1 bootstrap)
 
+## Harden Code ZIP Archive Downloads (2026-05-27)
+- [x] Register the scoped plan for diagnosing and hardening Code ZIP archive downloads.
+- [x] Add API-side archive diagnostics, multi-strategy GitLab archive attempts, and fallback ZIP generation.
+- [x] Update focused GitLab service/controller tests.
+- [x] Run static audits, focused tests, API/web type-checks, diff hygiene, and document results.
+
+### Review - Harden Code ZIP Archive Downloads
+- Resolved archive refs to commit SHAs before requesting GitLab archives, then tried three bounded strategies: `.zip` with bearer auth, no-extension archive with `Accept: application/zip`, and `.zip` with server-side OAuth query auth.
+- Added sanitized API-side diagnostics for failed archive attempts, including Atlasium ids, GitLab project id, resolved ref/SHA, upstream path, status, content type, GitLab request metadata, and a short response preview.
+- Added a controlled Atlasium ZIP fallback built from GitLab tree/raw-file APIs with conservative file and byte limits.
+- Preserved existing mappings for non-406 repository access failures and returned a controlled JSON error with `gitlab_archive_406` for persistent archive negotiation failures.
+- Captured the production correction pattern in `tasks/LESSONS.md`.
+- Verification:
+  - Static audit confirmed the old restrictive archive media-range header and `GITLAB_ARCHIVE_ACCEPT_HEADER` are absent.
+  - Static audit confirmed `/repository/archive.zip?sha=...`, no-extension retry, query-auth retry, fallback, and `gitlab_archive_406` diagnostics are present.
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/gitlab/gitlab.service.spec.ts -t "archive"` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/gitlab.controller.http.spec.ts -t "archive"` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `git diff --check` passed
+  - Commit message: `fix(code): harden gitlab archive downloads`
+
 ## Code ZIP Archive Accept Negotiation (2026-05-27)
 - [x] Register the scoped production fix for Code ZIP `406 Not Acceptable`.
 - [x] Relax repository archive `Accept` negotiation in the web helper and API GitLab proxy.

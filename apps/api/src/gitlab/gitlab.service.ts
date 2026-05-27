@@ -4,11 +4,13 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException
 } from "@nestjs/common";
 import { GitLabConnection, GlobalRole, Prisma, ProjectRole } from "@prisma/client";
+import AdmZip from "adm-zip";
 
 import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
@@ -21,7 +23,8 @@ import { CreateRepositoryBranchDto } from "./dto/create-repository-branch.dto";
 import { CreateRepositoryMergeRequestDto } from "./dto/create-repository-merge-request.dto";
 import { LinkProjectRepositoryDto } from "./dto/link-project-repository.dto";
 
-const GITLAB_ARCHIVE_ACCEPT_HEADER = "*/*";
+const GITLAB_ARCHIVE_FALLBACK_MAX_FILES = 2000;
+const GITLAB_ARCHIVE_FALLBACK_MAX_BYTES = 50 * 1024 * 1024;
 
 type GitlabOAuthTokenPayload = {
   access_token: string;
@@ -238,7 +241,13 @@ class GitlabApiError extends Error {
   constructor(
     readonly status: number,
     readonly responseBody: string,
-    message?: string
+    message?: string,
+    readonly metadata?: {
+      contentType: string | null;
+      requestId: string | null;
+      gitlabMeta: string | null;
+      path: string;
+    }
   ) {
     super(message ?? responseBody ?? `GitLab API error (${status})`);
   }
@@ -246,6 +255,7 @@ class GitlabApiError extends Error {
 
 @Injectable()
 export class GitlabService {
+  private readonly logger = new Logger(GitlabService.name);
   private readonly refreshConnectionByUserId = new Map<string, Promise<GitLabConnection>>();
 
   constructor(
@@ -1146,28 +1156,227 @@ export class GitlabService {
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
       const resolvedRef = ref?.trim() || repository.defaultBranch;
-      const search = new URLSearchParams({ sha: resolvedRef });
-
+      let archiveSha: string;
       try {
-        const archive = await this.executeGitlabBinaryRequest(
-          accessToken,
-          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/archive.zip?${search.toString()}`,
-          {
-            headers: {
-              Accept: GITLAB_ARCHIVE_ACCEPT_HEADER
-            }
-          }
-        );
-
-        return {
-          buffer: archive.buffer,
-          fileName: this.buildRepositoryArchiveFileName(repository.pathWithNamespace, resolvedRef),
-          contentType: archive.contentType ?? "application/zip"
-        };
+        archiveSha = await this.resolveRepositoryArchiveSha(repository, resolvedRef, accessToken);
       } catch (error) {
         throw this.mapRepositoryAccessError(error);
       }
+
+      const attempts: Array<{
+        label: string;
+        path: string;
+        accept: string;
+        authMode?: "header" | "query";
+      }> = [
+        {
+          label: "archive_zip_header_auth",
+          path: this.buildRepositoryArchivePath(repository.gitlabProjectId, archiveSha, "zip"),
+          accept: "*/*"
+        },
+        {
+          label: "archive_no_extension_accept_zip",
+          path: this.buildRepositoryArchivePath(repository.gitlabProjectId, archiveSha),
+          accept: "application/zip"
+        },
+        {
+          label: "archive_zip_query_auth",
+          path: this.buildRepositoryArchivePath(repository.gitlabProjectId, archiveSha, "zip"),
+          accept: "*/*",
+          authMode: "query"
+        }
+      ];
+
+      for (const attempt of attempts) {
+        try {
+          const archive = await this.executeGitlabBinaryRequest(
+            accessToken,
+            attempt.path,
+            {
+              headers: {
+                Accept: attempt.accept
+              }
+            },
+            {
+              authMode: attempt.authMode ?? "header"
+            }
+          );
+
+          return {
+            buffer: archive.buffer,
+            fileName: this.buildRepositoryArchiveFileName(repository.pathWithNamespace, resolvedRef),
+            contentType: archive.contentType ?? "application/zip"
+          };
+        } catch (error) {
+          this.logArchiveAttemptFailure({
+            attempt: attempt.label,
+            error,
+            projectId,
+            repositoryId: repository.id,
+            gitlabProjectId: repository.gitlabProjectId,
+            resolvedRef,
+            archiveSha
+          });
+          if (!(error instanceof GitlabApiError) || error.status !== 406) {
+            throw this.mapRepositoryAccessError(error);
+          }
+        }
+      }
+
+      try {
+        const buffer = await this.buildRepositoryArchiveFallback(repository, archiveSha, accessToken);
+        return {
+          buffer,
+          fileName: this.buildRepositoryArchiveFileName(repository.pathWithNamespace, resolvedRef),
+          contentType: "application/zip"
+        };
+      } catch (error) {
+        this.logArchiveAttemptFailure({
+          attempt: "atlasium_zip_fallback",
+          error,
+          projectId,
+          repositoryId: repository.id,
+          gitlabProjectId: repository.gitlabProjectId,
+          resolvedRef,
+          archiveSha
+        });
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
+        if (error instanceof GitlabApiError) {
+          if (error.status === 406) {
+            throw new BadGatewayException("GitLab archive download failed (gitlab_archive_406)");
+          }
+          throw this.mapRepositoryAccessError(error);
+        }
+        throw this.mapRepositoryAccessError(error);
+      }
     });
+  }
+
+  private buildRepositoryArchivePath(gitlabProjectId: string, sha: string, format?: "zip"): string {
+    const search = new URLSearchParams({ sha });
+    const suffix = format ? `.${format}` : "";
+    return `/projects/${encodeURIComponent(gitlabProjectId)}/repository/archive${suffix}?${search.toString()}`;
+  }
+
+  private async resolveRepositoryArchiveSha(
+    repository: RepositoryRecord,
+    resolvedRef: string,
+    accessToken: string
+  ): Promise<string> {
+    const search = new URLSearchParams({
+      per_page: "1",
+      ref_name: resolvedRef
+    });
+    const commits = await this.executeGitlabRequest<GitlabCommit[]>(
+      accessToken,
+      `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/commits?${search.toString()}`
+    );
+    const commitSha = commits[0]?.id;
+    if (!commitSha) {
+      throw new BadRequestException("GitLab archive ref could not be resolved");
+    }
+    return commitSha;
+  }
+
+  private async buildRepositoryArchiveFallback(
+    repository: RepositoryRecord,
+    archiveSha: string,
+    accessToken: string
+  ): Promise<Buffer> {
+    const zip = new AdmZip();
+    let page = 1;
+    let fileCount = 0;
+    let totalBytes = 0;
+
+    while (true) {
+      const search = new URLSearchParams({
+        recursive: "true",
+        per_page: "100",
+        page: String(page),
+        ref: archiveSha
+      });
+      const entries = await this.executeGitlabRequest<GitlabTreeNode[]>(
+        accessToken,
+        `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/tree?${search.toString()}`
+      );
+      const files = entries.filter((entry) => entry.type === "blob");
+
+      for (const file of files) {
+        fileCount += 1;
+        if (fileCount > GITLAB_ARCHIVE_FALLBACK_MAX_FILES) {
+          throw new BadRequestException("GitLab archive fallback exceeded file limit (gitlab_archive_fallback_file_limit)");
+        }
+
+        const rawSearch = new URLSearchParams({ ref: archiveSha });
+        const rawFile = await this.executeGitlabBinaryRequest(
+          accessToken,
+          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/files/${encodeURIComponent(file.path)}/raw?${rawSearch.toString()}`,
+          {
+            headers: {
+              Accept: "*/*"
+            }
+          }
+        );
+        totalBytes += rawFile.buffer.length;
+        if (totalBytes > GITLAB_ARCHIVE_FALLBACK_MAX_BYTES) {
+          throw new BadRequestException("GitLab archive fallback exceeded size limit (gitlab_archive_fallback_size_limit)");
+        }
+        zip.addFile(file.path, rawFile.buffer);
+      }
+
+      if (entries.length < 100) {
+        break;
+      }
+      page += 1;
+    }
+
+    return zip.toBuffer();
+  }
+
+  private logArchiveAttemptFailure(params: {
+    attempt: string;
+    error: unknown;
+    projectId: string;
+    repositoryId: string;
+    gitlabProjectId: string;
+    resolvedRef: string;
+    archiveSha: string;
+  }): void {
+    if (params.error instanceof GitlabApiError) {
+      this.logger.warn(
+        JSON.stringify({
+          code: params.error.status === 406 ? "gitlab_archive_406" : "gitlab_archive_upstream_error",
+          attempt: params.attempt,
+          projectId: params.projectId,
+          repositoryId: params.repositoryId,
+          gitlabProjectId: params.gitlabProjectId,
+          resolvedRef: params.resolvedRef,
+          archiveSha: params.archiveSha,
+          upstreamPath: params.error.metadata?.path ?? null,
+          upstreamStatus: params.error.status,
+          upstreamContentType: params.error.metadata?.contentType ?? null,
+          upstreamRequestId: params.error.metadata?.requestId ?? null,
+          upstreamGitlabMeta: params.error.metadata?.gitlabMeta ?? null,
+          responsePreview: params.error.responseBody.slice(0, 300)
+        })
+      );
+      return;
+    }
+
+    this.logger.warn(
+      JSON.stringify({
+        code: "gitlab_archive_proxy_error",
+        attempt: params.attempt,
+        projectId: params.projectId,
+        repositoryId: params.repositoryId,
+        gitlabProjectId: params.gitlabProjectId,
+        resolvedRef: params.resolvedRef,
+        archiveSha: params.archiveSha,
+        message: params.error instanceof Error ? params.error.message : String(params.error)
+      })
+    );
   }
 
   async createBranch(
@@ -1544,20 +1753,32 @@ export class GitlabService {
   private async executeGitlabBinaryRequest(
     accessToken: string,
     path: string,
-    init?: RequestInit
+    init?: RequestInit,
+    options?: { authMode?: "header" | "query" }
   ): Promise<{ buffer: Buffer; contentType: string | null }> {
-    const response = await fetch(`${this.getGitlabApiBaseUrl()}/api/v4${path}`, {
+    const url = new URL(`${this.getGitlabApiBaseUrl()}/api/v4${path}`);
+    const authMode = options?.authMode ?? "header";
+    if (authMode === "query") {
+      url.searchParams.set("access_token", accessToken);
+    }
+
+    const response = await fetch(url.toString(), {
       ...init,
       headers: {
         Accept: "application/octet-stream",
-        Authorization: `Bearer ${accessToken}`,
+        ...(authMode === "header" ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...(init?.headers ?? {})
       }
     });
 
     if (!response.ok) {
       const text = await response.text();
-      throw new GitlabApiError(response.status, text, text || `GitLab API error (${response.status})`);
+      throw new GitlabApiError(response.status, text, text || `GitLab API error (${response.status})`, {
+        contentType: response.headers.get("content-type"),
+        requestId: response.headers.get("x-request-id"),
+        gitlabMeta: response.headers.get("x-gitlab-meta"),
+        path
+      });
     }
 
     const arrayBuffer = await response.arrayBuffer();

@@ -177,6 +177,7 @@
 
 ## Managed GitLab sync
 - For GitLab endpoints that encode the binary format in the URL (for example `/repository/archive.zip`), prefer a neutral `Accept: */*` unless the endpoint explicitly requires stricter content negotiation.
+- If a production GitLab archive download keeps failing after header negotiation fixes, do not keep guessing from the UI; add API-side diagnostics with upstream request ids, resolve branch refs to commit SHAs, and provide bounded server-side fallbacks using already-working tree/raw APIs.
 - In GitLab projects that inherit access from a managed parent group, do not blindly add or downgrade direct project memberships for users who already have sufficient inherited access; inspect `/members/all` and treat inherited/effective access as satisfying the desired role before issuing `POST`/`PUT`.
 - When frontend API helpers surface Nest error responses, parse structured JSON `message` payloads instead of dumping the raw JSON string; otherwise operators lose the actionable GitLab error behind a generic blob.
 - For Atlasium-managed GitLab, web SSO and CLI Git authentication are different surfaces: Atlasium OIDC should own GitLab web login, SSH keys remain the recommended CLI path, and HTTPS Basic Auth only works with a GitLab-local password or PAT.

@@ -1,4 +1,4 @@
-import { INestApplication } from "@nestjs/common";
+import { BadGatewayException, INestApplication } from "@nestjs/common";
 import request from "supertest";
 
 import { GitlabController } from "../../src/gitlab/gitlab.controller";
@@ -632,5 +632,24 @@ describe("GitlabController HTTP", () => {
     expect(archive.headers["content-type"]).toContain("application/zip");
     expect(archive.headers["content-disposition"]).toBe("attachment; filename=\"atlasium-nav-main.zip\"");
     expect(mergeRequest.body.id).toBe(8);
+  });
+
+  it("returns a controlled JSON error when repository archive download fails", async () => {
+    gitlabService.getRepositoryArchive.mockRejectedValue(
+      new BadGatewayException("GitLab archive download failed (gitlab_archive_406)")
+    );
+
+    const response = await request(app.getHttpServer())
+      .get("/projects/project-1/repository/archive")
+      .query({ ref: "main" })
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(502);
+
+    expect(response.headers["content-type"]).toContain("application/json");
+    expect(response.body).toEqual({
+      message: "GitLab archive download failed (gitlab_archive_406)",
+      error: "Bad Gateway",
+      statusCode: 502
+    });
   });
 });

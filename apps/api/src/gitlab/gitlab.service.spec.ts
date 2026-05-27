@@ -3,10 +3,12 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException
 } from "@nestjs/common";
+import AdmZip from "adm-zip";
 
 import { encryptValue } from "../common/crypto";
 import * as envModule from "../config/env";
@@ -134,6 +136,7 @@ describe("GitlabService", () => {
     process.env.GITLAB_MANAGED_GROUP_NAME = "Atlasium";
     process.env.JWT_SECRET = "integration-secret-123";
     fetchSpy = jest.spyOn(global, "fetch");
+    jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
   });
 
   afterEach(() => {
@@ -1546,11 +1549,24 @@ describe("GitlabService", () => {
         return callback("user-token");
       });
 
-    fetchSpy.mockResolvedValueOnce(
-      binaryResponse(200, new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
-        "content-type": "application/zip"
-      }) as Response
-    );
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse(200, [
+          {
+            id: "commit-sha-1",
+            short_id: "commit",
+            title: "Export",
+            message: "Export",
+            authored_date: "2026-03-31T18:00:00.000Z",
+            author_name: "Luis"
+          }
+        ]) as Response
+      )
+      .mockResolvedValueOnce(
+        binaryResponse(200, new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          "content-type": "application/zip"
+        }) as Response
+      );
 
     await expect(
       service.getRepositoryArchive(
@@ -1567,8 +1583,18 @@ describe("GitlabService", () => {
       contentType: "application/zip"
     });
 
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      1,
+      "https://git.atlasium.info/api/v4/projects/123/repository/commits?per_page=1&ref_name=feature%2Fexport",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: "application/json",
+          Authorization: "Bearer user-token"
+        })
+      })
+    );
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://git.atlasium.info/api/v4/projects/123/repository/archive.zip?sha=feature%2Fexport",
+      "https://git.atlasium.info/api/v4/projects/123/repository/archive.zip?sha=commit-sha-1",
       expect.objectContaining({
         headers: expect.objectContaining({
           Accept: "*/*",
@@ -1576,6 +1602,191 @@ describe("GitlabService", () => {
         })
       })
     );
+  });
+
+  it("retries repository archives with no-extension format negotiation after a 406", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse(200, [
+          {
+            id: "commit-sha-2",
+            short_id: "commit",
+            title: "Main",
+            message: "Main",
+            authored_date: "2026-03-31T18:00:00.000Z",
+            author_name: "Luis"
+          }
+        ]) as Response
+      )
+      .mockResolvedValueOnce(jsonResponse(406, { error: "Not acceptable" }) as Response)
+      .mockResolvedValueOnce(
+        binaryResponse(200, new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          "content-type": "application/zip"
+        }) as Response
+      );
+
+    await expect(
+      service.getRepositoryArchive("project-1", "main", {
+        userId: "reader-1",
+        globalRole: "reader"
+      } as any)
+    ).resolves.toMatchObject({
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+      contentType: "application/zip"
+    });
+
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
+      "https://git.atlasium.info/api/v4/projects/123/repository/archive?sha=commit-sha-2",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: "application/zip",
+          Authorization: "Bearer user-token"
+        })
+      })
+    );
+  });
+
+  it("keeps existing repository access mappings for non-406 archive failures", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse(200, [
+          {
+            id: "commit-sha-forbidden",
+            short_id: "commit",
+            title: "Main",
+            message: "Main",
+            authored_date: "2026-03-31T18:00:00.000Z",
+            author_name: "Luis"
+          }
+        ]) as Response
+      )
+      .mockResolvedValueOnce(jsonResponse(403, { message: "forbidden" }) as Response);
+
+    await expect(
+      service.getRepositoryArchive("project-1", "main", {
+        userId: "reader-1",
+        globalRole: "reader"
+      } as any)
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries repository archives with OAuth query authentication after repeated 406 responses", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse(200, [
+          {
+            id: "commit-sha-3",
+            short_id: "commit",
+            title: "Main",
+            message: "Main",
+            authored_date: "2026-03-31T18:00:00.000Z",
+            author_name: "Luis"
+          }
+        ]) as Response
+      )
+      .mockResolvedValueOnce(jsonResponse(406, { error: "Not acceptable" }) as Response)
+      .mockResolvedValueOnce(jsonResponse(406, { error: "Still not acceptable" }) as Response)
+      .mockResolvedValueOnce(
+        binaryResponse(200, new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          "content-type": "application/zip"
+        }) as Response
+      );
+
+    await expect(
+      service.getRepositoryArchive("project-1", "main", {
+        userId: "reader-1",
+        globalRole: "reader"
+      } as any)
+    ).resolves.toMatchObject({
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+      contentType: "application/zip"
+    });
+
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      4,
+      "https://git.atlasium.info/api/v4/projects/123/repository/archive.zip?sha=commit-sha-3&access_token=user-token",
+      expect.objectContaining({
+        headers: expect.not.objectContaining({
+          Authorization: expect.any(String)
+        })
+      })
+    );
+  });
+
+  it("builds a fallback ZIP from repository tree and raw files after archive 406 responses", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse(200, [
+          {
+            id: "commit-sha-4",
+            short_id: "commit",
+            title: "Main",
+            message: "Main",
+            authored_date: "2026-03-31T18:00:00.000Z",
+            author_name: "Luis"
+          }
+        ]) as Response
+      )
+      .mockResolvedValueOnce(jsonResponse(406, { error: "Not acceptable" }) as Response)
+      .mockResolvedValueOnce(jsonResponse(406, { error: "Still not acceptable" }) as Response)
+      .mockResolvedValueOnce(jsonResponse(406, { error: "Query auth not acceptable" }) as Response)
+      .mockResolvedValueOnce(
+        jsonResponse(200, [
+          { id: "blob-1", name: "README.md", type: "blob", path: "README.md", mode: "100644" },
+          { id: "blob-2", name: "main.ts", type: "blob", path: "src/main.ts", mode: "100644" }
+        ]) as Response
+      )
+      .mockResolvedValueOnce(binaryResponse(200, new TextEncoder().encode("# Navigation\n")) as Response)
+      .mockResolvedValueOnce(binaryResponse(200, new TextEncoder().encode("console.log('nav');\n")) as Response);
+
+    const archive = await service.getRepositoryArchive("project-1", "main", {
+      userId: "reader-1",
+      globalRole: "reader"
+    } as any);
+    const zip = new AdmZip(archive.buffer);
+
+    expect(archive.fileName).toBe("atlasium-nav-main.zip");
+    expect(archive.contentType).toBe("application/zip");
+    expect(zip.readAsText("README.md")).toBe("# Navigation\n");
+    expect(zip.readAsText("src/main.ts")).toBe("console.log('nav');\n");
   });
 
   it("maps repository access failures from repository read and write operations", async () => {
