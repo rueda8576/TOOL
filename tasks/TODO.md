@@ -1,5 +1,23 @@
 # Implementation TODO (v1 bootstrap)
 
+## Code ZIP Archive Accept Negotiation (2026-05-27)
+- [x] Register the scoped production fix for Code ZIP `406 Not Acceptable`.
+- [x] Relax repository archive `Accept` negotiation in the web helper and API GitLab proxy.
+- [x] Update archive tests/static audits and run verification.
+
+### Review - Code ZIP Archive Accept Negotiation
+- Changed repository archive download requests to use neutral `Accept: */*` while keeping GitLab's explicit `/repository/archive.zip` URL format.
+- Preserved the Atlasium API proxy route, repository-scoped download flow, and ZIP fallback content type.
+- Verification:
+  - Static audit confirmed the old restrictive archive media-range header no longer remains.
+  - Static audit confirmed GitLab archive requests still use `/repository/archive.zip`.
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/gitlab/gitlab.service.spec.ts -t "downloads the repository archive"` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/gitlab.controller.http.spec.ts -t "archive"` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `git diff --check` passed
+  - Commit message: `fix(code): relax archive accept negotiation`
+
 ## Align Overview Entry Accent (2026-05-27)
 - [x] Register the scoped fix for the Overview module entry accent color.
 - [x] Preserve the Overview soft panel border while forcing the shared amber top accent color.
@@ -179,7 +197,7 @@
 - [x] Run API tests, API/web type-check, web build, static audits, and diff hygiene checks.
 
 ### Review - Code ZIP Download + Word Wrap
-- Repository archive downloads now request `application/zip, application/octet-stream, */*` from both the web helper and the API-to-GitLab binary request.
+- Repository archive downloads were updated to request ZIP-compatible binary content from both the web helper and the API-to-GitLab binary request.
 - The archive service test now asserts the ZIP-compatible `Accept` header while preserving the existing archive URL, buffer, filename, and content-type behavior.
 - The Code file viewer now includes a word-wrap toggle button with `WrapText`, `aria-pressed`, and `Alt+Z` support for selected text files.
 - Word wrap defaults off, persists in `localStorage` under `atlasium_code_file_word_wrap`, and wrapped mode stays contained inside the viewer.

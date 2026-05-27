@@ -1,6 +1,6 @@
 import { authFetch, authFetchResponse } from "./client-api";
 
-const REPOSITORY_ARCHIVE_ACCEPT_HEADER = "application/zip, application/octet-stream, */*";
+const REPOSITORY_ARCHIVE_ACCEPT_HEADER = "*/*";
 
 const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
   avif: "image/avif",

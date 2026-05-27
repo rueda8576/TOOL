@@ -1571,7 +1571,7 @@ describe("GitlabService", () => {
       "https://git.atlasium.info/api/v4/projects/123/repository/archive.zip?sha=feature%2Fexport",
       expect.objectContaining({
         headers: expect.objectContaining({
-          Accept: "application/zip, application/octet-stream, */*",
+          Accept: "*/*",
           Authorization: "Bearer user-token"
         })
       })

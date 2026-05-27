@@ -21,7 +21,7 @@ import { CreateRepositoryBranchDto } from "./dto/create-repository-branch.dto";
 import { CreateRepositoryMergeRequestDto } from "./dto/create-repository-merge-request.dto";
 import { LinkProjectRepositoryDto } from "./dto/link-project-repository.dto";
 
-const GITLAB_ARCHIVE_ACCEPT_HEADER = "application/zip, application/octet-stream, */*";
+const GITLAB_ARCHIVE_ACCEPT_HEADER = "*/*";
 
 type GitlabOAuthTokenPayload = {
   access_token: string;
