@@ -1,5 +1,19 @@
 # Implementation TODO (v1 bootstrap)
 
+## Align Overview Entry Accent (2026-05-27)
+- [x] Register the scoped fix for the Overview module entry accent color.
+- [x] Preserve the Overview soft panel border while forcing the shared amber top accent color.
+- [x] Run static CSS audits and diff hygiene checks.
+
+### Review - Align Overview Entry Accent
+- Fixed the Overview entry accent color by adding a composed `.overview-command-band.module-entry-panel` rule for `border-top-color: var(--brand)`.
+- Kept the softer `border-color` on the rest of the Overview panel border.
+- Verification:
+  - Static audit confirmed `.module-entry-panel` still owns the only `border-top: 3px solid var(--brand)` declaration.
+  - Static audit confirmed Overview now has a side-specific `border-top-color: var(--brand)` override without extra wrappers or duplicated border width.
+  - `git diff --check` passed
+  - Commit message: `style(web): align overview entry accent`
+
 ## Restore Module Entry Accent (2026-05-27)
 - [x] Register the scoped plan for restoring the amber entry line on module panels.
 - [x] Add a shared module entry panel accent class.

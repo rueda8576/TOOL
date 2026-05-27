@@ -17,6 +17,7 @@
 - Prefer shared UI components for repeated project-context text (e.g., project header subtitle) to prevent drift.
 - Keep action button labels concise; do not append keyboard shortcut hints in the visible label unless explicitly requested.
 - Do not split a dense technical settings workflow into competing nested cards inside a narrow secondary column. If a section combines long labels, action buttons, and optional detail, merge the related controls into one coherent panel and collapse heavy forms by default.
+- When adding shared visual accent classes, audit later page-specific shorthand rules like `border-color`; they can silently override one side of the shared accent through CSS cascade.
 
 ## Anti-vibe-coded product quality
 - Avoid novelty-first UI: no random purple gradients, sparkles, emojis-as-UI, fake testimonials, decorative social links, or generic launch-copy.

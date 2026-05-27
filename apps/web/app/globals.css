@@ -950,6 +950,10 @@ textarea {
   border-color: rgba(169, 95, 11, 0.32);
 }
 
+.overview-command-band.module-entry-panel {
+  border-top-color: var(--brand);
+}
+
 .overview-command-main {
   min-width: 0;
 }
