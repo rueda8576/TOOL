@@ -1,5 +1,23 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Username Settings Copy (2026-05-27)
+- [x] Register the scoped plan for the Profile account username copy change.
+- [x] Update the Profile username field from Git username wording to Atlasium username wording.
+- [x] Run web type-check, production build, static audit, and diff hygiene checks.
+- [x] Document verification results and commit message.
+
+### Review - Atlasium Username Settings Copy
+- Updated the Profile account form so the editable field is labeled `Atlasium username` instead of `Git username`.
+- Updated helper and success copy to describe Atlasium as the source identity that automatically syncs to the managed GitLab identity.
+- Kept the existing `/auth/me/username` frontend helper and backend sync behavior unchanged; no separate Git username field was added.
+- Verification:
+  - Static audit confirmed `Git username` no longer appears in `apps/web/components/account-settings-surface.tsx`.
+  - Static audit confirmed `updateAccountUsername` is still used for the Profile username form.
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - `git diff --check` passed
+  - Commit message: `fix(web): clarify atlasium username settings`
+
 ## Google Search Favicon Fix (2026-05-26)
 - [x] Inspect current Atlasium metadata and favicon assets.
 - [x] Add crawler-friendly favicon files and explicit metadata links.

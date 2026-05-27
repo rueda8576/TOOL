@@ -399,7 +399,7 @@ export function AccountSettingsSurface({
       setUsernameDraft(updated.username);
       setHttpsCloneUsername(updated.username);
       persistStoredUser(updated);
-      setUsernameSuccess("Username updated.");
+      setUsernameSuccess("Atlasium username updated.");
       if (connection?.connected) {
         await loadConnection(token);
       }
@@ -633,7 +633,7 @@ export function AccountSettingsSurface({
                 }}
               >
                 <label>
-                  Git username
+                  Atlasium username
                   <input
                     className="input"
                     value={usernameDraft}
@@ -644,12 +644,12 @@ export function AccountSettingsSurface({
                     spellCheck={false}
                   />
                 </label>
-                <p className="text-muted">Used as your GitLab username and for HTTPS clone prompts.</p>
+                <p className="text-muted">Identifies your Atlasium account and automatically syncs to your managed GitLab identity.</p>
                 {usernameError ? <p className="alert alert-error">{usernameError}</p> : null}
                 {usernameSuccess ? <p className="alert alert-success">{usernameSuccess}</p> : null}
                 <div className="button-row">
                   <button className="button" type="submit" disabled={usernameSubmitting || usernameDraft.trim() === profile.username}>
-                    {usernameSubmitting ? "Saving..." : "Save username"}
+                    {usernameSubmitting ? "Saving..." : "Save Atlasium username"}
                   </button>
                 </div>
               </form>
