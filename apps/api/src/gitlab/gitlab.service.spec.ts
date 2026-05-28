@@ -2141,6 +2141,28 @@ describe("GitlabService", () => {
     );
   });
 
+  it.each([
+    [{ name: "   ", sourceRef: "main" }, "Branch name is required."],
+    [{ name: "feature/nav", sourceRef: "   " }, "Source ref is required."]
+  ])("rejects invalid repository branch creation payloads", async (dto, message) => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+
+    await expect(
+      service.createBranch(
+        "project-1",
+        dto,
+        {
+          userId: "user-1",
+          globalRole: "editor"
+        } as any
+      )
+    ).rejects.toThrow(message);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect((service as any).auditService.log).not.toHaveBeenCalled();
+  });
+
   it("creates a merge request and writes an audit log", async () => {
     const service = makeService();
     jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
@@ -2198,6 +2220,42 @@ describe("GitlabService", () => {
         action: "project.repository.merge_request.create"
       })
     );
+  });
+
+  it.each([
+    [
+      { sourceBranch: "   ", targetBranch: "main", title: "Merge navigation updates" },
+      "Source branch is required."
+    ],
+    [
+      { sourceBranch: "feature/nav", targetBranch: "   ", title: "Merge navigation updates" },
+      "Target branch is required."
+    ],
+    [
+      { sourceBranch: "feature/nav", targetBranch: "main", title: "   " },
+      "Merge request title is required."
+    ],
+    [
+      { sourceBranch: "main", targetBranch: "main", title: "Merge navigation updates" },
+      "Source and target branches must be different."
+    ]
+  ])("rejects invalid merge request creation payloads", async (dto, message) => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);
+
+    await expect(
+      service.createMergeRequest(
+        "project-1",
+        dto,
+        {
+          userId: "user-1",
+          globalRole: "editor"
+        } as any
+      )
+    ).rejects.toThrow(message);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect((service as any).auditService.log).not.toHaveBeenCalled();
   });
 
   it("rejects manual repository linking and searching flows for managed GitLab projects", async () => {

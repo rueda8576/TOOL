@@ -125,7 +125,7 @@ const TAB_LABELS: Record<CodeTab, string> = {
   files: "Files",
   commits: "Commits",
   branches: "Branches",
-  "merge-requests": "Merge Requests"
+  "merge-requests": "MRs"
 };
 
 const CODE_FILE_WORD_WRAP_STORAGE_KEY = "atlasium_code_file_word_wrap";
@@ -199,6 +199,42 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const selectedFileImageMimeType =
     selectedFile && selectedFile.binary ? getRepositoryImageMimeType(selectedFile.fileName || selectedFile.filePath) : null;
   const selectedFileKindLabel = selectedFile ? (selectedFile.binary ? (selectedFileImageMimeType ? "Image" : "Binary") : "Text") : "";
+  const trimmedBranchSourceRef = currentBranchSourceRef.trim();
+  const trimmedMergeRequestSourceBranch = currentMergeRequestSourceBranch.trim();
+  const trimmedMergeRequestTargetBranch = currentMergeRequestTargetBranch.trim();
+  const branchActionDisabledReason = !canWrite
+    ? "Writer access is required to create branches."
+    : !gitlabConnected
+      ? "Connect GitLab API access before creating branches."
+      : contentLoading
+        ? "Repository refs are still loading."
+        : !trimmedBranchSourceRef
+          ? "Load a source ref before creating a branch."
+          : null;
+  const mergeRequestActionDisabledReason = !canWrite
+    ? "Writer access is required to create merge requests."
+    : !gitlabConnected
+      ? "Connect GitLab API access before creating merge requests."
+      : contentLoading
+        ? "Repository refs are still loading."
+        : mergeRequestsLoading
+          ? "Merge requests are still loading."
+          : branches.length < 2
+            ? "Create another branch before opening a merge request."
+            : !trimmedMergeRequestSourceBranch || !trimmedMergeRequestTargetBranch
+              ? "Select source and target branches before opening a merge request."
+              : trimmedMergeRequestSourceBranch === trimmedMergeRequestTargetBranch
+                ? "Source and target branches must be different."
+                : null;
+  const canOpenBranchModal = branchActionDisabledReason === null;
+  const canOpenMergeRequestModal = mergeRequestActionDisabledReason === null;
+  const canSubmitBranch = !creatingBranch && newBranchName.trim().length > 0 && trimmedBranchSourceRef.length > 0;
+  const canSubmitMergeRequest =
+    !creatingMergeRequest &&
+    mergeRequestTitle.trim().length > 0 &&
+    trimmedMergeRequestSourceBranch.length > 0 &&
+    trimmedMergeRequestTargetBranch.length > 0 &&
+    trimmedMergeRequestSourceBranch !== trimmedMergeRequestTargetBranch;
 
   const resetRepositoryWorkspace = useCallback((): void => {
     setBranches([]);
@@ -559,13 +595,19 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     event.preventDefault();
     if (!token) { setError("Missing session token. Please sign in again."); return; }
     if (!connectedRepository) { setError("Select a repository before creating branches."); return; }
+    const branchName = newBranchName.trim();
+    const sourceRef = currentBranchSourceRef.trim();
+    if (!branchName) { setError("Branch name is required."); return; }
+    if (!sourceRef) { setError("Source ref is required."); return; }
+    if (!gitlabConnected) { setError("Connect GitLab API access before creating branches."); return; }
+    if (!canWrite) { setError("Writer access is required to create branches."); return; }
     setCreatingBranch(true);
     setError(null);
     setSuccess(null);
     try {
       const created = await createRepositoryBranch(params.projectId, connectedRepository.id, token, {
-        name: newBranchName.trim(),
-        sourceRef: currentBranchSourceRef.trim()
+        name: branchName,
+        sourceRef
       });
       setNewBranchName("");
       setBrowserRef(created.name);
@@ -585,20 +627,30 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     event.preventDefault();
     if (!token) { setError("Missing session token. Please sign in again."); return; }
     if (!connectedRepository) { setError("Select a repository before creating merge requests."); return; }
+    const sourceBranch = currentMergeRequestSourceBranch.trim();
+    const targetBranch = currentMergeRequestTargetBranch.trim();
+    const title = mergeRequestTitle.trim();
+    if (!sourceBranch) { setError("Source branch is required."); return; }
+    if (!targetBranch) { setError("Target branch is required."); return; }
+    if (sourceBranch === targetBranch) { setError("Source and target branches must be different."); return; }
+    if (!title) { setError("Merge request title is required."); return; }
+    if (!gitlabConnected) { setError("Connect GitLab API access before creating merge requests."); return; }
+    if (!canWrite) { setError("Writer access is required to create merge requests."); return; }
     setCreatingMergeRequest(true);
     setError(null);
     setSuccess(null);
     try {
       const mergeRequest = await createRepositoryMergeRequest(params.projectId, connectedRepository.id, token, {
-        sourceBranch: currentMergeRequestSourceBranch.trim(),
-        targetBranch: currentMergeRequestTargetBranch.trim(),
-        title: mergeRequestTitle.trim(),
+        sourceBranch,
+        targetBranch,
+        title,
         description: mergeRequestDescription.trim() || undefined
       });
       setMergeRequestTitle("");
       setMergeRequestDescription("");
       setShowMRModal(false);
-      await loadMergeRequests(token, connectedRepository.id, mergeRequestFilter);
+      setMergeRequestFilter("opened");
+      await loadMergeRequests(token, connectedRepository.id, "opened");
       setSuccess(`Merge request !${mergeRequest.iid} created.`);
     } catch (mergeRequestError) {
       setError((mergeRequestError as Error).message || "Unable to create the merge request.");
@@ -677,6 +729,14 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                         setSelectedFile(null);
                         setContentError(null);
                         setMergeRequestsError(null);
+                        setNewBranchName("");
+                        setNewBranchSourceRef("");
+                        setMergeRequestSourceBranch("");
+                        setMergeRequestTargetBranch("");
+                        setMergeRequestTitle("");
+                        setMergeRequestDescription("");
+                        setShowBranchModal(false);
+                        setShowMRModal(false);
                       }}
                     >
                       {repositories.map((repository) => (
@@ -717,6 +777,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                         type="button"
                         className={`code-tab${activeTab === tab ? " active" : ""}`}
                         onClick={() => setActiveTab(tab)}
+                        aria-label={tab === "merge-requests" ? "Merge requests" : undefined}
                       >
                         {icons[tab]}
                         {TAB_LABELS[tab]}
@@ -748,21 +809,6 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     </label>
                   ) : null}
                   {activeTab === "files" ? <code className="code-current-path">/{browserPath || ""}</code> : null}
-                  {activeTab === "merge-requests" ? (
-                    <label className="code-filter-label">
-                      State
-                      <select
-                        className="input code-ref-select"
-                        value={mergeRequestFilter}
-                        onChange={(event) => setMergeRequestFilter(event.target.value as RepositoryMergeRequestState)}
-                      >
-                        <option value="opened">Opened</option>
-                        <option value="merged">Merged</option>
-                        <option value="closed">Closed</option>
-                        <option value="all">All</option>
-                      </select>
-                    </label>
-                  ) : null}
                 </div>
 
                 <div className="code-cockpit-actions">
@@ -790,18 +836,6 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     <Download size={16} aria-hidden="true" />
                     {downloadingArchive ? "Downloading..." : "ZIP"}
                   </button>
-                  {activeTab === "branches" && canWrite ? (
-                    <button className="button" type="button" onClick={() => setShowBranchModal(true)}>
-                      <Plus size={16} aria-hidden="true" />
-                      New branch
-                    </button>
-                  ) : null}
-                  {activeTab === "merge-requests" && canWrite ? (
-                    <button className="button" type="button" onClick={() => setShowMRModal(true)}>
-                      <Plus size={16} aria-hidden="true" />
-                      Create MR
-                    </button>
-                  ) : null}
                 </div>
               </div>
 
@@ -947,9 +981,12 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                         <p className="eyebrow">Commits</p>
                         <h3 className="section-heading">Recent history</h3>
                       </div>
-                      {contentLoading ? <span className="code-inline-status">Loading</span> : null}
+                      <div className="code-mode-header-actions">
+                        {contentLoading ? <span className="code-inline-status">Loading</span> : null}
+                      </div>
                     </div>
-                    {commits.length === 0 && !contentLoading ? <EmptyState title="No commits available" detail="This branch does not expose commits through GitLab yet." /> : null}
+                    {contentError ? <StatusLine tone="error">{contentError}</StatusLine> : null}
+                    {commits.length === 0 && !contentLoading && !contentError ? <EmptyState title="No commits available" detail="This branch does not expose commits through GitLab yet." /> : null}
                     <div className="code-commit-list">
                       {commits.map((commit) => (
                         <article key={commit.id} className="code-commit-row">
@@ -979,8 +1016,23 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                         <p className="eyebrow">Branches</p>
                         <h3 className="section-heading">Repository refs</h3>
                       </div>
-                      {contentLoading ? <span className="code-inline-status">Loading</span> : null}
+                      <div className="code-mode-header-actions">
+                        {contentLoading ? <span className="code-inline-status">Loading</span> : null}
+                        {canWrite ? (
+                          <button
+                            className="button"
+                            type="button"
+                            onClick={() => setShowBranchModal(true)}
+                            disabled={!canOpenBranchModal}
+                            title={branchActionDisabledReason ?? undefined}
+                          >
+                            <Plus size={16} aria-hidden="true" />
+                            New branch
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
+                    {contentError ? <StatusLine tone="error">{contentError}</StatusLine> : null}
                     <div className="code-branch-list">
                       {branches.map((branch) => (
                         <div key={branch.name} className="code-branch-row">
@@ -995,7 +1047,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                           {branch.webUrl ? <a className="button button-secondary" href={branch.webUrl} target="_blank" rel="noreferrer">Open</a> : null}
                         </div>
                       ))}
-                      {branches.length === 0 && !contentLoading ? <EmptyState title="No branches found" detail="GitLab did not return repository branches for this project." /> : null}
+                      {branches.length === 0 && !contentLoading && !contentError ? <EmptyState title="No branches found" detail="GitLab did not return repository branches for this project." /> : null}
                     </div>
                     {!canWrite ? <StatusLine tone="info">Reader role can browse repository content but cannot create branches.</StatusLine> : null}
                   </section>
@@ -1008,7 +1060,34 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                         <p className="eyebrow">Merge requests</p>
                         <h3 className="section-heading">Review queue</h3>
                       </div>
-                      {mergeRequestsLoading ? <span className="code-inline-status">Loading</span> : null}
+                      <div className="code-mode-header-actions">
+                        {mergeRequestsLoading ? <span className="code-inline-status">Loading</span> : null}
+                        <label className="code-filter-label">
+                          State
+                          <select
+                            className="input code-ref-select"
+                            value={mergeRequestFilter}
+                            onChange={(event) => setMergeRequestFilter(event.target.value as RepositoryMergeRequestState)}
+                          >
+                            <option value="opened">Opened</option>
+                            <option value="merged">Merged</option>
+                            <option value="closed">Closed</option>
+                            <option value="all">All</option>
+                          </select>
+                        </label>
+                        {canWrite ? (
+                          <button
+                            className="button"
+                            type="button"
+                            onClick={() => setShowMRModal(true)}
+                            disabled={!canOpenMergeRequestModal}
+                            title={mergeRequestActionDisabledReason ?? undefined}
+                          >
+                            <Plus size={16} aria-hidden="true" />
+                            Create MR
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                     {mergeRequestsError ? <StatusLine tone="error">{mergeRequestsError}</StatusLine> : null}
                     <div className="code-mr-list">
@@ -1107,7 +1186,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     </label>
                     <div className="code-mr-modal-footer">
                       <button type="button" className="button button-secondary" onClick={() => setShowBranchModal(false)}>Cancel</button>
-                      <button className="button" type="submit" disabled={creatingBranch}>{creatingBranch ? "Creating..." : "Create branch"}</button>
+                      <button className="button" type="submit" disabled={!canSubmitBranch}>{creatingBranch ? "Creating..." : "Create branch"}</button>
                     </div>
                   </form>
                 </div>
@@ -1156,7 +1235,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     </label>
                     <div className="code-mr-modal-footer">
                       <button type="button" className="button button-secondary" onClick={() => setShowMRModal(false)}>Cancel</button>
-                      <button className="button" type="submit" disabled={creatingMergeRequest}>{creatingMergeRequest ? "Creating..." : "Open merge request"}</button>
+                      <button className="button" type="submit" disabled={!canSubmitMergeRequest}>{creatingMergeRequest ? "Creating..." : "Open merge request"}</button>
                     </div>
                   </form>
                 </div>

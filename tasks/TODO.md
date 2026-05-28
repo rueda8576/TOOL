@@ -1,5 +1,26 @@
 # Implementation TODO (v1 bootstrap)
 
+## Fix Code Branches/Merge Requests Layout (2026-05-28)
+- [x] Register the scoped layout and validation fix for Code branch/MR actions.
+- [x] Move Branch/MR creation actions into their owning panels and remove cockpit overflow pressure.
+- [x] Add frontend guards for invalid branch/MR creation states and clearer repository content errors.
+- [x] Add API-side validation for empty trimmed fields and same-source-target merge requests.
+- [x] Run focused API tests, web/API type-checks, web build, diff hygiene, and document results.
+
+### Review - Fix Code Branches/Merge Requests Layout
+- Moved `New branch` and `Create MR` out of the global Code cockpit and into the `Branches` and `Merge requests` panel headers.
+- Shortened the top tab label to `MRs` while preserving the accessible `Merge requests` label, and added panel-header action wrapping to avoid the desktop scrollbar regression.
+- Added frontend guards for empty branch/MR inputs, GitLab connection/write/loading states, one-branch MR flows, and same-source-target merge requests.
+- Added API DTO/service validation for trimmed empty fields and same-source-target merge requests, with focused service and HTTP coverage.
+- Verification:
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/gitlab/gitlab.service.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/gitlab.controller.http.spec.ts` passed
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - `git diff --check` passed
+  - Commit message: `fix(code): stabilize branch and merge request actions`
+
 ## Worker Meeting Automation Coverage Gate Fix (2026-05-27)
 - [x] Register the scoped CI fix for the worker coverage gate regression.
 - [x] Add focused meeting automation edge-case coverage without lowering thresholds or excluding files.

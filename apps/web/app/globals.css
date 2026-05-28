@@ -4016,6 +4016,7 @@ body.wiki-layout-dragging * {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 .code-cockpit-state {
@@ -4049,7 +4050,7 @@ body.wiki-layout-dragging * {
 }
 
 .code-cockpit-controls {
-  grid-template-columns: minmax(0, auto) minmax(180px, 1fr) auto;
+  grid-template-columns: max-content minmax(180px, 1fr) auto;
   align-items: center;
 }
 
@@ -4133,6 +4134,8 @@ body.wiki-layout-dragging * {
 .code-tabs {
   display: flex;
   gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -4214,6 +4217,14 @@ body.wiki-layout-dragging * {
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-3);
+}
+
+.code-mode-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .code-workbench-tree-header .eyebrow,
@@ -4735,6 +4746,15 @@ body.wiki-layout-dragging * {
 
   .code-cockpit-state,
   .code-cockpit-actions {
+    justify-content: flex-start;
+  }
+
+  .code-mode-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .code-mode-header-actions {
     justify-content: flex-start;
   }
 

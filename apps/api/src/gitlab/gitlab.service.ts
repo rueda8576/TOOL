@@ -1386,6 +1386,14 @@ export class GitlabService {
     repositoryId?: string
   ): Promise<{ name: string; webUrl: string | null; default: boolean }> {
     const repository = await this.requireWritableRepository(projectId, user, repositoryId);
+    const branchName = dto.name.trim();
+    const sourceRef = dto.sourceRef.trim();
+    if (!branchName) {
+      throw new BadRequestException("Branch name is required.");
+    }
+    if (!sourceRef) {
+      throw new BadRequestException("Source ref is required.");
+    }
 
     const createdBranch = await this.withUserAccessToken(user.userId, async (accessToken) => {
       return this.executeGitlabRequest<GitlabBranch>(
@@ -1394,8 +1402,8 @@ export class GitlabService {
         {
           method: "POST",
           body: JSON.stringify({
-            branch: dto.name.trim(),
-            ref: dto.sourceRef.trim()
+            branch: branchName,
+            ref: sourceRef
           })
         }
       );
@@ -1408,7 +1416,7 @@ export class GitlabService {
       entityId: `${repository.id}:${createdBranch.name}`,
       action: "project.repository.branch.create",
       metadata: {
-        sourceRef: dto.sourceRef.trim()
+        sourceRef
       }
     });
 
@@ -1426,6 +1434,22 @@ export class GitlabService {
     repositoryId?: string
   ): Promise<{ id: number; iid: number; title: string; state: string; webUrl: string }> {
     const repository = await this.requireWritableRepository(projectId, user, repositoryId);
+    const sourceBranch = dto.sourceBranch.trim();
+    const targetBranch = dto.targetBranch.trim();
+    const title = dto.title.trim();
+    const description = dto.description?.trim() || undefined;
+    if (!sourceBranch) {
+      throw new BadRequestException("Source branch is required.");
+    }
+    if (!targetBranch) {
+      throw new BadRequestException("Target branch is required.");
+    }
+    if (!title) {
+      throw new BadRequestException("Merge request title is required.");
+    }
+    if (sourceBranch === targetBranch) {
+      throw new BadRequestException("Source and target branches must be different.");
+    }
 
     const mergeRequest = await this.withUserAccessToken(user.userId, async (accessToken) => {
       return this.executeGitlabRequest<GitlabMergeRequest>(
@@ -1434,10 +1458,10 @@ export class GitlabService {
         {
           method: "POST",
           body: JSON.stringify({
-            source_branch: dto.sourceBranch.trim(),
-            target_branch: dto.targetBranch.trim(),
-            title: dto.title.trim(),
-            description: dto.description?.trim() || undefined
+            source_branch: sourceBranch,
+            target_branch: targetBranch,
+            title,
+            description
           })
         }
       );
@@ -1451,8 +1475,8 @@ export class GitlabService {
       action: "project.repository.merge_request.create",
       metadata: {
         iid: mergeRequest.iid,
-        sourceBranch: dto.sourceBranch.trim(),
-        targetBranch: dto.targetBranch.trim()
+        sourceBranch,
+        targetBranch
       }
     });
 

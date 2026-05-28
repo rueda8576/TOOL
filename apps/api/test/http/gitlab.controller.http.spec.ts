@@ -59,6 +59,18 @@ describe("GitlabController HTTP", () => {
       .set(authHeaders("editor"))
       .send({ name: "feature/nav" })
       .expect(400);
+
+    await request(app.getHttpServer())
+      .post("/projects/project-1/repository/branches")
+      .set(authHeaders("editor"))
+      .send({ name: "   ", sourceRef: "main" })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post("/projects/project-1/repository/branches")
+      .set(authHeaders("editor"))
+      .send({ name: "feature/nav", sourceRef: "   " })
+      .expect(400);
   });
 
   it("returns 400 for malformed repository-link, merge-request-state, and archive-ref queries", async () => {
@@ -78,6 +90,20 @@ describe("GitlabController HTTP", () => {
       .get("/projects/project-1/repository/archive")
       .query({ ref: "x".repeat(256) })
       .set(authHeaders("reader"))
+      .expect(400);
+  });
+
+  it("returns 400 for malformed merge request creation payloads", async () => {
+    await request(app.getHttpServer())
+      .post("/projects/project-1/repository/merge-requests")
+      .set(authHeaders("editor"))
+      .send({ title: "Merge notes", sourceBranch: "   ", targetBranch: "main" })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post("/projects/project-1/repository/merge-requests")
+      .set(authHeaders("editor"))
+      .send({ title: "   ", sourceBranch: "feature/nav", targetBranch: "main" })
       .expect(400);
   });
 

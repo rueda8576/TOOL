@@ -102,6 +102,7 @@
 - In project-context pages, keep navigation contextual (`Overview`, module tabs) and separate global workspace navigation into an explicit `Exit project` action.
 - Centralize unsaved-change guards in a reusable hook (instead of per-page `window.confirm` duplication) so `Exit project` and `beforeunload` stay behaviorally consistent across modules.
 - In dense project workspaces like `Code`, split distinct repository activities (`files`, `commits`, `branches`, `merge requests`) into tabs with shared controls instead of stacking every panel vertically; this keeps navigation fast without hiding functionality.
+- In dense `Code` cockpits, keep global repository actions separate from view-specific creation actions; place actions like `New branch` and `Create MR` inside their owning panel headers so long tab labels and contextual buttons do not force horizontal scroll on desktop.
 
 ## Project home dashboard
 - The `/projects/:projectId` landing page should surface live, cross-module signals (recent documents, in-progress tasks, current-month meetings) rather than static module descriptions.
