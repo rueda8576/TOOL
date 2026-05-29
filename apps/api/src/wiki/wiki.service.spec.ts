@@ -181,7 +181,8 @@ describe("WikiService", () => {
       },
       wikiLink: {
         deleteMany: jest.fn(),
-        createMany: jest.fn()
+        createMany: jest.fn(),
+        updateMany: jest.fn()
       }
     };
     prisma.wikiPage.findFirst.mockResolvedValue(null);
@@ -230,6 +231,19 @@ describe("WikiService", () => {
         })
       })
     );
+    expect(tx.wikiLink.updateMany).toHaveBeenCalledWith({
+      where: {
+        toPath: "guides/roadmap",
+        toPageId: null,
+        fromPage: {
+          projectId: "project-1",
+          deletedAt: null
+        }
+      },
+      data: {
+        toPageId: "page-1"
+      }
+    });
     expect(auditService.log).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "wiki.page.create",
@@ -246,10 +260,16 @@ describe("WikiService", () => {
           id: "page-2",
           title: "New notes",
           path: "guides/new-notes"
-        })
+        }),
+        findMany: jest.fn().mockResolvedValue([{ id: "page-existing", path: "guides/existing" }])
       },
       wikiDraft: {
         create: jest.fn().mockResolvedValue(undefined)
+      },
+      wikiLink: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+        updateMany: jest.fn()
       }
     };
     prisma.wikiPage.findMany.mockResolvedValue([{ path: "guides/existing" }]);
@@ -270,7 +290,7 @@ describe("WikiService", () => {
             title: "New notes",
             slug: "new-notes",
             folderPath: "guides",
-            contentMarkdown: "# New notes",
+            contentMarkdown: "# New notes\n\nSee [[guides/existing]]",
             sourcePath: "guides/new-notes.md"
           },
           {
@@ -290,18 +310,52 @@ describe("WikiService", () => {
     );
 
     expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("editor-1", "editor", "project-1");
+    expect(prisma.wikiPage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          projectId: "project-1",
+          deletedAt: null,
+          path: {
+            in: ["guides/existing", "guides/new-notes", "guides/new-notes"]
+          }
+        }
+      })
+    );
     expect(tx.wikiPage.create).toHaveBeenCalledTimes(1);
     expect(tx.wikiDraft.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           pageId: "page-2",
           title: "New notes",
-          contentMarkdown: "# New notes",
+          contentMarkdown: "# New notes\n\nSee [[guides/existing]]",
           draftVersion: 1,
           updatedById: "editor-1"
         })
       })
     );
+    expect(tx.wikiLink.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          fromPageId: "page-2",
+          toPath: "guides/existing",
+          toPageId: "page-existing"
+        }
+      ],
+      skipDuplicates: true
+    });
+    expect(tx.wikiLink.updateMany).toHaveBeenCalledWith({
+      where: {
+        toPath: "guides/new-notes",
+        toPageId: null,
+        fromPage: {
+          projectId: "project-1",
+          deletedAt: null
+        }
+      },
+      data: {
+        toPageId: "page-2"
+      }
+    });
     expect(result).toEqual({
       created: [
         {
@@ -487,6 +541,102 @@ describe("WikiService", () => {
     expect(detail.page.path).toBe("roadmap");
     expect(detail.published).not.toBeNull();
     expect(detail.published?.revisionNumber).toBe(1);
+  });
+
+  it("hides draft-only link targets and backlinks from reader page details", async () => {
+    const { service, prisma } = makeService();
+    prisma.wikiPage.findFirst.mockResolvedValue({
+      id: "page-1",
+      projectId: "project-1",
+      title: "Roadmap",
+      slug: "roadmap",
+      folderPath: "",
+      path: "roadmap",
+      templateType: null,
+      updatedAt: new Date("2026-03-03T10:00:00.000Z"),
+      createdById: "user-1",
+      currentRevision: {
+        id: "revision-1",
+        revisionNumber: 1,
+        contentMarkdown: "published",
+        createdAt: new Date("2026-03-03T09:00:00.000Z"),
+        changeNote: null,
+        createdBy: {
+          id: "user-1",
+          name: "Owner",
+          email: "owner@example.com"
+        }
+      },
+      draft: null
+    });
+    prisma.wikiLink.findMany
+      .mockResolvedValueOnce([
+        {
+          toPath: "published-target",
+          toPageId: "published-page",
+          toPage: {
+            title: "Published target",
+            path: "published-target",
+            currentRevisionId: "revision-target"
+          }
+        },
+        {
+          toPath: "draft-target",
+          toPageId: "draft-page",
+          toPage: {
+            title: "Draft target",
+            path: "draft-target",
+            currentRevisionId: null
+          }
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          fromPageId: "published-source",
+          fromPage: {
+            title: "Published source",
+            path: "published-source",
+            currentRevisionId: "revision-source"
+          }
+        }
+      ]);
+
+    const detail = await service.getByPath(
+      "project-1",
+      "roadmap",
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      }
+    );
+
+    expect(prisma.wikiLink.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          fromPage: {
+            deletedAt: null,
+            currentRevisionId: { not: null }
+          }
+        })
+      })
+    );
+    expect(detail.outgoingLinks).toEqual([
+      {
+        toPath: "published-target",
+        toPageId: "published-page",
+        title: "Published target",
+        path: "published-target"
+      }
+    ]);
+    expect(detail.backlinks).toEqual([
+      {
+        fromPageId: "published-source",
+        fromTitle: "Published source",
+        fromPath: "published-source"
+      }
+    ]);
   });
 
   it("lets editors read draft-only pages with nullable published revision", async () => {
@@ -777,7 +927,8 @@ describe("WikiService", () => {
       },
       wikiLink: {
         deleteMany: jest.fn(),
-        createMany: jest.fn()
+        createMany: jest.fn(),
+        updateMany: jest.fn()
       }
     };
     prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
@@ -857,7 +1008,8 @@ describe("WikiService", () => {
       },
       wikiLink: {
         deleteMany: jest.fn(),
-        createMany: jest.fn()
+        createMany: jest.fn(),
+        updateMany: jest.fn()
       }
     };
     prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));

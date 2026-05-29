@@ -2,16 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { ChangeEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import rehypeKatex from "rehype-katex";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 
 import { AppShell } from "./app-shell";
 import { LoadingState } from "./ui";
-import { WikiHistoryDiff } from "./wiki-history-diff";
+import { WikiHistory } from "./wiki-history";
+import { WikiImportDraftEntry, WikiImportPanel } from "./wiki-import-panel";
+import { WikiMarkdown } from "./wiki-markdown";
+import { WikiReader } from "./wiki-reader";
 import { API_BASE_URL, LoginResponse } from "../lib/client-api";
 import {
   buildCollaboratorIdentity,
@@ -31,7 +30,6 @@ import {
   getWikiPageByPath,
   listWikiRevisions,
   listWikiTree,
-  normalizeWikiMathMarkdown,
   publishWikiPage,
   saveWikiDraft,
   searchWikiPages,
@@ -48,18 +46,6 @@ import { useConfirmDialog } from "../lib/use-confirm-dialog";
 
 type SaveState = "idle" | "saving" | "saved" | "error" | "conflict";
 type WikiSidebarWidthMode = "auto" | "manual";
-
-type WikiImportDraftEntry = {
-  id: string;
-  sourcePath: string;
-  title: string;
-  slug: string;
-  folderPath: string;
-  templateType: string;
-  contentMarkdown: string;
-  localConflict: boolean;
-  warnings: string[];
-};
 
 type WikiImportSelectionResult = {
   entries: WikiImportDraftEntry[];
@@ -731,79 +717,6 @@ function measureWikiSidebarAutoWidth(sidebar: HTMLElement, containerWidth: numbe
   return clampWikiSidebarWidth(Math.max(WIKI_SIDEBAR_AUTO_FALLBACK_PX, widestContentPx), containerWidth);
 }
 
-function resolveWikiAssetPath(src: string): string | null {
-  if (src.startsWith("/wiki-assets/")) {
-    return src;
-  }
-  if (src.startsWith(`${API_BASE_URL}/wiki-assets/`)) {
-    return src.slice(API_BASE_URL.length);
-  }
-  return null;
-}
-
-function AuthenticatedWikiImage({
-  src,
-  alt,
-  token
-}: {
-  src: string;
-  alt?: string;
-  token: string | null;
-}): JSX.Element {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  const assetPath = resolveWikiAssetPath(src);
-
-  useEffect(() => {
-    if (!assetPath || !token) {
-      setBlobUrl(null);
-      setFailed(false);
-      return;
-    }
-
-    let active = true;
-    let objectUrl: string | null = null;
-    setFailed(false);
-
-    void (async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}${assetPath}`, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-        if (!response.ok) {
-          throw new Error("Failed to load image");
-        }
-        const blob = await response.blob();
-        objectUrl = URL.createObjectURL(blob);
-        if (active) {
-          setBlobUrl(objectUrl);
-        }
-      } catch {
-        if (active) {
-          setFailed(true);
-        }
-      }
-    })();
-
-    return () => {
-      active = false;
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
-    };
-  }, [assetPath, token]);
-
-  if (!assetPath) {
-    return <img src={src} alt={alt ?? ""} />;
-  }
-  if (failed || !blobUrl) {
-    return <span className="wiki-image-fallback">Image unavailable</span>;
-  }
-  return <img src={blobUrl} alt={alt ?? ""} />;
-}
-
 export function WikiHub({
   projectId,
   initialPath
@@ -914,15 +827,6 @@ export function WikiHub({
     () => Math.max(collaborators.length - visibleCollaborators.length, 0),
     [collaborators.length, visibleCollaborators.length]
   );
-  const renderedPublishedMarkdown = useMemo(
-    () => normalizeWikiMathMarkdown(pageDetail?.published?.contentMarkdown ?? ""),
-    [pageDetail?.published?.contentMarkdown]
-  );
-  const renderedUnpublishedMarkdown = useMemo(
-    () => normalizeWikiMathMarkdown(pageDetail?.draft?.contentMarkdown ?? ""),
-    [pageDetail?.draft?.contentMarkdown]
-  );
-  const renderedDraftMarkdown = useMemo(() => normalizeWikiMathMarkdown(draftContent), [draftContent]);
   const selectedRevisionIndex = useMemo(
     () => revisions.findIndex((revision) => revision.id === selectedRevisionId),
     [revisions, selectedRevisionId]
@@ -2622,136 +2526,21 @@ export function WikiHub({
           ) : null}
 
           {showImportPanel ? (
-            <section className="wiki-import-panel">
-              <div className="wiki-import-toolbar">
-                <button type="button" className="button button-secondary" onClick={() => importFolderInputRef.current?.click()}>
-                  Import folder
-                </button>
-                <button type="button" className="button button-secondary" onClick={() => importFilesInputRef.current?.click()}>
-                  Import files
-                </button>
-              </div>
-
-              <p className="wiki-import-copy">
-                Batch import creates draft-only pages. Review title, slug, folder path, and optional template before creating them.
-              </p>
-
-              {importWarnings.length > 0 ? (
-                <div className="alert alert-info">
-                  <ul className="list">
-                    {importWarnings.map((warning) => (
-                      <li key={warning} className="list-item">
-                        {warning}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              {importSummary ? (
-                <div className="wiki-import-summary">
-                  <p className="alert alert-success">
-                    Created {importSummary.created.length} page(s), skipped {importSummary.skipped.length}.
-                  </p>
-                  {importSummary.skipped.length > 0 ? (
-                    <ul className="list">
-                      {importSummary.skipped.map((entry) => (
-                        <li key={`${entry.sourcePath}-${entry.path}`} className="list-item">
-                          <strong>{entry.sourcePath}</strong>
-                          <span className="wiki-page-path">/{entry.path}</span>
-                          <span>Skipped: {entry.reason}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {importEntries.length > 0 ? (
-                <div className="wiki-import-review-list">
-                  {importEntries.map((entry) => (
-                    <article key={entry.id} className="wiki-import-entry">
-                      <div className="wiki-import-entry-header">
-                        <strong>{entry.sourcePath}</strong>
-                        {entry.localConflict ? <span className="badge">Path exists</span> : <span className="badge">Draft only</span>}
-                      </div>
-                      <label>
-                        Title
-                        <input
-                          className="input"
-                          value={entry.title}
-                          maxLength={300}
-                          onChange={(event) => onImportEntryFieldChange(entry.id, "title", event.target.value)}
-                          disabled={importingPages}
-                        />
-                      </label>
-                      <label>
-                        Slug
-                        <input
-                          className="input"
-                          value={entry.slug}
-                          maxLength={120}
-                          onChange={(event) => onImportEntryFieldChange(entry.id, "slug", event.target.value)}
-                          disabled={importingPages}
-                        />
-                      </label>
-                      <label>
-                        Folder path
-                        <input
-                          className="input"
-                          value={entry.folderPath}
-                          maxLength={300}
-                          onChange={(event) => onImportEntryFieldChange(entry.id, "folderPath", event.target.value)}
-                          placeholder="research/methods"
-                          disabled={importingPages}
-                        />
-                      </label>
-                      <label>
-                        Template type
-                        <input
-                          className="input"
-                          value={entry.templateType}
-                          maxLength={120}
-                          onChange={(event) => onImportEntryFieldChange(entry.id, "templateType", event.target.value)}
-                          placeholder="paper-review"
-                          disabled={importingPages}
-                        />
-                      </label>
-                      <p className="wiki-page-path">/{composeWikiPath(entry.folderPath, slugify(entry.slug) || entry.slug)}</p>
-                      {entry.warnings.length > 0 ? (
-                        <ul className="list">
-                          {entry.warnings.map((warning) => (
-                            <li key={`${entry.id}-${warning}`} className="list-item">
-                              {warning}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <p className="alert alert-info">Choose a folder or a group of Markdown files to prepare the import.</p>
-              )}
-
-              <div className="inline-actions">
-                <button className="button" type="button" onClick={() => void onRunImport()} disabled={importingPages || importEntries.length === 0}>
-                  {importingPages ? "Importing..." : "Create draft-only pages"}
-                </button>
-                <button
-                  className="button button-secondary"
-                  type="button"
-                  onClick={() => {
-                    resetImportState();
-                    setImportSummary(null);
-                    setShowImportPanel(false);
-                  }}
-                  disabled={importingPages}
-                >
-                  Close
-                </button>
-              </div>
-            </section>
+            <WikiImportPanel
+              importFolderInputRef={importFolderInputRef}
+              importFilesInputRef={importFilesInputRef}
+              importWarnings={importWarnings}
+              importSummary={importSummary}
+              importEntries={importEntries}
+              importingPages={importingPages}
+              onEntryFieldChange={onImportEntryFieldChange}
+              onRunImport={() => void onRunImport()}
+              onClose={() => {
+                resetImportState();
+                setImportSummary(null);
+                setShowImportPanel(false);
+              }}
+            />
           ) : null}
 
           <input
@@ -2877,85 +2666,7 @@ export function WikiHub({
           {loadingPage ? <LoadingState title="Loading wiki page" detail="Preparing content, links, and collaboration state." /> : null}
 
           {pageDetail && !isEditing && !historyOpen ? (
-            <div className="wiki-read-view">
-              <div className="wiki-read-meta">
-                {pageDetail.published ? (
-                  <>
-                    <span className="badge">Published revision #{pageDetail.published.revisionNumber}</span>
-                    <span>Published at {timeLabel(pageDetail.published.publishedAt)}</span>
-                    {pageDetail.published.changeNote ? <span>Note: {pageDetail.published.changeNote}</span> : null}
-                  </>
-                ) : (
-                  <>
-                    <span className="badge">Unpublished</span>
-                    {pageDetail.draft ? <span>Draft updated at {timeLabel(pageDetail.draft.updatedAt)}</span> : null}
-                    {pageDetail.draft ? <span title={pageDetail.draft.updatedBy.email}>By {pageDetail.draft.updatedBy.name}</span> : null}
-                  </>
-                )}
-              </div>
-              <article className="wiki-markdown">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={{
-                    img: ({ src, alt }) => (
-                      <AuthenticatedWikiImage src={String(src ?? "")} alt={alt} token={token} />
-                    )
-                  }}
-                >
-                  {pageDetail.published ? renderedPublishedMarkdown : renderedUnpublishedMarkdown}
-                </ReactMarkdown>
-              </article>
-
-              <div className="wiki-links-grid">
-                <section className="status-card">
-                  <h4>Outgoing links</h4>
-                  {pageDetail.outgoingLinks.length === 0 ? (
-                    <p>No internal links in this page.</p>
-                  ) : (
-                    <ul className="list">
-                      {pageDetail.outgoingLinks.map((link) => (
-                        <li key={`${link.toPath}-${link.toPageId ?? "broken"}`} className="list-item">
-                          {link.toPageId && link.path ? (
-                            <button
-                              type="button"
-                              className="link-button"
-                              onClick={() => {
-                                if (link.path) {
-                                  void openPath(link.path);
-                                }
-                              }}
-                            >
-                              {link.title ?? link.path ?? link.toPath}
-                            </button>
-                          ) : (
-                            <span className="wiki-broken-link">Broken link: [[{link.toPath}]]</span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-
-                <section className="status-card">
-                  <h4>Backlinks</h4>
-                  {pageDetail.backlinks.length === 0 ? (
-                    <p>No backlinks yet.</p>
-                  ) : (
-                    <ul className="list">
-                      {pageDetail.backlinks.map((backlink) => (
-                        <li key={backlink.fromPageId} className="list-item">
-                          <button type="button" className="link-button" onClick={() => void openPath(backlink.fromPath)}>
-                            {backlink.fromTitle}
-                          </button>
-                          <p className="wiki-page-path">/{backlink.fromPath}</p>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-              </div>
-            </div>
+            <WikiReader pageDetail={pageDetail} token={token} onOpenPath={(path) => void openPath(path)} />
           ) : null}
 
           {pageDetail && isEditing && canWrite && !historyOpen ? (
@@ -3076,17 +2787,7 @@ export function WikiHub({
                 <section className="wiki-preview-panel">
                   <h4>Live preview</h4>
                   <article className="wiki-markdown">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm, remarkMath]}
-                      rehypePlugins={[rehypeKatex]}
-                      components={{
-                        img: ({ src, alt }) => (
-                          <AuthenticatedWikiImage src={String(src ?? "")} alt={alt} token={token} />
-                        )
-                      }}
-                    >
-                      {renderedDraftMarkdown}
-                    </ReactMarkdown>
+                    <WikiMarkdown contentMarkdown={draftContent} links={pageDetail.outgoingLinks} token={token} onNavigateWikiPath={(path) => void openPath(path)} />
                   </article>
                 </section>
               </div>
@@ -3104,84 +2805,18 @@ export function WikiHub({
           ) : null}
 
           {historyOpen && pageDetail ? (
-            <section className="wiki-history-mode">
-              <div className="wiki-history-mode-header">
-                <div>
-                  <h4 className="section-heading">Revision history</h4>
-                  <p className="wiki-page-path">Read-only line diff against the previous published revision.</p>
-                </div>
-                {selectedRevisionPreview ? (
-                  <div className="wiki-history-preview-meta">
-                    <span className="badge">Revision #{selectedRevisionPreview.revisionNumber}</span>
-                    {pageDetail.published?.id === selectedRevisionPreview.id ? <span className="badge">Current</span> : null}
-                    <span>{timeLabel(selectedRevisionPreview.publishedAt)}</span>
-                    <span title={selectedRevisionPreview.createdBy.email}>By {selectedRevisionPreview.createdBy.name}</span>
-                    {selectedRevisionPreview.changeNote ? <span>Note: {selectedRevisionPreview.changeNote}</span> : null}
-                  </div>
-                ) : null}
-              </div>
-
-              {loadingHistory ? <p className="alert alert-info">Loading revisions...</p> : null}
-              {historyError ? <p className="alert alert-error">{historyError}</p> : null}
-              {!loadingHistory && revisions.length === 0 ? <p className="alert alert-info">No revisions available.</p> : null}
-              {!loadingHistory && revisions.length > 0 ? (
-                <div className="wiki-history-layout">
-                  <div className="wiki-history-timeline">
-                    <ul className="wiki-history-list">
-                      {revisions.map((revision) => {
-                        const isActiveRevision = selectedRevisionId === revision.id;
-                        const isCurrentRevision = pageDetail.published?.id === revision.id;
-                        return (
-                          <li key={revision.id}>
-                            <button
-                              type="button"
-                              className={isActiveRevision ? "wiki-history-item wiki-history-item-active" : "wiki-history-item"}
-                              onClick={() => setSelectedRevisionId(revision.id)}
-                            >
-                              <div className="wiki-history-item-top">
-                                <strong>Revision #{revision.revisionNumber}</strong>
-                                {isCurrentRevision ? <span className="badge">Current</span> : null}
-                              </div>
-                              <div className="wiki-history-item-meta">
-                                <span>{timeLabel(revision.publishedAt)}</span>
-                                <span title={revision.createdBy.email}>By {revision.createdBy.name}</span>
-                                {revision.changeNote ? <span>Note: {revision.changeNote}</span> : null}
-                              </div>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-
-                  <div className="wiki-history-preview">
-                    {loadingRevisionPreview && (!selectedRevisionPreview || (baseRevisionSummary && !baseRevisionPreview)) ? (
-                      <p className="alert alert-info">Loading revision diff...</p>
-                    ) : null}
-                    {!loadingRevisionPreview && !selectedRevisionPreview && selectedRevisionId ? (
-                      <p className="alert alert-info">Select a revision to inspect its published changes.</p>
-                    ) : null}
-                    {selectedRevisionPreview && (!baseRevisionSummary || baseRevisionPreview) ? (
-                      <>
-                        <div className="wiki-history-diff-meta">
-                          <span className="badge">
-                            {baseRevisionSummary ? `Compared with revision #${baseRevisionSummary.revisionNumber}` : "Initial revision"}
-                          </span>
-                          {baseRevisionPreview ? <span>{timeLabel(baseRevisionPreview.publishedAt)}</span> : null}
-                          {baseRevisionPreview ? (
-                            <span title={baseRevisionPreview.createdBy.email}>Base by {baseRevisionPreview.createdBy.name}</span>
-                          ) : null}
-                        </div>
-                        <WikiHistoryDiff
-                          original={baseRevisionPreview?.contentMarkdown ?? ""}
-                          modified={selectedRevisionPreview.contentMarkdown}
-                        />
-                      </>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-            </section>
+            <WikiHistory
+              pageDetail={pageDetail}
+              revisions={revisions}
+              selectedRevisionId={selectedRevisionId}
+              selectedRevisionPreview={selectedRevisionPreview}
+              baseRevisionSummary={baseRevisionSummary}
+              baseRevisionPreview={baseRevisionPreview}
+              loadingHistory={loadingHistory}
+              loadingRevisionPreview={loadingRevisionPreview}
+              historyError={historyError}
+              onSelectRevision={setSelectedRevisionId}
+            />
           ) : null}
         </section>
       </div>

@@ -1,5 +1,29 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Consistency and Link Hardening (2026-05-28)
+- [x] Register the scoped Wiki hardening implementation plan.
+- [x] Update Wiki data constraints/indexes for soft-delete path reuse and search performance.
+- [x] Harden Wiki link visibility, link hydration, and draft-only import link graph behavior.
+- [x] Add inline `[[wiki-link]]` navigation in rendered Markdown without changing stored Markdown.
+- [x] Extract low-risk Wiki render/import/history components from the hub.
+- [x] Run focused Wiki tests, API/web type-checks, diff hygiene, and document results.
+
+### Review - Wiki Consistency and Link Hardening
+- Replaced the full Wiki path uniqueness model with a migration-managed active-page partial unique index and added GIN search indexes for page title/path plus revision/draft content.
+- Wiki link graph now rebuilds for draft-only imports, hydrates existing broken links when target pages are created/published/imported, and filters draft-only link targets/backlinks away from reader responses.
+- Rendered Wiki Markdown now turns `[[path]]` into internal navigation using the existing outgoing-link contract, preserving broken/hidden links as non-navigable text.
+- Extracted low-risk Wiki UI pieces into dedicated reader, import, history, and Markdown renderer components while keeping realtime editor state in the hub.
+- Verification:
+  - `pnpm --filter @doctoral/db db:generate` passed
+  - `DATABASE_URL='postgresql://postgres:postgres@localhost:5432/doctoral_platform?schema=public' pnpm --filter @doctoral/db exec prisma validate` passed
+  - `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/wiki/wiki.service.spec.ts` passed with 37 tests
+  - `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/wiki.controller.http.spec.ts` passed with 14 tests
+  - `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` passed
+  - `pnpm --filter @doctoral/web build` passed
+  - `git diff --check` passed
+  - Commit message: `fix(wiki): harden links and draft visibility`
+
 ## Fix Code Branches/Merge Requests Layout (2026-05-28)
 - [x] Register the scoped layout and validation fix for Code branch/MR actions.
 - [x] Move Branch/MR creation actions into their owning panels and remove cockpit overflow pressure.

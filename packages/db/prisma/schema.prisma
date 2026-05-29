@@ -437,8 +437,8 @@ model WikiPage {
   outgoingLinks   WikiLink[]    @relation("WikiLinkFrom")
   incomingLinks   WikiLink[]    @relation("WikiLinkTo")
 
-  @@unique([projectId, path])
   @@index([projectId])
+  @@index([projectId, path])
 }
 
 model WikiRevision {

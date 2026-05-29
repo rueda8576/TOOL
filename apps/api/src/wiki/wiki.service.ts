@@ -240,7 +240,7 @@ export class WikiService {
     return sortNodes(root.children);
   }
 
-  private async ensurePageReadable(pageId: string, user: AuthenticatedUser): Promise<{ id: string; projectId: string }> {
+  private async ensurePageReadable(pageId: string, user: AuthenticatedUser): Promise<{ id: string; projectId: string; canWrite: boolean }> {
     const page = await this.prisma.wikiPage.findFirst({
       where: {
         id: pageId,
@@ -262,7 +262,11 @@ export class WikiService {
       throw new NotFoundException("Wiki page not found");
     }
 
-    return page;
+    return {
+      id: page.id,
+      projectId: page.projectId,
+      canWrite: access.canWrite
+    };
   }
 
   private preparePageEntry(entry: Pick<CreateWikiPageDto, "slug" | "folderPath">): { slug: string; folderPath: string; path: string } {
@@ -415,6 +419,22 @@ export class WikiService {
     });
   }
 
+  private async hydrateLinksToPage(tx: DbClient, params: { projectId: string; pageId: string; path: string }): Promise<void> {
+    await tx.wikiLink.updateMany({
+      where: {
+        toPath: params.path,
+        toPageId: null,
+        fromPage: {
+          projectId: params.projectId,
+          deletedAt: null
+        }
+      },
+      data: {
+        toPageId: params.pageId
+      }
+    });
+  }
+
   private buildWikiPageSummary(page: WikiPageWithDraftAndRevision): WikiPageSummary {
     return {
       id: page.id,
@@ -476,6 +496,18 @@ export class WikiService {
       }
     });
 
+    await this.rebuildLinks(tx, {
+      projectId,
+      fromPageId: page.id,
+      contentMarkdown: entry.contentMarkdown
+    });
+
+    await this.hydrateLinksToPage(tx, {
+      projectId,
+      pageId: page.id,
+      path: page.path
+    });
+
     return page;
   }
 
@@ -514,58 +546,79 @@ export class WikiService {
       throw new BadRequestException("Wiki path already exists in this project");
     }
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      const page = await tx.wikiPage.create({
-        data: {
+    let created: {
+      id: string;
+      projectId: string;
+      slug: string;
+      title: string;
+      path: string;
+      revisionNumber: number;
+    };
+    try {
+      created = await this.prisma.$transaction(async (tx) => {
+        const page = await tx.wikiPage.create({
+          data: {
+            projectId,
+            title: dto.title,
+            slug,
+            folderPath,
+            path: pagePath,
+            templateType: dto.templateType,
+            createdById: user.userId
+          },
+          select: { id: true, projectId: true, slug: true, title: true, path: true }
+        });
+
+        const revision = await tx.wikiRevision.create({
+          data: {
+            pageId: page.id,
+            revisionNumber: 1,
+            contentMarkdown: dto.contentMarkdown,
+            createdById: user.userId
+          },
+          select: { id: true, revisionNumber: true }
+        });
+
+        await tx.wikiPage.update({
+          where: { id: page.id },
+          data: {
+            currentRevisionId: revision.id
+          }
+        });
+
+        await tx.wikiDraft.create({
+          data: {
+            pageId: page.id,
+            title: dto.title,
+            contentMarkdown: dto.contentMarkdown,
+            draftVersion: 1,
+            updatedById: user.userId
+          }
+        });
+
+        await this.rebuildLinks(tx, {
           projectId,
-          title: dto.title,
-          slug,
-          folderPath,
-          path: pagePath,
-          templateType: dto.templateType,
-          createdById: user.userId
-        },
-        select: { id: true, projectId: true, slug: true, title: true, path: true }
-      });
+          fromPageId: page.id,
+          contentMarkdown: dto.contentMarkdown
+        });
 
-      const revision = await tx.wikiRevision.create({
-        data: {
+        await this.hydrateLinksToPage(tx, {
+          projectId,
           pageId: page.id,
-          revisionNumber: 1,
-          contentMarkdown: dto.contentMarkdown,
-          createdById: user.userId
-        },
-        select: { id: true, revisionNumber: true }
-      });
+          path: page.path
+        });
 
-      await tx.wikiPage.update({
-        where: { id: page.id },
-        data: {
-          currentRevisionId: revision.id
-        }
+        return {
+          ...page,
+          revisionNumber: revision.revisionNumber
+        };
       });
-
-      await tx.wikiDraft.create({
-        data: {
-          pageId: page.id,
-          title: dto.title,
-          contentMarkdown: dto.contentMarkdown,
-          draftVersion: 1,
-          updatedById: user.userId
-        }
-      });
-
-      await this.rebuildLinks(tx, {
-        projectId,
-        fromPageId: page.id,
-        contentMarkdown: dto.contentMarkdown
-      });
-
-      return {
-        ...page,
-        revisionNumber: revision.revisionNumber
-      };
-    });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new BadRequestException("Wiki path already exists in this project");
+      }
+      throw error;
+    }
 
     await this.auditService.log({
       userId: user.userId,
@@ -607,6 +660,7 @@ export class WikiService {
         await this.prisma.wikiPage.findMany({
           where: {
             projectId,
+            deletedAt: null,
             path: {
               in: entries.map((entry) => entry.path)
             }
@@ -811,17 +865,20 @@ export class WikiService {
         toPage: {
           select: {
             title: true,
-            path: true
+            path: true,
+            currentRevisionId: true
           }
         }
       }
     });
 
+    const canReadDraft = access.canWrite;
     const backlinksRaw = await this.prisma.wikiLink.findMany({
       where: {
         OR: [{ toPageId: page.id }, { toPath: page.path }],
         fromPage: {
-          deletedAt: null
+          deletedAt: null,
+          ...(canReadDraft ? {} : { currentRevisionId: { not: null } })
         }
       },
       select: {
@@ -829,7 +886,8 @@ export class WikiService {
         fromPage: {
           select: {
             title: true,
-            path: true
+            path: true,
+            currentRevisionId: true
           }
         }
       }
@@ -848,14 +906,15 @@ export class WikiService {
       });
     }
 
-    const outgoingLinks: WikiLinkView[] = outgoingLinksRaw.map((link) => ({
-      toPath: link.toPath,
-      toPageId: link.toPageId,
-      title: link.toPage?.title ?? null,
-      path: link.toPage?.path ?? null
-    }));
+    const outgoingLinks: WikiLinkView[] = outgoingLinksRaw
+      .filter((link) => canReadDraft || !link.toPageId || Boolean(link.toPage?.currentRevisionId))
+      .map((link) => ({
+        toPath: link.toPath,
+        toPageId: link.toPageId,
+        title: link.toPage?.title ?? null,
+        path: link.toPage?.path ?? null
+      }));
 
-    const canReadDraft = access.canWrite;
     const draft: WikiDraftView | undefined =
       canReadDraft && page.draft
         ? {
@@ -894,6 +953,11 @@ export class WikiService {
     const draftMatchCondition = includeDraft
       ? Prisma.sql`to_tsvector('simple', COALESCE(d."contentMarkdown", '')) @@ query`
       : Prisma.sql`FALSE`;
+    const pageMatchCondition = Prisma.sql`(
+      to_tsvector('simple', COALESCE(p.title, '')) @@ query OR
+      to_tsvector('simple', COALESCE(p.path, '')) @@ query
+    )`;
+    const publishedMatchCondition = Prisma.sql`to_tsvector('simple', COALESCE(pr."contentMarkdown", '')) @@ query`;
 
     const rows = await this.prisma.$queryRaw<WikiSearchRow[]>(Prisma.sql`
       SELECT
@@ -933,7 +997,7 @@ export class WikiService {
       WHERE p."projectId" = ${projectId}
         AND p."deletedAt" IS NULL
         AND ${visibilityCondition}
-        AND search_data.search_vector @@ query
+        AND (${pageMatchCondition} OR ${publishedMatchCondition} OR ${draftMatchCondition})
       ORDER BY "score" DESC, p."updatedAt" DESC
       LIMIT ${limit}
     `);
@@ -1129,6 +1193,12 @@ export class WikiService {
         contentMarkdown: draft.contentMarkdown
       });
 
+      await this.hydrateLinksToPage(tx, {
+        projectId: page.projectId,
+        pageId: page.id,
+        path: page.path
+      });
+
       return {
         page,
         revision,
@@ -1268,7 +1338,8 @@ export class WikiService {
       where: {
         OR: [{ toPageId: page.id }, { toPath: wikiPage.path }],
         fromPage: {
-          deletedAt: null
+          deletedAt: null,
+          ...(page.canWrite ? {} : { currentRevisionId: { not: null } })
         }
       },
       select: {
