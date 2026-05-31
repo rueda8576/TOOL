@@ -1,5 +1,21 @@
 # Implementation TODO (v1 bootstrap)
 
+## README Refresh and Atlasium v0.4.0 Release (2026-05-31)
+- [x] Register the README/release implementation plan.
+- [x] Rewrite `README.md` to reflect the current Atlasium product, architecture, setup, testing, and deployment model.
+- [x] Run local documentation verification and commit the README/TODO changes.
+- [ ] Push `main` and verify GitHub Actions CI passes for the documentation commit.
+- [ ] Create annotated tag `v0.4.0` and publish GitHub Release `Atlasium v0.4.0` as latest.
+
+### Review - README Refresh and Atlasium v0.4.0 Release
+- Replaced the outdated `v1 bootstrap` README with a current Atlasium guide covering product scope, workspace architecture, features, local setup, environment groups, API overview, testing, deployment, and project conventions.
+- Kept package versions unchanged at `0.1.0`; product release versioning remains Git tags and GitHub Releases.
+- Verification:
+  - `git diff --check` passed
+  - `pnpm lint` passed
+  - `pnpm build` passed
+  - Commit message: `docs(readme): refresh atlasium project guide`
+
 ## Wiki Consistency and Link Hardening (2026-05-28)
 - [x] Register the scoped Wiki hardening implementation plan.
 - [x] Update Wiki data constraints/indexes for soft-delete path reuse and search performance.
