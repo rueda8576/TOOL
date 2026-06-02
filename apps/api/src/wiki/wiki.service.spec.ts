@@ -19,7 +19,7 @@ describe("WikiService", () => {
     const prisma: any = {
       wikiPage: {
         findFirst: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn(),
         create: jest.fn(),
         update: jest.fn()
@@ -950,6 +950,318 @@ describe("WikiService", () => {
         })
       })
     );
+  });
+
+  it("exports an unbound published wiki page under a repository prefix to Git", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Backend",
+        pathWithNamespace: "atlasium/backend",
+        defaultBranch: "main",
+        wikiDocsPrefix: "backend",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiPage.findMany.mockResolvedValueOnce([
+      {
+        id: "page-1",
+        projectId: "project-1",
+        title: "Auth",
+        path: "backend/research/auth",
+        currentRevisionId: "revision-1",
+        currentRevision: {
+          id: "revision-1",
+          contentMarkdown: "# Auth"
+        }
+      }
+    ]);
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([]);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    prisma.wikiDocsBinding.create.mockResolvedValue({});
+    prisma.projectRepository.update.mockResolvedValue({});
+    gitlabService.listRepositoryDocsMarkdownFiles.mockResolvedValue([]);
+    gitlabService.getRepositoryTextFileForDocsSync.mockResolvedValue(null);
+    gitlabService.commitRepositoryFileActions.mockResolvedValue({
+      id: "commit-1",
+      shortId: "commit-1",
+      title: "Create wiki docs file Docs/research/auth.md",
+      message: "Create wiki docs file Docs/research/auth.md",
+      createdAt: "2026-06-02T10:00:00.000Z",
+      webUrl: "https://git.example/commit-1"
+    });
+
+    const result = await service.syncDocs("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(result.totals.exportedToGit).toBe(1);
+    expect(result.totals.unassigned).toBe(0);
+    expect(gitlabService.commitRepositoryFileActions).toHaveBeenCalledWith(
+      "project-1",
+      expect.any(Object),
+      "repo-1",
+      [
+        {
+          action: "create",
+          filePath: "Docs/research/auth.md",
+          content: "# Auth"
+        }
+      ],
+      "Create wiki docs file Docs/research/auth.md"
+    );
+    expect(prisma.wikiDocsBinding.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          repositoryId: "repo-1",
+          wikiPageId: "page-1",
+          docsPath: "Docs/research/auth.md",
+          wikiPath: "backend/research/auth",
+          gitLastCommitId: "commit-1",
+          wikiRevisionId: "revision-1",
+          status: "active"
+        })
+      })
+    );
+  });
+
+  it("links an unbound wiki page to an identical existing Docs file without committing", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Backend",
+        pathWithNamespace: "atlasium/backend",
+        defaultBranch: "main",
+        wikiDocsPrefix: "backend",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiPage.findMany.mockResolvedValueOnce([
+      {
+        id: "page-1",
+        projectId: "project-1",
+        title: "Auth",
+        path: "backend/research/auth",
+        currentRevisionId: "revision-1",
+        currentRevision: {
+          id: "revision-1",
+          contentMarkdown: "# Auth"
+        }
+      }
+    ]);
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([]);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    prisma.wikiDocsBinding.create.mockResolvedValue({});
+    prisma.projectRepository.update.mockResolvedValue({});
+    gitlabService.listRepositoryDocsMarkdownFiles.mockResolvedValue([
+      {
+        docsPath: "Docs/research/auth.md",
+        relativePath: "research/auth.md",
+        fileName: "auth.md",
+        ref: "main",
+        blobId: "blob-1",
+        lastCommitId: "commit-1",
+        contentSha256: null,
+        content: "# Auth"
+      }
+    ]);
+
+    const result = await service.syncDocs("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(result.totals.linked).toBe(1);
+    expect(result.totals.created).toBe(0);
+    expect(gitlabService.commitRepositoryFileActions).not.toHaveBeenCalled();
+    expect(gitlabService.getRepositoryTextFileForDocsSync).not.toHaveBeenCalled();
+    expect(prisma.wikiDocsBinding.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          gitBlobId: "blob-1",
+          gitLastCommitId: "commit-1",
+          docsPath: "Docs/research/auth.md",
+          wikiPath: "backend/research/auth"
+        })
+      })
+    );
+  });
+
+  it("reports a conflict when an unbound wiki page differs from an existing Docs file", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Backend",
+        pathWithNamespace: "atlasium/backend",
+        defaultBranch: "main",
+        wikiDocsPrefix: "backend",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiPage.findMany.mockResolvedValueOnce([
+      {
+        id: "page-1",
+        projectId: "project-1",
+        title: "Auth",
+        path: "backend/research/auth",
+        currentRevisionId: "revision-1",
+        currentRevision: {
+          id: "revision-1",
+          contentMarkdown: "# Wiki Auth"
+        }
+      }
+    ]);
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([]);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    prisma.projectRepository.update.mockResolvedValue({});
+    gitlabService.listRepositoryDocsMarkdownFiles.mockResolvedValue([
+      {
+        docsPath: "Docs/research/auth.md",
+        relativePath: "research/auth.md",
+        fileName: "auth.md",
+        ref: "main",
+        blobId: "blob-1",
+        lastCommitId: "commit-1",
+        contentSha256: null,
+        content: "# Git Auth"
+      }
+    ]);
+
+    const result = await service.syncDocs("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(result.totals.conflicts).toBe(1);
+    expect(result.repositories[0].conflicts[0]).toEqual(
+      expect.objectContaining({
+        docsPath: "Docs/research/auth.md",
+        wikiPath: "backend/research/auth",
+        reason: "Unbound Wiki page and existing Docs file have different content"
+      })
+    );
+    expect(gitlabService.commitRepositoryFileActions).not.toHaveBeenCalled();
+    expect(prisma.wikiDocsBinding.create).not.toHaveBeenCalled();
+  });
+
+  it("reports unbound published wiki pages outside repository prefixes as unassigned", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Backend",
+        pathWithNamespace: "atlasium/backend",
+        defaultBranch: "main",
+        wikiDocsPrefix: "backend",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiPage.findMany.mockResolvedValueOnce([
+      {
+        id: "page-1",
+        projectId: "project-1",
+        title: "Roadmap",
+        path: "roadmap",
+        currentRevisionId: "revision-1",
+        currentRevision: {
+          id: "revision-1",
+          contentMarkdown: "# Roadmap"
+        }
+      }
+    ]);
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([]);
+    prisma.projectRepository.update.mockResolvedValue({});
+    gitlabService.listRepositoryDocsMarkdownFiles.mockResolvedValue([]);
+
+    const result = await service.syncDocs("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(prisma.wikiPage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          deletedAt: null,
+          currentRevisionId: {
+            not: null
+          },
+          docsBinding: {
+            is: null
+          }
+        })
+      })
+    );
+    expect(result.totals.unassigned).toBe(1);
+    expect(result.unassigned).toEqual([
+      {
+        pageId: "page-1",
+        wikiPath: "roadmap",
+        title: "Roadmap",
+        reason: "Wiki page is not under any repository Docs prefix"
+      }
+    ]);
+    expect(gitlabService.commitRepositoryFileActions).not.toHaveBeenCalled();
+  });
+
+  it("does not create a Docs binding when exporting an unbound page fails in GitLab", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Backend",
+        pathWithNamespace: "atlasium/backend",
+        defaultBranch: "main",
+        wikiDocsPrefix: "backend",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiPage.findMany.mockResolvedValueOnce([
+      {
+        id: "page-1",
+        projectId: "project-1",
+        title: "Auth",
+        path: "backend/research/auth",
+        currentRevisionId: "revision-1",
+        currentRevision: {
+          id: "revision-1",
+          contentMarkdown: "# Auth"
+        }
+      }
+    ]);
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([]);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    prisma.projectRepository.update.mockResolvedValue({});
+    gitlabService.listRepositoryDocsMarkdownFiles.mockResolvedValue([]);
+    gitlabService.getRepositoryTextFileForDocsSync.mockResolvedValue(null);
+    gitlabService.commitRepositoryFileActions.mockRejectedValue(new Error("GitLab commit failed"));
+
+    const result = await service.syncDocs("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(result.totals.errors).toBe(1);
+    expect(result.repositories[0].errors[0]).toBe("/backend/research/auth: GitLab commit failed");
+    expect(prisma.wikiDocsBinding.create).not.toHaveBeenCalled();
   });
 
   it("builds tree with draft markers for editor users", async () => {

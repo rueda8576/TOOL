@@ -211,12 +211,23 @@ describe("WikiController HTTP", () => {
         created: 1,
         updatedFromGit: 0,
         updatedToGit: 0,
+        exportedToGit: 1,
+        linked: 1,
         deletedFromWiki: 0,
         deletedFromGit: 0,
         unchanged: 0,
+        unassigned: 1,
         conflicts: 0,
         errors: 0
-      }
+      },
+      unassigned: [
+        {
+          pageId: "page-2",
+          wikiPath: "roadmap",
+          title: "Roadmap",
+          reason: "Wiki page is not under any repository Docs prefix"
+        }
+      ]
     });
 
     const statusResponse = await request(app.getHttpServer())
@@ -240,6 +251,9 @@ describe("WikiController HTTP", () => {
     });
     expect(statusResponse.body.repositories[0].wikiDocsPrefix).toBe("atlasium");
     expect(syncResponse.body.totals.created).toBe(1);
+    expect(syncResponse.body.totals.exportedToGit).toBe(1);
+    expect(syncResponse.body.totals.linked).toBe(1);
+    expect(syncResponse.body.unassigned[0].wikiPath).toBe("roadmap");
   });
 
   it("imports markdown pages with bound params and body", async () => {

@@ -128,6 +128,13 @@ export type WikiDocsSyncConflict = {
   reason: string;
 };
 
+export type WikiDocsSyncUnassignedPage = {
+  pageId: string;
+  wikiPath: string;
+  title: string;
+  reason: string;
+};
+
 export type WikiDocsSyncRepositoryResult = {
   repositoryId: string;
   name: string;
@@ -135,6 +142,8 @@ export type WikiDocsSyncRepositoryResult = {
   created: number;
   updatedFromGit: number;
   updatedToGit: number;
+  exportedToGit: number;
+  linked: number;
   deletedFromWiki: number;
   deletedFromGit: number;
   unchanged: number;
@@ -148,12 +157,16 @@ export type WikiDocsSyncResult = {
     created: number;
     updatedFromGit: number;
     updatedToGit: number;
+    exportedToGit: number;
+    linked: number;
     deletedFromWiki: number;
     deletedFromGit: number;
     unchanged: number;
+    unassigned: number;
     conflicts: number;
     errors: number;
   };
+  unassigned: WikiDocsSyncUnassignedPage[];
 };
 
 export type CreateWikiPageInput = {

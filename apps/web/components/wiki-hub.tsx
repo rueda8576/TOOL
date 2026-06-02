@@ -1922,10 +1922,10 @@ export function WikiHub({
       await loadDocsSyncStatus(token);
       await refreshSearchResults(token);
       if (selectedPath) {
-        await loadPage(token, selectedPath);
+      await loadPage(token, selectedPath);
       }
       setSuccess(
-        `Docs sync finished: ${result.totals.created} created, ${result.totals.updatedFromGit + result.totals.updatedToGit} updated, ${result.totals.conflicts} conflict(s), ${result.totals.errors} error(s).`
+        `Docs sync finished: ${result.totals.created} imported, ${result.totals.updatedFromGit + result.totals.updatedToGit} updated, ${result.totals.exportedToGit} exported, ${result.totals.linked} linked, ${result.totals.unassigned} unassigned, ${result.totals.conflicts} conflict(s), ${result.totals.errors} error(s).`
       );
     } catch (syncError) {
       setError((syncError as Error).message);
@@ -2537,10 +2537,10 @@ export function WikiHub({
 
           {docsSyncResult ? (
             <div className="wiki-import-summary">
-              <p className={docsSyncResult.totals.conflicts > 0 || docsSyncResult.totals.errors > 0 ? "alert alert-info" : "alert alert-success"}>
-                Docs sync: {docsSyncResult.totals.created} created, {docsSyncResult.totals.updatedFromGit + docsSyncResult.totals.updatedToGit} updated, {docsSyncResult.totals.deletedFromWiki + docsSyncResult.totals.deletedFromGit} deleted, {docsSyncResult.totals.conflicts} conflict(s), {docsSyncResult.totals.errors} error(s).
+              <p className={docsSyncResult.totals.conflicts > 0 || docsSyncResult.totals.errors > 0 || docsSyncResult.totals.unassigned > 0 ? "alert alert-info" : "alert alert-success"}>
+                Docs sync: {docsSyncResult.totals.created} imported, {docsSyncResult.totals.updatedFromGit + docsSyncResult.totals.updatedToGit} updated, {docsSyncResult.totals.exportedToGit} exported, {docsSyncResult.totals.linked} linked, {docsSyncResult.totals.deletedFromWiki + docsSyncResult.totals.deletedFromGit} deleted, {docsSyncResult.totals.unassigned} unassigned, {docsSyncResult.totals.conflicts} conflict(s), {docsSyncResult.totals.errors} error(s).
               </p>
-              {docsSyncResult.repositories.some((repository) => repository.conflicts.length > 0 || repository.errors.length > 0) ? (
+              {docsSyncResult.repositories.some((repository) => repository.conflicts.length > 0 || repository.errors.length > 0) || docsSyncResult.unassigned.length > 0 ? (
                 <ul className="list">
                   {docsSyncResult.repositories.flatMap((repository) => [
                     ...repository.conflicts.map((conflict) => (
@@ -2557,6 +2557,13 @@ export function WikiHub({
                       </li>
                     ))
                   ])}
+                  {docsSyncResult.unassigned.map((page) => (
+                    <li key={`${page.pageId}-unassigned`} className="list-item">
+                      <strong>Unassigned wiki page</strong>
+                      <span className="wiki-page-path">/{page.wikiPath}</span>
+                      <span>{page.reason}</span>
+                    </li>
+                  ))}
                 </ul>
               ) : null}
             </div>

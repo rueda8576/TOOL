@@ -26,6 +26,7 @@ import {
   WikiDocsSyncRepositoryStatus,
   WikiDocsSyncResult,
   WikiDocsSyncStatus,
+  WikiDocsSyncUnassignedPage,
   WikiDraftView,
   WikiLinkView,
   WikiPageDetail,
@@ -132,6 +133,18 @@ type WikiDocsBindingRecord = {
       revisionNumber: number;
       contentMarkdown: string;
     } | null;
+  } | null;
+};
+
+type WikiDocsUnboundPageRecord = {
+  id: string;
+  projectId: string;
+  title: string;
+  path: string;
+  currentRevisionId: string | null;
+  currentRevision: {
+    id: string;
+    contentMarkdown: string;
   } | null;
 };
 
@@ -983,6 +996,8 @@ export class WikiService {
       created: 0,
       updatedFromGit: 0,
       updatedToGit: 0,
+      exportedToGit: 0,
+      linked: 0,
       deletedFromWiki: 0,
       deletedFromGit: 0,
       unchanged: 0,
@@ -1057,6 +1072,217 @@ export class WikiService {
       }
     });
     return bindings as WikiDocsBindingRecord[];
+  }
+
+  private async loadUnboundPublishedWikiPages(projectId: string): Promise<WikiDocsUnboundPageRecord[]> {
+    const pages = await this.prisma.wikiPage.findMany({
+      where: {
+        projectId,
+        deletedAt: null,
+        currentRevisionId: {
+          not: null
+        },
+        docsBinding: {
+          is: null
+        }
+      },
+      orderBy: {
+        path: "asc"
+      },
+      select: {
+        id: true,
+        projectId: true,
+        title: true,
+        path: true,
+        currentRevisionId: true,
+        currentRevision: {
+          select: {
+            id: true,
+            contentMarkdown: true
+          }
+        }
+      }
+    });
+    return pages as WikiDocsUnboundPageRecord[];
+  }
+
+  private groupUnboundWikiPagesByRepository(params: {
+    repositories: WikiDocsRepositoryRecord[];
+    pages: WikiDocsUnboundPageRecord[];
+  }): {
+    pagesByRepositoryId: Map<string, WikiDocsUnboundPageRecord[]>;
+    pagesByWikiPath: Map<string, WikiDocsUnboundPageRecord>;
+    unassigned: WikiDocsSyncUnassignedPage[];
+  } {
+    const repositoriesByPrefix = new Map<string, WikiDocsRepositoryRecord>();
+    for (const repository of params.repositories) {
+      if (repository.wikiDocsPrefix) {
+        repositoriesByPrefix.set(repository.wikiDocsPrefix, repository);
+      }
+    }
+
+    const pagesByRepositoryId = new Map<string, WikiDocsUnboundPageRecord[]>();
+    const pagesByWikiPath = new Map<string, WikiDocsUnboundPageRecord>();
+    const unassigned: WikiDocsSyncUnassignedPage[] = [];
+
+    for (const page of params.pages) {
+      pagesByWikiPath.set(page.path, page);
+      const prefix = page.path.split("/")[0] ?? "";
+      const repository = repositoriesByPrefix.get(prefix);
+      if (!repository) {
+        unassigned.push({
+          pageId: page.id,
+          wikiPath: page.path,
+          title: page.title,
+          reason: "Wiki page is not under any repository Docs prefix"
+        });
+        continue;
+      }
+
+      const pages = pagesByRepositoryId.get(repository.id) ?? [];
+      pages.push(page);
+      pagesByRepositoryId.set(repository.id, pages);
+    }
+
+    return { pagesByRepositoryId, pagesByWikiPath, unassigned };
+  }
+
+  private async createDocsBindingForUnboundWikiPage(params: {
+    projectId: string;
+    repository: WikiDocsRepositoryRecord;
+    page: WikiDocsUnboundPageRecord;
+    docsPath: string;
+    remoteFile: RepositoryDocsMarkdownFile | null;
+    commitId: string | null;
+    contentHash: string;
+  }): Promise<void> {
+    await this.prisma.wikiDocsBinding.create({
+      data: {
+        projectId: params.projectId,
+        repositoryId: params.repository.id,
+        wikiPageId: params.page.id,
+        docsPath: params.docsPath,
+        wikiPath: params.page.path,
+        gitBlobId: params.remoteFile?.blobId ?? null,
+        gitLastCommitId: params.commitId ?? params.remoteFile?.lastCommitId ?? null,
+        gitContentHash: params.contentHash,
+        wikiRevisionId: params.page.currentRevision?.id ?? params.page.currentRevisionId,
+        wikiContentHash: params.contentHash,
+        status: WIKI_DOCS_BINDING_STATUS_ACTIVE,
+        lastSyncedAt: new Date()
+      }
+    });
+  }
+
+  private async reconcileUnboundWikiPagesForRepository(params: {
+    projectId: string;
+    repository: WikiDocsRepositoryRecord;
+    pages: WikiDocsUnboundPageRecord[];
+    filesByPath: Map<string, RepositoryDocsMarkdownFile>;
+    user: AuthenticatedUser;
+    result: WikiDocsSyncRepositoryResult;
+  }): Promise<void> {
+    const { projectId, repository, pages, filesByPath, user, result } = params;
+    const prefix = repository.wikiDocsPrefix;
+    if (!prefix || pages.length === 0) {
+      return;
+    }
+
+    for (const page of pages) {
+      try {
+        const currentRevision = page.currentRevision;
+        if (!currentRevision) {
+          continue;
+        }
+
+        const docsPath = this.wikiPathToDocsPath(prefix, page.path);
+        const existingBinding = await this.prisma.wikiDocsBinding.findFirst({
+          where: {
+            OR: [
+              {
+                projectId,
+                wikiPath: page.path
+              },
+              {
+                repositoryId: repository.id,
+                docsPath
+              }
+            ]
+          },
+          select: {
+            id: true
+          }
+        });
+        if (existingBinding) {
+          this.addDocsConflict(result, {
+            repositoryId: repository.id,
+            docsPath,
+            wikiPath: page.path,
+            reason: "Wiki page or Docs path already has a Docs binding"
+          });
+          continue;
+        }
+
+        const contentMarkdown = currentRevision.contentMarkdown;
+        const contentHash = this.hashMarkdownContent(contentMarkdown);
+        const remoteFile =
+          filesByPath.get(docsPath) ??
+          (await this.gitlabService.getRepositoryTextFileForDocsSync(projectId, user, repository.id, docsPath));
+
+        if (remoteFile) {
+          const remoteHash = this.hashMarkdownContent(remoteFile.content);
+          if (remoteHash !== contentHash) {
+            this.addDocsConflict(result, {
+              repositoryId: repository.id,
+              docsPath,
+              wikiPath: page.path,
+              reason: "Unbound Wiki page and existing Docs file have different content"
+            });
+            continue;
+          }
+
+          await this.createDocsBindingForUnboundWikiPage({
+            projectId,
+            repository,
+            page,
+            docsPath,
+            remoteFile,
+            commitId: null,
+            contentHash
+          });
+          result.linked += 1;
+          continue;
+        }
+
+        const commit = await this.gitlabService.commitRepositoryFileActions(
+          projectId,
+          user,
+          repository.id,
+          [
+            {
+              action: "create",
+              filePath: docsPath,
+              content: contentMarkdown
+            }
+          ],
+          `Create wiki docs file ${docsPath}`
+        );
+
+        await this.createDocsBindingForUnboundWikiPage({
+          projectId,
+          repository,
+          page,
+          docsPath,
+          remoteFile: null,
+          commitId: commit.id,
+          contentHash
+        });
+        result.exportedToGit += 1;
+      } catch (error) {
+        const message = (error as Error).message || "Unbound wiki page export failed";
+        result.errors.push(`/${page.path}: ${message}`);
+      }
+    }
   }
 
   private async createPublishedPageFromDocs(params: {
@@ -1648,6 +1874,12 @@ export class WikiService {
   async syncDocs(projectId: string, user: AuthenticatedUser): Promise<WikiDocsSyncResult> {
     await this.accessService.ensureProjectWritable(user.userId, user.globalRole, projectId);
     const repositories = await this.ensureAllRepositoryWikiDocsPrefixes(projectId);
+    const unboundPages = await this.loadUnboundPublishedWikiPages(projectId);
+    const {
+      pagesByRepositoryId: unboundPagesByRepositoryId,
+      pagesByWikiPath: unboundPagesByWikiPath,
+      unassigned
+    } = this.groupUnboundWikiPagesByRepository({ repositories, pages: unboundPages });
     const repositoryResults: WikiDocsSyncRepositoryResult[] = [];
 
     for (const repository of repositories) {
@@ -1671,6 +1903,10 @@ export class WikiService {
           const binding = bindingsByPath.get(file.docsPath);
 
           if (!binding) {
+            if (unboundPagesByWikiPath.has(prepared.wikiPath)) {
+              continue;
+            }
+
             if (!(await this.ensureDocsWikiPathAvailable(projectId, prepared.wikiPath))) {
               this.addDocsConflict(result, {
                 repositoryId: repository.id,
@@ -1695,6 +1931,15 @@ export class WikiService {
           }
           await this.reconcileMissingDocsFile({ repository, binding, user, result });
         }
+
+        await this.reconcileUnboundWikiPagesForRepository({
+          projectId,
+          repository,
+          pages: unboundPagesByRepositoryId.get(repository.id) ?? [],
+          filesByPath,
+          user,
+          result
+        });
 
         const lastSyncError =
           result.errors.length > 0
@@ -1726,9 +1971,12 @@ export class WikiService {
         created: accumulator.created + result.created,
         updatedFromGit: accumulator.updatedFromGit + result.updatedFromGit,
         updatedToGit: accumulator.updatedToGit + result.updatedToGit,
+        exportedToGit: accumulator.exportedToGit + result.exportedToGit,
+        linked: accumulator.linked + result.linked,
         deletedFromWiki: accumulator.deletedFromWiki + result.deletedFromWiki,
         deletedFromGit: accumulator.deletedFromGit + result.deletedFromGit,
         unchanged: accumulator.unchanged + result.unchanged,
+        unassigned: accumulator.unassigned,
         conflicts: accumulator.conflicts + result.conflicts.length,
         errors: accumulator.errors + result.errors.length
       }),
@@ -1736,9 +1984,12 @@ export class WikiService {
         created: 0,
         updatedFromGit: 0,
         updatedToGit: 0,
+        exportedToGit: 0,
+        linked: 0,
         deletedFromWiki: 0,
         deletedFromGit: 0,
         unchanged: 0,
+        unassigned: unassigned.length,
         conflicts: 0,
         errors: 0
       }
@@ -1755,7 +2006,8 @@ export class WikiService {
 
     return {
       repositories: repositoryResults,
-      totals
+      totals,
+      unassigned
     };
   }
 

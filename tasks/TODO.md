@@ -1,5 +1,18 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Docs Unbound Export (2026-06-02)
+- [x] Register the approved implementation plan for exporting unbound Wiki pages during Docs sync.
+- [x] Add backend sync phase for published Wiki pages without Docs bindings.
+- [x] Extend sync result types with exported/linked/unassigned counts.
+- [x] Update Wiki UI sync summary for exported/linked/unassigned pages.
+- [x] Add focused API and HTTP/type coverage.
+- [x] Run verification and document results.
+
+### Review
+- `Sync Docs` now exports published unbound Wiki pages whose first path segment matches a repository Docs prefix, links identical existing files without committing, and reports pages outside repository prefixes as unassigned.
+- Conflicting existing Docs content or existing bindings are reported without overwriting; GitLab failures leave no partial binding.
+- Verification passed: `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/wiki/wiki.service.spec.ts`; `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/wiki/wiki.service.spec.ts src/gitlab/gitlab.service.spec.ts`; `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/wiki.controller.http.spec.ts`; `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `git diff --check`.
+
 ## Wiki Docs Sync (2026-06-02)
 - [x] Register the approved implementation plan for bidirectional Wiki/Docs synchronization.
 - [x] Add Prisma persistence for per-repository Wiki Docs prefixes and file bindings.
