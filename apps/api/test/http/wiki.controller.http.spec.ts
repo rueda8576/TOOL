@@ -16,6 +16,8 @@ describe("WikiController HTTP", () => {
     wikiService = {
       createPage: jest.fn(),
       importPages: jest.fn(),
+      getDocsSyncStatus: jest.fn(),
+      syncDocs: jest.fn(),
       listTree: jest.fn(),
       getByPath: jest.fn(),
       searchPages: jest.fn(),
@@ -150,6 +152,7 @@ describe("WikiController HTTP", () => {
         title: "Roadmap",
         slug: "roadmap",
         folderPath: "guides",
+        docsRepositoryId: "repo-1",
         contentMarkdown: "# Roadmap"
       })
       .expect(201);
@@ -165,6 +168,7 @@ describe("WikiController HTTP", () => {
         title: "Roadmap",
         slug: "roadmap",
         folderPath: "guides",
+        docsRepositoryId: "repo-1",
         contentMarkdown: "# Roadmap"
       },
       {
@@ -180,6 +184,62 @@ describe("WikiController HTTP", () => {
     });
     expect(createResponse.body.revisionNumber).toBe(1);
     expect(treeResponse.body[0].pageId).toBe("page-1");
+  });
+
+  it("binds Docs sync status and run endpoints", async () => {
+    wikiService.getDocsSyncStatus.mockResolvedValue({
+      repositories: [
+        {
+          repositoryId: "repo-1",
+          name: "Atlasium",
+          pathWithNamespace: "atlasium/project",
+          defaultBranch: "main",
+          wikiDocsPrefix: "atlasium",
+          docsRoot: "Docs",
+          lastSyncedAt: null,
+          lastSyncError: null,
+          bindings: {
+            active: 1,
+            deleted: 0
+          }
+        }
+      ]
+    });
+    wikiService.syncDocs.mockResolvedValue({
+      repositories: [],
+      totals: {
+        created: 1,
+        updatedFromGit: 0,
+        updatedToGit: 0,
+        deletedFromWiki: 0,
+        deletedFromGit: 0,
+        unchanged: 0,
+        conflicts: 0,
+        errors: 0
+      }
+    });
+
+    const statusResponse = await request(app.getHttpServer())
+      .get("/projects/project-1/wiki-pages/docs-sync/status")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .expect(200);
+    const syncResponse = await request(app.getHttpServer())
+      .post("/projects/project-1/wiki-pages/docs-sync")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .expect(201);
+
+    expect(wikiService.getDocsSyncStatus).toHaveBeenCalledWith("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+    expect(wikiService.syncDocs).toHaveBeenCalledWith("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+    expect(statusResponse.body.repositories[0].wikiDocsPrefix).toBe("atlasium");
+    expect(syncResponse.body.totals.created).toBe(1);
   });
 
   it("imports markdown pages with bound params and body", async () => {

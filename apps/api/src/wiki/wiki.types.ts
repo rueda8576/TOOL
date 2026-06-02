@@ -79,4 +79,69 @@ export type WikiPageDetail = {
   draft?: WikiDraftView;
   outgoingLinks: WikiLinkView[];
   backlinks: WikiBacklinkView[];
+  docsSource?: WikiDocsSourceView | null;
+};
+
+export type WikiDocsSourceView = {
+  repositoryId: string;
+  repositoryName: string;
+  pathWithNamespace: string;
+  defaultBranch: string;
+  docsPath: string;
+  docsRoot: "Docs";
+  wikiPrefix: string;
+};
+
+export type WikiDocsSyncRepositoryStatus = {
+  repositoryId: string;
+  name: string;
+  pathWithNamespace: string;
+  defaultBranch: string;
+  wikiDocsPrefix: string;
+  docsRoot: "Docs";
+  lastSyncedAt: string | null;
+  lastSyncError: string | null;
+  bindings: {
+    active: number;
+    deleted: number;
+  };
+};
+
+export type WikiDocsSyncStatus = {
+  repositories: WikiDocsSyncRepositoryStatus[];
+};
+
+export type WikiDocsSyncConflict = {
+  repositoryId: string;
+  docsPath: string;
+  wikiPath: string;
+  reason: string;
+};
+
+export type WikiDocsSyncRepositoryResult = {
+  repositoryId: string;
+  name: string;
+  wikiDocsPrefix: string;
+  created: number;
+  updatedFromGit: number;
+  updatedToGit: number;
+  deletedFromWiki: number;
+  deletedFromGit: number;
+  unchanged: number;
+  conflicts: WikiDocsSyncConflict[];
+  errors: string[];
+};
+
+export type WikiDocsSyncResult = {
+  repositories: WikiDocsSyncRepositoryResult[];
+  totals: {
+    created: number;
+    updatedFromGit: number;
+    updatedToGit: number;
+    deletedFromWiki: number;
+    deletedFromGit: number;
+    unchanged: number;
+    conflicts: number;
+    errors: number;
+  };
 };

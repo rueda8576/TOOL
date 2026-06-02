@@ -2006,6 +2006,147 @@ describe("GitlabService", () => {
     });
   });
 
+  it("lists Docs markdown files recursively and decodes their content", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "findRepositoryRecordById").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse(200, [
+          {
+            id: "blob-1",
+            name: "Intro.md",
+            path: "Docs/Guides/Intro.md",
+            type: "blob"
+          },
+          {
+            id: "blob-2",
+            name: "logo.png",
+            path: "Docs/logo.png",
+            type: "blob"
+          }
+        ]) as Response
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          file_path: "Docs/Guides/Intro.md",
+          file_name: "Intro.md",
+          ref: "main",
+          size: 8,
+          encoding: "base64",
+          content_sha256: "sha-1",
+          blob_id: "blob-1",
+          commit_id: "commit-1",
+          last_commit_id: "commit-1",
+          content: Buffer.from("# Intro\n").toString("base64")
+        }) as Response
+      );
+
+    await expect(
+      service.listRepositoryDocsMarkdownFiles(
+        "project-1",
+        {
+          userId: "user-1",
+          globalRole: "reader"
+        } as any,
+        "repo-1"
+      )
+    ).resolves.toEqual([
+      {
+        docsPath: "Docs/Guides/Intro.md",
+        relativePath: "Guides/Intro.md",
+        fileName: "Intro.md",
+        ref: "main",
+        blobId: "blob-1",
+        lastCommitId: "commit-1",
+        contentSha256: "sha-1",
+        content: "# Intro\n"
+      }
+    ]);
+
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      "https://git.atlasium.info/api/v4/projects/123/repository/tree?recursive=true&per_page=100&page=1&ref=main&path=Docs"
+    );
+  });
+
+  it("creates repository commits for Docs file actions", async () => {
+    const { service, auditService } = makeServiceWithDeps();
+    jest.spyOn(service as any, "findRepositoryRecordById").mockResolvedValue(repositoryRecord);
+    jest
+      .spyOn(service as any, "withUserAccessToken")
+      .mockImplementation(async (...args: unknown[]) => {
+        const callback = args[1] as (accessToken: string) => Promise<unknown>;
+        return callback("user-token");
+      });
+
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(201, {
+        id: "commit-2",
+        short_id: "commit-2",
+        title: "Sync docs",
+        message: "Sync docs",
+        authored_date: "2026-06-02T10:00:00.000Z",
+        author_name: "Luis",
+        web_url: "https://git.atlasium.info/atlasium/nav/-/commit/commit-2"
+      }) as Response
+    );
+
+    await expect(
+      service.commitRepositoryFileActions(
+        "project-1",
+        {
+          userId: "user-1",
+          globalRole: "editor"
+        } as any,
+        "repo-1",
+        [
+          {
+            action: "update",
+            filePath: "Docs/Intro.md",
+            content: "# Intro",
+            lastCommitId: "commit-1"
+          }
+        ],
+        "Sync docs"
+      )
+    ).resolves.toEqual({
+      id: "commit-2",
+      shortId: "commit-2",
+      title: "Sync docs",
+      message: "Sync docs",
+      webUrl: "https://git.atlasium.info/atlasium/nav/-/commit/commit-2"
+    });
+
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://git.atlasium.info/api/v4/projects/123/repository/commits");
+    expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        branch: "main",
+        commit_message: "Sync docs",
+        actions: [
+          {
+            action: "update",
+            file_path: "Docs/Intro.md",
+            content: "# Intro",
+            last_commit_id: "commit-1"
+          }
+        ]
+      })
+    });
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "project.repository.docs.commit",
+        entityId: "repo-1"
+      })
+    );
+  });
+
   it("returns binary repository files without exposing decoded text content", async () => {
     const service = makeService();
     jest.spyOn(service as any, "findRepositoryRecord").mockResolvedValue(repositoryRecord);

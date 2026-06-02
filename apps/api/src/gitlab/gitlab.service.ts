@@ -234,8 +234,37 @@ const GITLAB_ACCESS_LEVEL_REPORTER = 20;
 const GITLAB_ACCESS_LEVEL_DEVELOPER = 30;
 const GITLAB_ACCESS_LEVEL_MAINTAINER = 40;
 const GITLAB_MERGE_REQUEST_STATES = ["opened", "merged", "closed", "all"] as const;
+const GITLAB_DOCS_ROOT = "Docs";
+const GITLAB_DOCS_TREE_PAGE_SIZE = 100;
+const GITLAB_DOCS_MAX_MARKDOWN_FILES = 2000;
 
 type RepositoryMergeRequestState = (typeof GITLAB_MERGE_REQUEST_STATES)[number];
+
+export type RepositoryDocsMarkdownFile = {
+  docsPath: string;
+  relativePath: string;
+  fileName: string;
+  ref: string;
+  blobId: string;
+  lastCommitId: string;
+  contentSha256: string | null;
+  content: string;
+};
+
+export type RepositoryCommitFileAction = {
+  action: "create" | "update" | "delete";
+  filePath: string;
+  content?: string;
+  lastCommitId?: string | null;
+};
+
+export type RepositoryDocsCommitResult = {
+  id: string;
+  shortId: string;
+  title: string;
+  message: string;
+  webUrl: string | null;
+};
 
 class GitlabApiError extends Error {
   constructor(
@@ -1075,6 +1104,151 @@ export class GitlabService {
     });
   }
 
+  async listRepositoryDocsMarkdownFiles(
+    projectId: string,
+    user: AuthenticatedUser,
+    repositoryId: string
+  ): Promise<RepositoryDocsMarkdownFile[]> {
+    const repository = await this.requireReadableRepository(projectId, user, repositoryId);
+
+    return this.withUserAccessToken(user.userId, async (accessToken) => {
+      const ref = repository.defaultBranch;
+      const entries = await this.listRepositoryTreeRecursive(repository, accessToken, ref, GITLAB_DOCS_ROOT);
+      const markdownEntries = entries
+        .filter((entry) => entry.type === "blob" && this.isDocsMarkdownPath(entry.path))
+        .sort((left, right) => left.path.localeCompare(right.path));
+
+      if (markdownEntries.length > GITLAB_DOCS_MAX_MARKDOWN_FILES) {
+        throw new BadRequestException(`Docs sync exceeded ${GITLAB_DOCS_MAX_MARKDOWN_FILES} Markdown files`);
+      }
+
+      const files: RepositoryDocsMarkdownFile[] = [];
+      for (const entry of markdownEntries) {
+        const gitlabFile = await this.readRepositoryTextFile(repository, accessToken, entry.path, ref);
+        files.push({
+          docsPath: gitlabFile.file_path,
+          relativePath: gitlabFile.file_path.slice(`${GITLAB_DOCS_ROOT}/`.length),
+          fileName: gitlabFile.file_name,
+          ref: gitlabFile.ref,
+          blobId: gitlabFile.blob_id,
+          lastCommitId: gitlabFile.last_commit_id,
+          contentSha256: gitlabFile.content_sha256 ?? null,
+          content: gitlabFile.content
+        });
+      }
+
+      return files;
+    });
+  }
+
+  async getRepositoryTextFileForDocsSync(
+    projectId: string,
+    user: AuthenticatedUser,
+    repositoryId: string,
+    filePath: string
+  ): Promise<RepositoryDocsMarkdownFile | null> {
+    const repository = await this.requireReadableRepository(projectId, user, repositoryId);
+    const normalizedFilePath = filePath.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    if (!normalizedFilePath) {
+      throw new BadRequestException("filePath is required");
+    }
+
+    return this.withUserAccessToken(user.userId, async (accessToken) => {
+      try {
+        const gitlabFile = await this.readRepositoryTextFile(repository, accessToken, normalizedFilePath, repository.defaultBranch);
+        return {
+          docsPath: gitlabFile.file_path,
+          relativePath: gitlabFile.file_path.startsWith(`${GITLAB_DOCS_ROOT}/`)
+            ? gitlabFile.file_path.slice(`${GITLAB_DOCS_ROOT}/`.length)
+            : gitlabFile.file_path,
+          fileName: gitlabFile.file_name,
+          ref: gitlabFile.ref,
+          blobId: gitlabFile.blob_id,
+          lastCommitId: gitlabFile.last_commit_id,
+          contentSha256: gitlabFile.content_sha256 ?? null,
+          content: gitlabFile.content
+        };
+      } catch (error) {
+        if (error instanceof GitlabApiError && error.status === 404) {
+          return null;
+        }
+        throw this.mapRepositoryAccessError(error);
+      }
+    });
+  }
+
+  async commitRepositoryFileActions(
+    projectId: string,
+    user: AuthenticatedUser,
+    repositoryId: string,
+    actions: RepositoryCommitFileAction[],
+    commitMessage: string
+  ): Promise<RepositoryDocsCommitResult> {
+    const repository = await this.requireWritableRepository(projectId, user, repositoryId);
+    const normalizedActions = actions.map((action) => ({
+      ...action,
+      filePath: action.filePath.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+    }));
+
+    if (normalizedActions.length === 0) {
+      throw new BadRequestException("At least one repository file action is required");
+    }
+    if (normalizedActions.some((action) => !action.filePath)) {
+      throw new BadRequestException("Repository file action paths are required");
+    }
+    if (
+      normalizedActions.some(
+        (action) => (action.action === "create" || action.action === "update") && typeof action.content !== "string"
+      )
+    ) {
+      throw new BadRequestException("Repository create/update actions require content");
+    }
+
+    return this.withUserAccessToken(user.userId, async (accessToken) => {
+      try {
+        const commit = await this.executeGitlabRequest<GitlabCommit>(
+          accessToken,
+          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/commits`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              branch: repository.defaultBranch,
+              commit_message: commitMessage.trim() || "Sync Atlasium Wiki Docs",
+              actions: normalizedActions.map((action) => ({
+                action: action.action,
+                file_path: action.filePath,
+                ...(action.content !== undefined ? { content: action.content } : {}),
+                ...(action.lastCommitId ? { last_commit_id: action.lastCommitId } : {})
+              }))
+            })
+          }
+        );
+
+        await this.auditService.log({
+          userId: user.userId,
+          projectId,
+          entityType: "project_repository",
+          entityId: repository.id,
+          action: "project.repository.docs.commit",
+          metadata: {
+            commitId: commit.id,
+            actionCount: normalizedActions.length
+          }
+        });
+
+        return {
+          id: commit.id,
+          shortId: commit.short_id,
+          title: commit.title,
+          message: commit.message,
+          webUrl: commit.web_url ?? null
+        };
+      } catch (error) {
+        throw this.mapRepositoryAccessError(error);
+      }
+    });
+  }
+
   async listMergeRequests(
     projectId: string,
     state: RepositoryMergeRequestState | undefined,
@@ -1333,6 +1507,74 @@ export class GitlabService {
     }
 
     return zip.toBuffer();
+  }
+
+  private async listRepositoryTreeRecursive(
+    repository: RepositoryRecord,
+    accessToken: string,
+    ref: string,
+    path: string
+  ): Promise<GitlabTreeNode[]> {
+    const entries: GitlabTreeNode[] = [];
+    let page = 1;
+
+    while (true) {
+      const search = new URLSearchParams({
+        recursive: "true",
+        per_page: String(GITLAB_DOCS_TREE_PAGE_SIZE),
+        page: String(page),
+        ref,
+        path
+      });
+
+      let pageEntries: GitlabTreeNode[];
+      try {
+        pageEntries = await this.executeGitlabRequest<GitlabTreeNode[]>(
+          accessToken,
+          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/tree?${search.toString()}`
+        );
+      } catch (error) {
+        if (error instanceof GitlabApiError && error.status === 404 && page === 1) {
+          return [];
+        }
+        throw this.mapRepositoryAccessError(error);
+      }
+
+      entries.push(...pageEntries);
+      if (pageEntries.length < GITLAB_DOCS_TREE_PAGE_SIZE) {
+        break;
+      }
+      page += 1;
+    }
+
+    return entries;
+  }
+
+  private async readRepositoryTextFile(
+    repository: RepositoryRecord,
+    accessToken: string,
+    filePath: string,
+    ref: string
+  ): Promise<Omit<GitlabFile, "content"> & { content: string }> {
+    const search = new URLSearchParams({ ref });
+    const gitlabFile = await this.executeGitlabRequest<GitlabFile>(
+      accessToken,
+      `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/files/${encodeURIComponent(filePath)}?${search.toString()}`
+    );
+    const rawBuffer = Buffer.from(gitlabFile.content, "base64");
+    if (this.isBinaryBuffer(rawBuffer)) {
+      throw new BadRequestException(`Repository file is binary and cannot be synced as Markdown: ${filePath}`);
+    }
+
+    return {
+      ...gitlabFile,
+      content: rawBuffer.toString("utf8")
+    };
+  }
+
+  private isDocsMarkdownPath(path: string): boolean {
+    const normalized = path.replace(/\\/g, "/");
+    return normalized.startsWith(`${GITLAB_DOCS_ROOT}/`) && /\.(md|markdown)$/i.test(normalized);
   }
 
   private logArchiveAttemptFailure(params: {

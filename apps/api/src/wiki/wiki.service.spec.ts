@@ -14,6 +14,7 @@ describe("WikiService", () => {
     accessService: any;
     auditService: any;
     storageService: any;
+    gitlabService: any;
   } => {
     const prisma: any = {
       wikiPage: {
@@ -42,6 +43,20 @@ describe("WikiService", () => {
         create: jest.fn(),
         findFirst: jest.fn()
       },
+      wikiDocsBinding: {
+        create: jest.fn(),
+        findFirst: jest.fn(),
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        groupBy: jest.fn()
+      },
+      projectRepository: {
+        findFirst: jest.fn(),
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn()
+      },
       fileObject: {
         findUnique: jest.fn()
       },
@@ -68,12 +83,19 @@ describe("WikiService", () => {
       readObject: jest.fn()
     };
 
+    const gitlabService: any = {
+      listRepositoryDocsMarkdownFiles: jest.fn(),
+      getRepositoryTextFileForDocsSync: jest.fn(),
+      commitRepositoryFileActions: jest.fn()
+    };
+
     return {
-      service: new WikiService(prisma, accessService, auditService, storageService),
+      service: new WikiService(prisma, accessService, auditService, storageService, gitlabService),
       prisma,
       accessService,
       auditService,
-      storageService
+      storageService,
+      gitlabService
     };
   };
 
@@ -384,6 +406,548 @@ describe("WikiService", () => {
       expect.objectContaining({
         action: "wiki.page.import",
         entityId: "page-2"
+      })
+    );
+  });
+
+  it("returns Docs sync status with stable repository prefixes", async () => {
+    const { service, prisma, accessService } = makeService();
+    prisma.projectRepository.findMany
+      .mockResolvedValueOnce([
+        {
+          id: "repo-1",
+          projectId: "project-1",
+          name: "Research Repo",
+          pathWithNamespace: "atlasium/research-repo",
+          defaultBranch: "main",
+          wikiDocsPrefix: null,
+          wikiDocsLastSyncedAt: null,
+          wikiDocsLastSyncError: null
+        }
+      ])
+      .mockResolvedValueOnce([]);
+    prisma.projectRepository.update.mockResolvedValue({
+      id: "repo-1",
+      projectId: "project-1",
+      name: "Research Repo",
+      pathWithNamespace: "atlasium/research-repo",
+      defaultBranch: "main",
+      wikiDocsPrefix: "research-repo",
+      wikiDocsLastSyncedAt: null,
+      wikiDocsLastSyncError: null
+    });
+    prisma.wikiDocsBinding.groupBy.mockResolvedValue([
+      {
+        repositoryId: "repo-1",
+        status: "active",
+        _count: { _all: 2 }
+      },
+      {
+        repositoryId: "repo-1",
+        status: "deleted",
+        _count: { _all: 1 }
+      }
+    ]);
+
+    const status = await service.getDocsSyncStatus("project-1", {
+      userId: "reader-1",
+      email: "reader@example.com",
+      globalRole: "reader"
+    });
+
+    expect(accessService.ensureProjectReadable).toHaveBeenCalledWith("reader-1", "reader", "project-1");
+    expect(prisma.projectRepository.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          wikiDocsPrefix: "research-repo"
+        }
+      })
+    );
+    expect(status.repositories[0]).toEqual(
+      expect.objectContaining({
+        repositoryId: "repo-1",
+        wikiDocsPrefix: "research-repo",
+        bindings: {
+          active: 2,
+          deleted: 1
+        }
+      })
+    );
+  });
+
+  it("syncs new Docs markdown files into published wiki pages", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    const tx: any = {
+      wikiPage: {
+        create: jest.fn().mockResolvedValue({ id: "page-1", path: "research-repo/guides/intro" }),
+        findMany: jest.fn().mockResolvedValue([]),
+        update: jest.fn()
+      },
+      wikiRevision: {
+        create: jest.fn().mockResolvedValue({ id: "revision-1" })
+      },
+      wikiDraft: {
+        create: jest.fn()
+      },
+      wikiDocsBinding: {
+        create: jest.fn()
+      },
+      wikiLink: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+        updateMany: jest.fn()
+      }
+    };
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Research Repo",
+        pathWithNamespace: "atlasium/research-repo",
+        defaultBranch: "main",
+        wikiDocsPrefix: "research-repo",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([]);
+    prisma.wikiPage.findFirst.mockResolvedValue(null);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+    prisma.projectRepository.update.mockResolvedValue({});
+    gitlabService.listRepositoryDocsMarkdownFiles.mockResolvedValue([
+      {
+        docsPath: "Docs/Guides/Intro.md",
+        relativePath: "Guides/Intro.md",
+        fileName: "Intro.md",
+        ref: "main",
+        blobId: "blob-1",
+        lastCommitId: "commit-1",
+        contentSha256: null,
+        content: "# Intro\n\nSee [Next](Next.md)."
+      }
+    ]);
+
+    const result = await service.syncDocs("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(result.totals.created).toBe(1);
+    expect(tx.wikiPage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          title: "Intro",
+          path: "research-repo/guides/intro",
+          templateType: "docs"
+        })
+      })
+    );
+    expect(tx.wikiRevision.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          contentMarkdown: "# Intro\n\nSee [Next](Next.md)."
+        })
+      })
+    );
+    expect(tx.wikiLink.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            toPath: "research-repo/guides/next"
+          })
+        ]
+      })
+    );
+  });
+
+  it("reports conflicts when Docs and Wiki both changed since last sync", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Research Repo",
+        pathWithNamespace: "atlasium/research-repo",
+        defaultBranch: "main",
+        wikiDocsPrefix: "research-repo",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([
+      {
+        id: "binding-1",
+        projectId: "project-1",
+        repositoryId: "repo-1",
+        wikiPageId: "page-1",
+        docsPath: "Docs/Intro.md",
+        wikiPath: "research-repo/intro",
+        gitBlobId: "blob-old",
+        gitLastCommitId: "commit-old",
+        gitContentHash: "old-git-hash",
+        wikiRevisionId: "revision-old",
+        wikiContentHash: "old-wiki-hash",
+        status: "active",
+        lastSyncedAt: null,
+        wikiPage: {
+          id: "page-1",
+          title: "Intro",
+          path: "research-repo/intro",
+          slug: "intro",
+          folderPath: "research-repo",
+          deletedAt: null,
+          currentRevisionId: "revision-new",
+          currentRevision: {
+            id: "revision-new",
+            revisionNumber: 2,
+            contentMarkdown: "Wiki changed"
+          }
+        }
+      }
+    ]);
+    prisma.wikiPage.findFirst.mockResolvedValue(null);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    prisma.projectRepository.update.mockResolvedValue({});
+    gitlabService.listRepositoryDocsMarkdownFiles.mockResolvedValue([
+      {
+        docsPath: "Docs/Intro.md",
+        relativePath: "Intro.md",
+        fileName: "Intro.md",
+        ref: "main",
+        blobId: "blob-new",
+        lastCommitId: "commit-new",
+        contentSha256: null,
+        content: "Docs changed"
+      }
+    ]);
+
+    const result = await service.syncDocs("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(result.totals.conflicts).toBe(1);
+    expect(result.repositories[0].conflicts[0]).toEqual(
+      expect.objectContaining({
+        docsPath: "Docs/Intro.md",
+        wikiPath: "research-repo/intro"
+      })
+    );
+    expect(gitlabService.commitRepositoryFileActions).not.toHaveBeenCalled();
+  });
+
+  it("uses a humanized file name when imported Docs markdown has no H1", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    const tx: any = {
+      wikiPage: {
+        create: jest.fn().mockResolvedValue({ id: "page-1", path: "research-repo/research/my-note" }),
+        findMany: jest.fn().mockResolvedValue([]),
+        update: jest.fn()
+      },
+      wikiRevision: {
+        create: jest.fn().mockResolvedValue({ id: "revision-1" })
+      },
+      wikiDraft: {
+        create: jest.fn()
+      },
+      wikiDocsBinding: {
+        create: jest.fn()
+      },
+      wikiLink: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+        updateMany: jest.fn()
+      }
+    };
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Research Repo",
+        pathWithNamespace: "atlasium/research-repo",
+        defaultBranch: "main",
+        wikiDocsPrefix: "research-repo",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([]);
+    prisma.wikiPage.findFirst.mockResolvedValue(null);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+    prisma.projectRepository.update.mockResolvedValue({});
+    gitlabService.listRepositoryDocsMarkdownFiles.mockResolvedValue([
+      {
+        docsPath: "Docs/Research/My Note.md",
+        relativePath: "Research/My Note.md",
+        fileName: "My Note.md",
+        ref: "main",
+        blobId: "blob-1",
+        lastCommitId: "commit-1",
+        contentSha256: null,
+        content: "Plain Markdown without heading"
+      }
+    ]);
+
+    const result = await service.syncDocs("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(result.totals.created).toBe(1);
+    expect(tx.wikiPage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          title: "My Note",
+          folderPath: "research-repo/research",
+          slug: "my-note",
+          path: "research-repo/research/my-note"
+        })
+      })
+    );
+  });
+
+  it("reports path collisions instead of importing Docs over an existing wiki page", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Research Repo",
+        pathWithNamespace: "atlasium/research-repo",
+        defaultBranch: "main",
+        wikiDocsPrefix: "research-repo",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([]);
+    prisma.wikiPage.findFirst.mockResolvedValue({ id: "existing-page" });
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    prisma.projectRepository.update.mockResolvedValue({});
+    gitlabService.listRepositoryDocsMarkdownFiles.mockResolvedValue([
+      {
+        docsPath: "Docs/Intro.md",
+        relativePath: "Intro.md",
+        fileName: "Intro.md",
+        ref: "main",
+        blobId: "blob-1",
+        lastCommitId: "commit-1",
+        contentSha256: null,
+        content: "# Intro"
+      }
+    ]);
+
+    const result = await service.syncDocs("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(result.totals.conflicts).toBe(1);
+    expect(result.repositories[0].conflicts[0]).toEqual(
+      expect.objectContaining({
+        docsPath: "Docs/Intro.md",
+        wikiPath: "research-repo/intro",
+        reason: "Wiki path is already used by another page or Docs binding"
+      })
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("exports Wiki-only changes to Git when Docs has not changed", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    const syncedHash = (service as any).hashMarkdownContent("Original");
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Research Repo",
+        pathWithNamespace: "atlasium/research-repo",
+        defaultBranch: "main",
+        wikiDocsPrefix: "research-repo",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([
+      {
+        id: "binding-1",
+        projectId: "project-1",
+        repositoryId: "repo-1",
+        wikiPageId: "page-1",
+        docsPath: "Docs/Intro.md",
+        wikiPath: "research-repo/intro",
+        gitBlobId: "blob-1",
+        gitLastCommitId: "commit-1",
+        gitContentHash: syncedHash,
+        wikiRevisionId: "revision-1",
+        wikiContentHash: syncedHash,
+        status: "active",
+        lastSyncedAt: null,
+        wikiPage: {
+          id: "page-1",
+          title: "Intro",
+          path: "research-repo/intro",
+          slug: "intro",
+          folderPath: "research-repo",
+          deletedAt: null,
+          currentRevisionId: "revision-2",
+          currentRevision: {
+            id: "revision-2",
+            revisionNumber: 2,
+            contentMarkdown: "Wiki changed"
+          }
+        }
+      }
+    ]);
+    prisma.wikiPage.findFirst.mockResolvedValue(null);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    prisma.projectRepository.update.mockResolvedValue({});
+    prisma.wikiDocsBinding.update.mockResolvedValue({});
+    gitlabService.listRepositoryDocsMarkdownFiles.mockResolvedValue([
+      {
+        docsPath: "Docs/Intro.md",
+        relativePath: "Intro.md",
+        fileName: "Intro.md",
+        ref: "main",
+        blobId: "blob-1",
+        lastCommitId: "commit-1",
+        contentSha256: null,
+        content: "Original"
+      }
+    ]);
+    gitlabService.commitRepositoryFileActions.mockResolvedValue({
+      id: "commit-2",
+      shortId: "commit-2",
+      title: "Update wiki docs file Docs/Intro.md",
+      message: "Update wiki docs file Docs/Intro.md",
+      createdAt: "2026-06-02T10:00:00.000Z",
+      webUrl: "https://git.example/commit-2"
+    });
+
+    const result = await service.syncDocs("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(result.totals.updatedToGit).toBe(1);
+    expect(gitlabService.commitRepositoryFileActions).toHaveBeenCalledWith(
+      "project-1",
+      expect.any(Object),
+      "repo-1",
+      [
+        {
+          action: "update",
+          filePath: "Docs/Intro.md",
+          content: "Wiki changed",
+          lastCommitId: "commit-1"
+        }
+      ],
+      "Update wiki docs file Docs/Intro.md"
+    );
+    expect(prisma.wikiDocsBinding.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "binding-1" },
+        data: expect.objectContaining({
+          gitBlobId: "blob-1",
+          gitLastCommitId: "commit-2",
+          wikiRevisionId: "revision-2",
+          status: "active"
+        })
+      })
+    );
+  });
+
+  it("soft-deletes a Docs-bound wiki page when the Git file disappears without Wiki changes", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    const syncedHash = (service as any).hashMarkdownContent("Published");
+    const tx: any = {
+      wikiLink: {
+        deleteMany: jest.fn(),
+        updateMany: jest.fn()
+      },
+      wikiPage: {
+        update: jest.fn()
+      },
+      wikiDocsBinding: {
+        update: jest.fn()
+      }
+    };
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Research Repo",
+        pathWithNamespace: "atlasium/research-repo",
+        defaultBranch: "main",
+        wikiDocsPrefix: "research-repo",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([
+      {
+        id: "binding-1",
+        projectId: "project-1",
+        repositoryId: "repo-1",
+        wikiPageId: "page-1",
+        docsPath: "Docs/Intro.md",
+        wikiPath: "research-repo/intro",
+        gitBlobId: "blob-1",
+        gitLastCommitId: "commit-1",
+        gitContentHash: syncedHash,
+        wikiRevisionId: "revision-1",
+        wikiContentHash: syncedHash,
+        status: "active",
+        lastSyncedAt: null,
+        wikiPage: {
+          id: "page-1",
+          title: "Intro",
+          path: "research-repo/intro",
+          slug: "intro",
+          folderPath: "research-repo",
+          deletedAt: null,
+          currentRevisionId: "revision-1",
+          currentRevision: {
+            id: "revision-1",
+            revisionNumber: 1,
+            contentMarkdown: "Published"
+          }
+        }
+      }
+    ]);
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+    prisma.projectRepository.update.mockResolvedValue({});
+    gitlabService.listRepositoryDocsMarkdownFiles.mockResolvedValue([]);
+
+    const result = await service.syncDocs("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(result.totals.deletedFromWiki).toBe(1);
+    expect(tx.wikiPage.update).toHaveBeenCalledWith({
+      where: { id: "page-1" },
+      data: {
+        deletedAt: expect.any(Date)
+      }
+    });
+    expect(tx.wikiDocsBinding.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "binding-1" },
+        data: expect.objectContaining({
+          status: "deleted",
+          gitBlobId: null,
+          gitLastCommitId: null,
+          gitContentHash: null
+        })
       })
     );
   });
@@ -766,6 +1330,7 @@ describe("WikiService", () => {
         update: jest.fn()
       }
     };
+    prisma.wikiPage.findFirst.mockImplementation(tx.wikiPage.findFirst);
     prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
 
     await expect(
@@ -839,6 +1404,7 @@ describe("WikiService", () => {
         })
       }
     };
+    prisma.wikiPage.findFirst.mockImplementation(tx.wikiPage.findFirst);
     prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
 
     await expect(
@@ -1203,6 +1769,7 @@ describe("WikiService", () => {
         updateMany: jest.fn()
       }
     };
+    prisma.wikiPage.findFirst.mockImplementation(tx.wikiPage.findFirst);
     prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
 
     const result = await service.deletePage("page-1", {
@@ -1384,6 +1951,7 @@ describe("WikiService", () => {
         updateMany: jest.fn()
       }
     };
+    prisma.wikiPage.findFirst.mockImplementation(tx.wikiPage.findFirst);
     accessService.ensureProjectWritable.mockRejectedValueOnce(new ForbiddenException("Forbidden"));
     prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
 

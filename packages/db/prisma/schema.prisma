@@ -230,6 +230,7 @@ model Project {
   documents Document[]
   wikiPages WikiPage[]
   wikiAssets WikiAsset[]
+  wikiDocsBindings WikiDocsBinding[]
   tasks     Task[]
   meetings  Meeting[]
   meetingAutomationRuns MeetingAutomationRun[]
@@ -271,13 +272,18 @@ model ProjectRepository {
   defaultBranch     String
   visibility        String   @default("private")
   lastActivityAt    DateTime @default(now())
+  wikiDocsPrefix    String?
+  wikiDocsLastSyncedAt DateTime?
+  wikiDocsLastSyncError String?
   connectedByUserId String
   connectedAt       DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   connectedBy User    @relation("ProjectRepositoryConnector", fields: [connectedByUserId], references: [id], onDelete: Restrict)
+  wikiDocsBindings WikiDocsBinding[]
 
+  @@unique([projectId, wikiDocsPrefix])
   @@index([projectId])
   @@index([pathWithNamespace])
 }
@@ -436,6 +442,7 @@ model WikiPage {
   draft           WikiDraft?
   outgoingLinks   WikiLink[]    @relation("WikiLinkFrom")
   incomingLinks   WikiLink[]    @relation("WikiLinkTo")
+  docsBinding     WikiDocsBinding?
 
   @@index([projectId])
   @@index([projectId, path])
@@ -502,6 +509,33 @@ model WikiAsset {
 
   @@unique([fileObjectId])
   @@index([projectId, createdAt])
+}
+
+model WikiDocsBinding {
+  id                    String   @id @default(cuid())
+  projectId             String
+  repositoryId          String
+  wikiPageId            String?  @unique
+  docsPath              String
+  wikiPath              String
+  gitBlobId             String?
+  gitLastCommitId       String?
+  gitContentHash        String?
+  wikiRevisionId        String?
+  wikiContentHash       String?
+  status                String   @default("active")
+  lastSyncedAt          DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  project    Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repository ProjectRepository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  wikiPage   WikiPage?         @relation(fields: [wikiPageId], references: [id], onDelete: SetNull)
+
+  @@unique([repositoryId, docsPath])
+  @@unique([projectId, wikiPath])
+  @@index([projectId, status])
+  @@index([repositoryId, status])
 }
 
 model Task {

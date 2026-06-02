@@ -7,7 +7,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
 import { API_BASE_URL } from "../lib/client-api";
-import { normalizeWikiMathMarkdown, WikiLinkView } from "../lib/wiki";
+import { normalizeWikiMathMarkdown, WikiDocsSourceView, WikiLinkView } from "../lib/wiki";
 
 const WIKI_LINK_PATTERN = /\[\[([^[\]]+)]]/g;
 const WIKI_PATH_SEGMENT_PATTERN = /^[a-z0-9-]+$/;
@@ -33,6 +33,83 @@ function normalizeWikiPath(rawPath: string): string | null {
   }
 
   return segments.join("/");
+}
+
+function isExternalMarkdownTarget(rawTarget: string): boolean {
+  const target = rawTarget.trim();
+  return (
+    target.startsWith("http://") ||
+    target.startsWith("https://") ||
+    target.startsWith("data:") ||
+    target.startsWith("mailto:") ||
+    target.startsWith("#") ||
+    target.startsWith("/") ||
+    target.startsWith("//")
+  );
+}
+
+function stripMarkdownExtension(fileName: string): string {
+  return fileName.replace(/\.(md|markdown)$/i, "");
+}
+
+function toWikiPathSegment(rawSegment: string, fallback = "page"): string {
+  const normalized = rawSegment
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+  return normalized || fallback;
+}
+
+function resolveRelativeDocsPath(fromDocsPath: string, rawTarget: string): string | null {
+  if (!rawTarget.trim() || isExternalMarkdownTarget(rawTarget)) {
+    return null;
+  }
+
+  let targetPath = rawTarget.trim().replace(/^<|>$/g, "").split("#")[0]?.split("?")[0] ?? "";
+  try {
+    targetPath = decodeURIComponent(targetPath);
+  } catch {
+    // Keep raw target when it is not URI-encoded.
+  }
+
+  const sourceSegments = fromDocsPath.replace(/\\/g, "/").split("/").filter(Boolean);
+  sourceSegments.pop();
+  const resolvedSegments = [...sourceSegments];
+  for (const segment of targetPath.replace(/\\/g, "/").split("/")) {
+    if (!segment || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      if (resolvedSegments.length === 0) {
+        return null;
+      }
+      resolvedSegments.pop();
+      continue;
+    }
+    resolvedSegments.push(segment);
+  }
+
+  return resolvedSegments.join("/");
+}
+
+function docsPathToWikiPath(docsSource: WikiDocsSourceView, docsPath: string): string {
+  const normalizedDocsPath = docsPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const relativePath = normalizedDocsPath.startsWith(`${docsSource.docsRoot}/`)
+    ? normalizedDocsPath.slice(`${docsSource.docsRoot}/`.length)
+    : normalizedDocsPath;
+  const segments = relativePath.split("/").filter(Boolean);
+  if (segments.length === 0) {
+    return docsSource.wikiPrefix;
+  }
+
+  const last = segments[segments.length - 1] ?? "index.md";
+  return [
+    docsSource.wikiPrefix,
+    ...segments.slice(0, -1).map((segment) => toWikiPathSegment(segment, "folder")),
+    toWikiPathSegment(stripMarkdownExtension(last))
+  ].join("/");
 }
 
 function rewriteWikiLinksInText(markdown: string): string {
@@ -144,18 +221,24 @@ function resolveWikiAssetPath(src: string): string | null {
 function AuthenticatedWikiImage({
   src,
   alt,
-  token
+  token,
+  projectId,
+  docsSource
 }: {
   src: string;
   alt?: string;
   token: string | null;
+  projectId?: string;
+  docsSource?: WikiDocsSourceView | null;
 }): JSX.Element {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const assetPath = resolveWikiAssetPath(src);
+  const docsPath = !assetPath && docsSource ? resolveRelativeDocsPath(docsSource.docsPath, src) : null;
+  const docsImagePath = docsPath && !/\.(md|markdown)$/i.test(docsPath) ? docsPath : null;
 
   useEffect(() => {
-    if (!assetPath || !token) {
+    if ((!assetPath && !docsImagePath) || !token) {
       setBlobUrl(null);
       setFailed(false);
       return;
@@ -167,7 +250,19 @@ function AuthenticatedWikiImage({
 
     void (async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}${assetPath}`, {
+        const url = assetPath
+          ? `${API_BASE_URL}${assetPath}`
+          : projectId && docsSource && docsImagePath
+            ? `${API_BASE_URL}/projects/${projectId}/repositories/${docsSource.repositoryId}/file/raw?${new URLSearchParams({
+                filePath: docsImagePath,
+                ref: docsSource.defaultBranch
+              }).toString()}`
+            : null;
+        if (!url) {
+          throw new Error("Failed to resolve image");
+        }
+
+        const response = await fetch(url, {
           headers: {
             Authorization: `Bearer ${token}`
           }
@@ -193,9 +288,9 @@ function AuthenticatedWikiImage({
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [assetPath, token]);
+  }, [assetPath, docsImagePath, docsSource, projectId, token]);
 
-  if (!assetPath) {
+  if (!assetPath && !docsImagePath) {
     return <img src={src} alt={alt ?? ""} />;
   }
   if (failed || !blobUrl) {
@@ -208,11 +303,15 @@ export function WikiMarkdown({
   contentMarkdown,
   links = [],
   token,
+  projectId,
+  docsSource,
   onNavigateWikiPath
 }: {
   contentMarkdown: string;
   links?: WikiLinkView[];
   token: string | null;
+  projectId?: string;
+  docsSource?: WikiDocsSourceView | null;
   onNavigateWikiPath?: (path: string) => void;
 }): JSX.Element {
   const renderedMarkdown = useMemo(
@@ -228,6 +327,16 @@ export function WikiMarkdown({
       components={{
         a: ({ href, children }) => {
           if (!href?.startsWith(WIKI_LINK_PREFIX)) {
+            const activeDocsSource = docsSource ?? null;
+            const docsPath = activeDocsSource ? resolveRelativeDocsPath(activeDocsSource.docsPath, href ?? "") : null;
+            if (activeDocsSource && docsPath && /\.(md|markdown)$/i.test(docsPath) && onNavigateWikiPath) {
+              const wikiPath = docsPathToWikiPath(activeDocsSource, docsPath);
+              return (
+                <button type="button" className="link-button" onClick={() => onNavigateWikiPath(wikiPath)}>
+                  {children}
+                </button>
+              );
+            }
             return <a href={href}>{children}</a>;
           }
 
@@ -247,7 +356,15 @@ export function WikiMarkdown({
             </button>
           );
         },
-        img: ({ src, alt }) => <AuthenticatedWikiImage src={String(src ?? "")} alt={alt} token={token} />
+        img: ({ src, alt }) => (
+          <AuthenticatedWikiImage
+            src={String(src ?? "")}
+            alt={alt}
+            token={token}
+            projectId={projectId}
+            docsSource={docsSource}
+          />
+        )
       }}
     >
       {renderedMarkdown}

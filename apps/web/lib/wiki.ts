@@ -89,6 +89,71 @@ export type WikiPageDetail = {
   draft?: WikiDraftView;
   outgoingLinks: WikiLinkView[];
   backlinks: WikiBacklinkView[];
+  docsSource?: WikiDocsSourceView | null;
+};
+
+export type WikiDocsSourceView = {
+  repositoryId: string;
+  repositoryName: string;
+  pathWithNamespace: string;
+  defaultBranch: string;
+  docsPath: string;
+  docsRoot: "Docs";
+  wikiPrefix: string;
+};
+
+export type WikiDocsSyncRepositoryStatus = {
+  repositoryId: string;
+  name: string;
+  pathWithNamespace: string;
+  defaultBranch: string;
+  wikiDocsPrefix: string;
+  docsRoot: "Docs";
+  lastSyncedAt: string | null;
+  lastSyncError: string | null;
+  bindings: {
+    active: number;
+    deleted: number;
+  };
+};
+
+export type WikiDocsSyncStatus = {
+  repositories: WikiDocsSyncRepositoryStatus[];
+};
+
+export type WikiDocsSyncConflict = {
+  repositoryId: string;
+  docsPath: string;
+  wikiPath: string;
+  reason: string;
+};
+
+export type WikiDocsSyncRepositoryResult = {
+  repositoryId: string;
+  name: string;
+  wikiDocsPrefix: string;
+  created: number;
+  updatedFromGit: number;
+  updatedToGit: number;
+  deletedFromWiki: number;
+  deletedFromGit: number;
+  unchanged: number;
+  conflicts: WikiDocsSyncConflict[];
+  errors: string[];
+};
+
+export type WikiDocsSyncResult = {
+  repositories: WikiDocsSyncRepositoryResult[];
+  totals: {
+    created: number;
+    updatedFromGit: number;
+    updatedToGit: number;
+    deletedFromWiki: number;
+    deletedFromGit: number;
+    unchanged: number;
+    conflicts: number;
+    errors: number;
+  };
 };
 
 export type CreateWikiPageInput = {
@@ -96,6 +161,7 @@ export type CreateWikiPageInput = {
   slug: string;
   folderPath?: string;
   templateType?: string;
+  docsRepositoryId?: string;
   contentMarkdown: string;
 };
 
@@ -302,6 +368,19 @@ export async function importWikiPages(
     init: {
       method: "POST",
       body: JSON.stringify(payload)
+    }
+  });
+}
+
+export async function getWikiDocsSyncStatus(projectId: string, token: string): Promise<WikiDocsSyncStatus> {
+  return authFetch<WikiDocsSyncStatus>(`/projects/${projectId}/wiki-pages/docs-sync/status`, { token });
+}
+
+export async function syncWikiDocs(projectId: string, token: string): Promise<WikiDocsSyncResult> {
+  return authFetch<WikiDocsSyncResult>(`/projects/${projectId}/wiki-pages/docs-sync`, {
+    token,
+    init: {
+      method: "POST"
     }
   });
 }

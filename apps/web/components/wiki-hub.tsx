@@ -24,6 +24,7 @@ import {
   deleteWikiPage,
   DraftConflictPayload,
   flushWikiRealtimeDraft,
+  getWikiDocsSyncStatus,
   ImportWikiPagesResult,
   importWikiPages,
   getWikiRevision,
@@ -33,7 +34,10 @@ import {
   publishWikiPage,
   saveWikiDraft,
   searchWikiPages,
+  syncWikiDocs,
   uploadWikiAsset,
+  WikiDocsSyncResult,
+  WikiDocsSyncStatus,
   WikiDraftConflictError,
   WikiPageDetail,
   WikiRevisionView,
@@ -761,10 +765,14 @@ export function WikiHub({
   const [importWarnings, setImportWarnings] = useState<string[]>([]);
   const [importSummary, setImportSummary] = useState<ImportWikiPagesResult | null>(null);
   const [importingPages, setImportingPages] = useState(false);
+  const [docsSyncStatus, setDocsSyncStatus] = useState<WikiDocsSyncStatus | null>(null);
+  const [docsSyncResult, setDocsSyncResult] = useState<WikiDocsSyncResult | null>(null);
+  const [syncingDocs, setSyncingDocs] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createSlug, setCreateSlug] = useState("");
   const [createFolderPath, setCreateFolderPath] = useState("");
   const [createTemplateType, setCreateTemplateType] = useState("");
+  const [createDocsRepositoryId, setCreateDocsRepositoryId] = useState("");
   const [createSlugEdited, setCreateSlugEdited] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
@@ -822,6 +830,10 @@ export function WikiHub({
 
   const allPagePaths = useMemo(() => flattenPagePaths(treeNodes), [treeNodes]);
   const existingWikiPaths = useMemo(() => new Set(allPagePaths), [allPagePaths]);
+  const selectedCreateDocsRepository = useMemo(
+    () => docsSyncStatus?.repositories.find((repository) => repository.repositoryId === createDocsRepositoryId) ?? null,
+    [createDocsRepositoryId, docsSyncStatus]
+  );
   const visibleCollaborators = useMemo(() => collaborators.slice(0, 6), [collaborators]);
   const hiddenCollaboratorsCount = useMemo(
     () => Math.max(collaborators.length - visibleCollaborators.length, 0),
@@ -1088,6 +1100,25 @@ export function WikiHub({
     [projectId]
   );
 
+  const loadDocsSyncStatus = useCallback(
+    async (authToken: string): Promise<void> => {
+      try {
+        const status = await getWikiDocsSyncStatus(projectId, authToken);
+        setDocsSyncStatus(status);
+        setCreateDocsRepositoryId((current) => {
+          if (current && status.repositories.some((repository) => repository.repositoryId === current)) {
+            return current;
+          }
+          return status.repositories[0]?.repositoryId ?? "";
+        });
+      } catch (statusError) {
+        setDocsSyncStatus(null);
+        setError((statusError as Error).message);
+      }
+    },
+    [projectId]
+  );
+
   const refreshSearchResults = useCallback(
     async (authToken: string): Promise<void> => {
       if (!searchModeActive) {
@@ -1159,6 +1190,7 @@ export function WikiHub({
     const storedUser = parseStoredUser(localStorage.getItem("doctoral_user"));
     setSessionUser(storedUser);
     void loadAccess(storedToken);
+    void loadDocsSyncStatus(storedToken);
 
     void (async () => {
       const nodes = await loadTree(storedToken);
@@ -1169,7 +1201,7 @@ export function WikiHub({
         null;
       setSelectedPath(candidatePath);
     })();
-  }, [initialPathNormalized, loadAccess, loadTree, router]);
+  }, [initialPathNormalized, loadAccess, loadDocsSyncStatus, loadTree, router]);
 
   useEffect(() => {
     if (!token || !selectedPath) {
@@ -1627,6 +1659,7 @@ export function WikiHub({
       setIsEditing(false);
       setHistoryOpen(false);
       await loadTree(token);
+      await loadDocsSyncStatus(token);
       if (selectedPath) {
         await loadPage(token, selectedPath);
       }
@@ -1668,6 +1701,10 @@ export function WikiHub({
       setError("Slug is required and must be URL-safe.");
       return;
     }
+    if (!createDocsRepositoryId) {
+      setError("Select a Docs repository before creating a wiki page.");
+      return;
+    }
     const normalizedFolder = normalizePath(createFolderPath) ?? "";
 
     setCreatingPage(true);
@@ -1680,6 +1717,7 @@ export function WikiHub({
         slug: normalizedSlug,
         folderPath: normalizedFolder || undefined,
         templateType: createTemplateType.trim() || undefined,
+        docsRepositoryId: createDocsRepositoryId || undefined,
         contentMarkdown: `# ${trimmedTitle}\n\n`
       });
 
@@ -1689,8 +1727,10 @@ export function WikiHub({
       setCreateFolderPath("");
       setCreateTemplateType("");
       setCreateSlugEdited(false);
+      setCreateDocsRepositoryId((current) => current || (docsSyncStatus?.repositories[0]?.repositoryId ?? ""));
 
       await loadTree(token);
+      await loadDocsSyncStatus(token);
       setSelectedPath(response.path);
       router.push(`/projects/${projectId}/wiki/${encodeWikiPath(response.path)}`);
       await loadPage(token, response.path);
@@ -1860,6 +1900,49 @@ export function WikiHub({
     token
   ]);
 
+  const onSyncDocs = useCallback(async (): Promise<void> => {
+    if (!token) {
+      setError("Missing session token. Please sign in again.");
+      return;
+    }
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
+      return;
+    }
+
+    setSyncingDocs(true);
+    setError(null);
+    setSuccess(null);
+    setDocsSyncResult(null);
+
+    try {
+      const result = await syncWikiDocs(projectId, token);
+      setDocsSyncResult(result);
+      await loadTree(token);
+      await loadDocsSyncStatus(token);
+      await refreshSearchResults(token);
+      if (selectedPath) {
+        await loadPage(token, selectedPath);
+      }
+      setSuccess(
+        `Docs sync finished: ${result.totals.created} created, ${result.totals.updatedFromGit + result.totals.updatedToGit} updated, ${result.totals.conflicts} conflict(s), ${result.totals.errors} error(s).`
+      );
+    } catch (syncError) {
+      setError((syncError as Error).message);
+    } finally {
+      setSyncingDocs(false);
+    }
+  }, [
+    canWrite,
+    loadDocsSyncStatus,
+    loadPage,
+    loadTree,
+    projectId,
+    refreshSearchResults,
+    selectedPath,
+    token
+  ]);
+
   const onDeletePage = async (): Promise<void> => {
     if (!token || !pageDetail || !canWrite) {
       return;
@@ -1903,6 +1986,7 @@ export function WikiHub({
       setConflictLocalSnapshot(null);
       setPublishNote("");
       await loadTree(token);
+      await loadDocsSyncStatus(token);
       await refreshSearchResults(token);
       sessionStorage.setItem(WIKI_FLASH_SUCCESS_KEY, `Deleted wiki page "/${targetPage.path}".`);
       router.push(`/projects/${projectId}/wiki`);
@@ -2439,9 +2523,44 @@ export function WikiHub({
                 >
                   {showImportPanel ? "Close import" : "Import Markdown"}
                 </button>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => void onSyncDocs()}
+                  disabled={syncingDocs || (docsSyncStatus?.repositories.length ?? 0) === 0}
+                >
+                  {syncingDocs ? "Syncing..." : "Sync Docs"}
+                </button>
               </div>
             ) : null}
           </div>
+
+          {docsSyncResult ? (
+            <div className="wiki-import-summary">
+              <p className={docsSyncResult.totals.conflicts > 0 || docsSyncResult.totals.errors > 0 ? "alert alert-info" : "alert alert-success"}>
+                Docs sync: {docsSyncResult.totals.created} created, {docsSyncResult.totals.updatedFromGit + docsSyncResult.totals.updatedToGit} updated, {docsSyncResult.totals.deletedFromWiki + docsSyncResult.totals.deletedFromGit} deleted, {docsSyncResult.totals.conflicts} conflict(s), {docsSyncResult.totals.errors} error(s).
+              </p>
+              {docsSyncResult.repositories.some((repository) => repository.conflicts.length > 0 || repository.errors.length > 0) ? (
+                <ul className="list">
+                  {docsSyncResult.repositories.flatMap((repository) => [
+                    ...repository.conflicts.map((conflict) => (
+                      <li key={`${repository.repositoryId}-${conflict.docsPath}-conflict`} className="list-item">
+                        <strong>{repository.name}</strong>
+                        <span className="wiki-page-path">/{conflict.wikiPath}</span>
+                        <span>{conflict.reason}</span>
+                      </li>
+                    )),
+                    ...repository.errors.map((syncError) => (
+                      <li key={`${repository.repositoryId}-${syncError}`} className="list-item">
+                        <strong>{repository.name}</strong>
+                        <span>{syncError}</span>
+                      </li>
+                    ))
+                  ])}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
 
           <label className="wiki-search-label">
             Search
@@ -2487,8 +2606,32 @@ export function WikiHub({
                   disabled={creatingPage}
                 />
               </label>
+              {docsSyncStatus && docsSyncStatus.repositories.length > 0 ? (
+                <label>
+                  Docs repository
+                  <select
+                    className="input"
+                    value={createDocsRepositoryId}
+                    onChange={(event) => setCreateDocsRepositoryId(event.target.value)}
+                    disabled={creatingPage}
+                  >
+                    {docsSyncStatus.repositories.map((repository) => (
+                      <option key={repository.repositoryId} value={repository.repositoryId}>
+                        {repository.name} - /{repository.wikiDocsPrefix}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedCreateDocsRepository ? (
+                    <span className="wiki-page-path">
+                      Git: {selectedCreateDocsRepository.pathWithNamespace}/{selectedCreateDocsRepository.docsRoot}
+                    </span>
+                  ) : null}
+                </label>
+              ) : (
+                <p className="alert alert-info">No Code repositories are available for Docs-backed wiki pages.</p>
+              )}
               <label>
-                Folder path (optional)
+                Folder path in Docs (optional)
                 <input
                   className="input"
                   value={createFolderPath}
@@ -2497,6 +2640,11 @@ export function WikiHub({
                   placeholder="research/methods"
                   disabled={creatingPage}
                 />
+                {selectedCreateDocsRepository ? (
+                  <span className="wiki-page-path">
+                    Wiki prefix: /{selectedCreateDocsRepository.wikiDocsPrefix}
+                  </span>
+                ) : null}
               </label>
               <label>
                 Template type (optional)
@@ -2510,7 +2658,7 @@ export function WikiHub({
                 />
               </label>
               <div className="inline-actions">
-                <button className="button" type="submit" disabled={creatingPage}>
+                <button className="button" type="submit" disabled={creatingPage || (docsSyncStatus?.repositories.length ?? 0) === 0}>
                   {creatingPage ? "Creating..." : "Create page"}
                 </button>
                 <button
@@ -2666,7 +2814,7 @@ export function WikiHub({
           {loadingPage ? <LoadingState title="Loading wiki page" detail="Preparing content, links, and collaboration state." /> : null}
 
           {pageDetail && !isEditing && !historyOpen ? (
-            <WikiReader pageDetail={pageDetail} token={token} onOpenPath={(path) => void openPath(path)} />
+            <WikiReader projectId={projectId} pageDetail={pageDetail} token={token} onOpenPath={(path) => void openPath(path)} />
           ) : null}
 
           {pageDetail && isEditing && canWrite && !historyOpen ? (
@@ -2787,7 +2935,14 @@ export function WikiHub({
                 <section className="wiki-preview-panel">
                   <h4>Live preview</h4>
                   <article className="wiki-markdown">
-                    <WikiMarkdown contentMarkdown={draftContent} links={pageDetail.outgoingLinks} token={token} onNavigateWikiPath={(path) => void openPath(path)} />
+                    <WikiMarkdown
+                      contentMarkdown={draftContent}
+                      links={pageDetail.outgoingLinks}
+                      token={token}
+                      projectId={projectId}
+                      docsSource={pageDetail.docsSource}
+                      onNavigateWikiPath={(path) => void openPath(path)}
+                    />
                   </article>
                 </section>
               </div>

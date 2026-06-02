@@ -11,10 +11,12 @@ function timeLabel(dateIso: string | null | undefined): string {
 }
 
 export function WikiReader({
+  projectId,
   pageDetail,
   token,
   onOpenPath
 }: {
+  projectId: string;
   pageDetail: WikiPageDetail;
   token: string | null;
   onOpenPath: (path: string) => void;
@@ -41,6 +43,8 @@ export function WikiReader({
           contentMarkdown={pageDetail.published ? pageDetail.published.contentMarkdown : pageDetail.draft?.contentMarkdown ?? ""}
           links={pageDetail.outgoingLinks}
           token={token}
+          projectId={projectId}
+          docsSource={pageDetail.docsSource}
           onNavigateWikiPath={onOpenPath}
         />
       </article>

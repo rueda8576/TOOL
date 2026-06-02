@@ -21,6 +21,11 @@ export class CreateWikiPageDto {
   @MaxLength(300)
   folderPath?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  docsRepositoryId?: string;
+
   @IsString()
   contentMarkdown!: string;
 }

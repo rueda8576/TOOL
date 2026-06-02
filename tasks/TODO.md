@@ -1,5 +1,20 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Docs Sync (2026-06-02)
+- [x] Register the approved implementation plan for bidirectional Wiki/Docs synchronization.
+- [x] Add Prisma persistence for per-repository Wiki Docs prefixes and file bindings.
+- [x] Add GitLab repository traversal and direct commit helpers for `Docs` Markdown files.
+- [x] Add backend Wiki Docs sync status/run endpoints with conflict-safe reconciliation.
+- [x] Sync Wiki create/publish/delete flows to GitLab for Docs-bound pages.
+- [x] Update Wiki UI with repository-aware page creation, `Sync Docs`, and Docs-relative Markdown rendering.
+- [x] Add focused API/Web tests and run verification.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Implemented repository-scoped Docs bindings, stable Wiki prefixes, conflict-safe reconciliation, GitLab commit/export hooks for Docs-bound pages, and Wiki UI controls for sync and repository-aware creation.
+- Verification passed: `pnpm --filter @doctoral/db db:generate`; `DATABASE_URL='postgresql://postgres:postgres@localhost:5432/doctoral_platform?schema=public' pnpm --filter @doctoral/db exec prisma validate`; `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/wiki/wiki.service.spec.ts src/gitlab/gitlab.service.spec.ts`; `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/wiki.controller.http.spec.ts test/http/gitlab.controller.http.spec.ts`; `pnpm --filter @doctoral/api build`; `pnpm --filter @doctoral/web build`; `git diff --check`.
+- Coverage gate was not required by the project rule because this change did not add a new API service file.
+
 ## README Refresh and Atlasium v0.4.0 Release (2026-05-31)
 - [x] Register the README/release implementation plan.
 - [x] Rewrite `README.md` to reflect the current Atlasium product, architecture, setup, testing, and deployment model.

@@ -18,7 +18,15 @@ import { SaveWikiDraftDto } from "./dto/save-wiki-draft.dto";
 import { SearchWikiPagesQueryDto } from "./dto/search-wiki-pages-query.dto";
 import { UpdateWikiPageDto } from "./dto/update-wiki-page.dto";
 import { WikiService } from "./wiki.service";
-import { WikiBacklinkView, WikiPageDetail, WikiRevisionView, WikiSearchResult, WikiTreeNode } from "./wiki.types";
+import {
+  WikiBacklinkView,
+  WikiDocsSyncResult,
+  WikiDocsSyncStatus,
+  WikiPageDetail,
+  WikiRevisionView,
+  WikiSearchResult,
+  WikiTreeNode
+} from "./wiki.types";
 
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -51,6 +59,22 @@ export class WikiController {
     skipped: Array<{ title: string; path: string; sourcePath: string; reason: "path_exists" }>;
   }> {
     return this.wikiService.importPages(projectId, dto, user);
+  }
+
+  @Get("projects/:projectId/wiki-pages/docs-sync/status")
+  getDocsSyncStatus(
+    @Param("projectId") projectId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WikiDocsSyncStatus> {
+    return this.wikiService.getDocsSyncStatus(projectId, user);
+  }
+
+  @Post("projects/:projectId/wiki-pages/docs-sync")
+  syncDocs(
+    @Param("projectId") projectId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WikiDocsSyncResult> {
+    return this.wikiService.syncDocs(projectId, user);
   }
 
   @Get("projects/:projectId/wiki-pages/tree")
