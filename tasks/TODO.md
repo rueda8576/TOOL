@@ -1,5 +1,20 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Docs Assignment Panel (2026-06-02)
+- [x] Register the approved implementation plan for assigning unassigned Wiki pages to Docs repos.
+- [x] Add API DTO, endpoint, service flow, and result/status types.
+- [x] Preserve page history while moving paths and creating Docs bindings.
+- [x] Add guided Wiki UI assignment panel.
+- [x] Add focused API and HTTP coverage.
+- [x] Run verification and document results.
+
+### Review
+- Added the Docs assignment endpoint and status payload support for published unbound Wiki pages with draft-change indicators.
+- Assignment now moves the existing Wiki page under the selected repository prefix, preserves revisions/drafts, updates link graph targets, commits missing Markdown files in grouped GitLab commits, links identical remote files, and leaves Wiki state untouched on conflicts or GitLab failures.
+- The Wiki UI now exposes an `Assign pages` guided modal with repository selection, folder/slug editing, destination previews, validation, and post-assignment result badges.
+- Verification passed: `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/wiki/wiki.service.spec.ts`; `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand src/wiki/wiki.service.spec.ts src/gitlab/gitlab.service.spec.ts`; `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/wiki.controller.http.spec.ts`; `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `git diff --check`.
+- Coverage gate attempted with `pnpm --filter @doctoral/api test:coverage:gate`; unit coverage passed with 22 suites and 305 tests, HTTP coverage passed with 9 suites and 79 tests, and integration coverage could not run because no PostgreSQL server was reachable at `localhost:5432`.
+
 ## Wiki Docs Unbound Export (2026-06-02)
 - [x] Register the approved implementation plan for exporting unbound Wiki pages during Docs sync.
 - [x] Add backend sync phase for published Wiki pages without Docs bindings.

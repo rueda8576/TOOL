@@ -119,6 +119,7 @@ export type WikiDocsSyncRepositoryStatus = {
 
 export type WikiDocsSyncStatus = {
   repositories: WikiDocsSyncRepositoryStatus[];
+  unassigned: WikiDocsSyncUnassignedPage[];
 };
 
 export type WikiDocsSyncConflict = {
@@ -132,7 +133,38 @@ export type WikiDocsSyncUnassignedPage = {
   pageId: string;
   wikiPath: string;
   title: string;
+  hasDraftChanges: boolean;
   reason: string;
+};
+
+export type WikiDocsAssignPageInput = {
+  pageId: string;
+  repositoryId: string;
+  folderPath?: string;
+  slug: string;
+};
+
+export type WikiDocsAssignPageResult = {
+  pageId: string;
+  title: string;
+  oldWikiPath: string;
+  newWikiPath: string;
+  repositoryId: string;
+  repositoryName: string;
+  docsPath: string;
+  status: "exportedToGit" | "linked" | "conflict" | "error";
+  reason: string | null;
+};
+
+export type WikiDocsAssignResult = {
+  pages: WikiDocsAssignPageResult[];
+  totals: {
+    assigned: number;
+    exportedToGit: number;
+    linked: number;
+    conflicts: number;
+    errors: number;
+  };
 };
 
 export type WikiDocsSyncRepositoryResult = {
@@ -394,6 +426,20 @@ export async function syncWikiDocs(projectId: string, token: string): Promise<Wi
     token,
     init: {
       method: "POST"
+    }
+  });
+}
+
+export async function assignWikiDocsPages(
+  projectId: string,
+  token: string,
+  assignments: WikiDocsAssignPageInput[]
+): Promise<WikiDocsAssignResult> {
+  return authFetch<WikiDocsAssignResult>(`/projects/${projectId}/wiki-pages/docs-sync/assign`, {
+    token,
+    init: {
+      method: "POST",
+      body: JSON.stringify({ assignments })
     }
   });
 }

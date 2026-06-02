@@ -1213,6 +1213,7 @@ describe("WikiService", () => {
         pageId: "page-1",
         wikiPath: "roadmap",
         title: "Roadmap",
+        hasDraftChanges: false,
         reason: "Wiki page is not under any repository Docs prefix"
       }
     ]);
@@ -1262,6 +1263,383 @@ describe("WikiService", () => {
     expect(result.totals.errors).toBe(1);
     expect(result.repositories[0].errors[0]).toBe("/backend/research/auth: GitLab commit failed");
     expect(prisma.wikiDocsBinding.create).not.toHaveBeenCalled();
+  });
+
+  it("assigns an unbound wiki page to a Docs repository and preserves the page record", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    const tx: any = {
+      wikiPage: {
+        update: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([])
+      },
+      wikiDocsBinding: {
+        create: jest.fn()
+      },
+      wikiLink: {
+        updateMany: jest.fn()
+      },
+      projectRepository: {
+        update: jest.fn()
+      }
+    };
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Backend",
+        pathWithNamespace: "atlasium/backend",
+        defaultBranch: "main",
+        wikiDocsPrefix: "backend",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiPage.findMany.mockResolvedValueOnce([
+      {
+        id: "page-1",
+        projectId: "project-1",
+        title: "Roadmap",
+        path: "roadmap",
+        currentRevisionId: "revision-1",
+        currentRevision: {
+          id: "revision-1",
+          contentMarkdown: "# Roadmap"
+        },
+        draft: {
+          title: "Roadmap",
+          contentMarkdown: "# Roadmap\n\nDraft"
+        }
+      }
+    ]);
+    prisma.wikiPage.findFirst.mockResolvedValue(null);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+    gitlabService.getRepositoryTextFileForDocsSync.mockResolvedValue(null);
+    gitlabService.commitRepositoryFileActions.mockResolvedValue({
+      id: "commit-1",
+      shortId: "commit-1",
+      title: "Assign wiki page backend/roadmap to Docs",
+      message: "Assign wiki page backend/roadmap to Docs",
+      createdAt: "2026-06-02T10:00:00.000Z",
+      webUrl: "https://git.example/commit-1"
+    });
+
+    const result = await service.assignDocsPages(
+      "project-1",
+      {
+        assignments: [
+          {
+            pageId: "page-1",
+            repositoryId: "repo-1",
+            folderPath: "",
+            slug: "roadmap"
+          }
+        ]
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(result.totals).toEqual({
+      assigned: 1,
+      exportedToGit: 1,
+      linked: 0,
+      conflicts: 0,
+      errors: 0
+    });
+    expect(gitlabService.commitRepositoryFileActions).toHaveBeenCalledWith(
+      "project-1",
+      expect.any(Object),
+      "repo-1",
+      [
+        {
+          action: "create",
+          filePath: "Docs/roadmap.md",
+          content: "# Roadmap"
+        }
+      ],
+      "Assign wiki page backend/roadmap to Docs"
+    );
+    expect(tx.wikiPage.update).toHaveBeenCalledWith({
+      where: { id: "page-1" },
+      data: {
+        slug: "roadmap",
+        folderPath: "backend",
+        path: "backend/roadmap"
+      }
+    });
+    expect(tx.wikiDocsBinding.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          repositoryId: "repo-1",
+          wikiPageId: "page-1",
+          docsPath: "Docs/roadmap.md",
+          wikiPath: "backend/roadmap",
+          gitLastCommitId: "commit-1",
+          wikiRevisionId: "revision-1"
+        })
+      })
+    );
+    expect(tx.wikiLink.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { toPageId: "page-1" },
+        data: { toPath: "backend/roadmap" }
+      })
+    );
+    expect(tx.wikiLink.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          toPath: "roadmap",
+          fromPage: {
+            projectId: "project-1"
+          }
+        }),
+        data: {
+          toPath: "backend/roadmap",
+          toPageId: "page-1"
+        }
+      })
+    );
+  });
+
+  it("links an assigned wiki page when the destination Docs file has identical content", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    const tx: any = {
+      wikiPage: {
+        update: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([])
+      },
+      wikiDocsBinding: {
+        create: jest.fn()
+      },
+      wikiLink: {
+        updateMany: jest.fn()
+      },
+      projectRepository: {
+        update: jest.fn()
+      }
+    };
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Backend",
+        pathWithNamespace: "atlasium/backend",
+        defaultBranch: "main",
+        wikiDocsPrefix: "backend",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiPage.findMany.mockResolvedValueOnce([
+      {
+        id: "page-1",
+        projectId: "project-1",
+        title: "Roadmap",
+        path: "roadmap",
+        currentRevisionId: "revision-1",
+        currentRevision: {
+          id: "revision-1",
+          contentMarkdown: "# Roadmap"
+        },
+        draft: null
+      }
+    ]);
+    prisma.wikiPage.findFirst.mockResolvedValue(null);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+    gitlabService.getRepositoryTextFileForDocsSync.mockResolvedValue({
+      docsPath: "Docs/roadmap.md",
+      relativePath: "roadmap.md",
+      fileName: "roadmap.md",
+      ref: "main",
+      blobId: "blob-1",
+      lastCommitId: "commit-1",
+      contentSha256: null,
+      content: "# Roadmap"
+    });
+
+    const result = await service.assignDocsPages(
+      "project-1",
+      {
+        assignments: [
+          {
+            pageId: "page-1",
+            repositoryId: "repo-1",
+            folderPath: "",
+            slug: "roadmap"
+          }
+        ]
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(result.totals.linked).toBe(1);
+    expect(gitlabService.commitRepositoryFileActions).not.toHaveBeenCalled();
+    expect(tx.wikiDocsBinding.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          gitBlobId: "blob-1",
+          gitLastCommitId: "commit-1"
+        })
+      })
+    );
+  });
+
+  it("reports assignment conflicts for different remote content and occupied wiki paths", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Backend",
+        pathWithNamespace: "atlasium/backend",
+        defaultBranch: "main",
+        wikiDocsPrefix: "backend",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiPage.findMany.mockResolvedValue([
+      {
+        id: "page-1",
+        projectId: "project-1",
+        title: "Roadmap",
+        path: "roadmap",
+        currentRevisionId: "revision-1",
+        currentRevision: {
+          id: "revision-1",
+          contentMarkdown: "# Roadmap"
+        },
+        draft: null
+      },
+      {
+        id: "page-2",
+        projectId: "project-1",
+        title: "Vision",
+        path: "vision",
+        currentRevisionId: "revision-2",
+        currentRevision: {
+          id: "revision-2",
+          contentMarkdown: "# Vision"
+        },
+        draft: null
+      }
+    ]);
+    prisma.wikiPage.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "existing-page" });
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    gitlabService.getRepositoryTextFileForDocsSync.mockResolvedValueOnce({
+      docsPath: "Docs/roadmap.md",
+      relativePath: "roadmap.md",
+      fileName: "roadmap.md",
+      ref: "main",
+      blobId: "blob-1",
+      lastCommitId: "commit-1",
+      contentSha256: null,
+      content: "# Remote"
+    });
+
+    const result = await service.assignDocsPages(
+      "project-1",
+      {
+        assignments: [
+          {
+            pageId: "page-1",
+            repositoryId: "repo-1",
+            folderPath: "",
+            slug: "roadmap"
+          },
+          {
+            pageId: "page-2",
+            repositoryId: "repo-1",
+            folderPath: "",
+            slug: "vision"
+          }
+        ]
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(result.totals.conflicts).toBe(2);
+    expect(result.pages.map((page) => page.reason)).toEqual([
+      "Destination Docs file exists with different content",
+      "Destination wiki path is already used"
+    ]);
+    expect(gitlabService.commitRepositoryFileActions).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("does not mutate wiki assignment state when grouped GitLab commit fails", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.projectRepository.findMany.mockResolvedValueOnce([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Backend",
+        pathWithNamespace: "atlasium/backend",
+        defaultBranch: "main",
+        wikiDocsPrefix: "backend",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiPage.findMany.mockResolvedValueOnce([
+      {
+        id: "page-1",
+        projectId: "project-1",
+        title: "Roadmap",
+        path: "roadmap",
+        currentRevisionId: "revision-1",
+        currentRevision: {
+          id: "revision-1",
+          contentMarkdown: "# Roadmap"
+        },
+        draft: null
+      }
+    ]);
+    prisma.wikiPage.findFirst.mockResolvedValue(null);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    gitlabService.getRepositoryTextFileForDocsSync.mockResolvedValue(null);
+    gitlabService.commitRepositoryFileActions.mockRejectedValue(new Error("GitLab commit failed"));
+
+    const result = await service.assignDocsPages(
+      "project-1",
+      {
+        assignments: [
+          {
+            pageId: "page-1",
+            repositoryId: "repo-1",
+            folderPath: "",
+            slug: "roadmap"
+          }
+        ]
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(result.totals.errors).toBe(1);
+    expect(result.pages[0]).toEqual(
+      expect.objectContaining({
+        status: "error",
+        reason: "GitLab commit failed"
+      })
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("builds tree with draft markers for editor users", async () => {

@@ -12,6 +12,7 @@ import {
 } from "../gitlab/gitlab.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { StorageService } from "../storage/storage.service";
+import { AssignWikiDocsPagesDto } from "./dto/assign-wiki-docs-pages.dto";
 import { CreateWikiPageDto } from "./dto/create-wiki-page.dto";
 import { ImportWikiPageEntryDto, ImportWikiPagesDto } from "./dto/import-wiki-pages.dto";
 import { PublishWikiPageDto } from "./dto/publish-wiki-page.dto";
@@ -20,6 +21,8 @@ import { SearchWikiPagesQueryDto } from "./dto/search-wiki-pages-query.dto";
 import { UpdateWikiPageDto } from "./dto/update-wiki-page.dto";
 import {
   WikiBacklinkView,
+  WikiDocsAssignPageResult,
+  WikiDocsAssignResult,
   WikiDocsSourceView,
   WikiDocsSyncConflict,
   WikiDocsSyncRepositoryResult,
@@ -146,6 +149,10 @@ type WikiDocsUnboundPageRecord = {
     id: string;
     contentMarkdown: string;
   } | null;
+  draft?: {
+    title: string;
+    contentMarkdown: string;
+  } | null;
 };
 
 type PreparedDocsPage = {
@@ -156,6 +163,20 @@ type PreparedDocsPage = {
   docsPath: string;
   contentMarkdown: string;
   contentHash: string;
+};
+
+type PreparedDocsAssignment = {
+  page: WikiDocsUnboundPageRecord;
+  repository: WikiDocsRepositoryRecord;
+  slug: string;
+  folderPath: string;
+  oldWikiPath: string;
+  newWikiPath: string;
+  docsPath: string;
+  contentMarkdown: string;
+  contentHash: string;
+  remoteFile: RepositoryDocsMarkdownFile | null;
+  mode: "exportedToGit" | "linked";
 };
 
 @Injectable()
@@ -984,7 +1005,8 @@ export class WikiService {
       repositories: repositories.map((repository) => {
         const repositoryCounts = countByRepository.get(repository.id) ?? { active: 0, deleted: 0 };
         return this.buildSyncRepositoryStatus(repository, repositoryCounts.active, repositoryCounts.deleted);
-      })
+      }),
+      unassigned: this.buildUnassignedDocsPages(await this.loadUnboundPublishedWikiPages(projectId), repositories)
     };
   }
 
@@ -1100,10 +1122,40 @@ export class WikiService {
             id: true,
             contentMarkdown: true
           }
+        },
+        draft: {
+          select: {
+            title: true,
+            contentMarkdown: true
+          }
         }
       }
     });
     return pages as WikiDocsUnboundPageRecord[];
+  }
+
+  private hasUnboundPageDraftChanges(page: WikiDocsUnboundPageRecord): boolean {
+    return Boolean(
+      page.draft &&
+        page.currentRevision &&
+        (page.draft.title !== page.title || page.draft.contentMarkdown !== page.currentRevision.contentMarkdown)
+    );
+  }
+
+  private buildUnassignedDocsPages(
+    pages: WikiDocsUnboundPageRecord[],
+    repositories: WikiDocsRepositoryRecord[]
+  ): WikiDocsSyncUnassignedPage[] {
+    const prefixes = new Set(repositories.map((repository) => repository.wikiDocsPrefix).filter(Boolean));
+    return pages
+      .filter((page) => !prefixes.has(page.path.split("/")[0] ?? ""))
+      .map((page) => ({
+        pageId: page.id,
+        wikiPath: page.path,
+        title: page.title,
+        hasDraftChanges: this.hasUnboundPageDraftChanges(page),
+        reason: "Wiki page is not under any repository Docs prefix"
+      }));
   }
 
   private groupUnboundWikiPagesByRepository(params: {
@@ -1134,6 +1186,7 @@ export class WikiService {
           pageId: page.id,
           wikiPath: page.path,
           title: page.title,
+          hasDraftChanges: this.hasUnboundPageDraftChanges(page),
           reason: "Wiki page is not under any repository Docs prefix"
         });
         continue;
@@ -1283,6 +1336,454 @@ export class WikiService {
         result.errors.push(`/${page.path}: ${message}`);
       }
     }
+  }
+
+  private buildDocsAssignmentResult(params: {
+    page: WikiDocsUnboundPageRecord;
+    repository: WikiDocsRepositoryRecord;
+    oldWikiPath: string;
+    newWikiPath: string;
+    docsPath: string;
+    status: WikiDocsAssignPageResult["status"];
+    reason: string | null;
+  }): WikiDocsAssignPageResult {
+    return {
+      pageId: params.page.id,
+      title: params.page.title,
+      oldWikiPath: params.oldWikiPath,
+      newWikiPath: params.newWikiPath,
+      repositoryId: params.repository.id,
+      repositoryName: params.repository.name,
+      docsPath: params.docsPath,
+      status: params.status,
+      reason: params.reason
+    };
+  }
+
+  private async applyPreparedDocsAssignment(params: {
+    projectId: string;
+    assignment: PreparedDocsAssignment;
+    commitId: string | null;
+  }): Promise<void> {
+    const { projectId, assignment, commitId } = params;
+    const page = assignment.page;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.wikiPage.update({
+        where: {
+          id: page.id
+        },
+        data: {
+          slug: assignment.slug,
+          folderPath: assignment.folderPath,
+          path: assignment.newWikiPath
+        }
+      });
+
+      await tx.wikiDocsBinding.create({
+        data: {
+          projectId,
+          repositoryId: assignment.repository.id,
+          wikiPageId: page.id,
+          docsPath: assignment.docsPath,
+          wikiPath: assignment.newWikiPath,
+          gitBlobId: assignment.remoteFile?.blobId ?? null,
+          gitLastCommitId: commitId ?? assignment.remoteFile?.lastCommitId ?? null,
+          gitContentHash: assignment.contentHash,
+          wikiRevisionId: page.currentRevision?.id ?? page.currentRevisionId,
+          wikiContentHash: assignment.contentHash,
+          status: WIKI_DOCS_BINDING_STATUS_ACTIVE,
+          lastSyncedAt: new Date()
+        }
+      });
+
+      await tx.wikiLink.updateMany({
+        where: {
+          toPageId: page.id
+        },
+        data: {
+          toPath: assignment.newWikiPath
+        }
+      });
+
+      await tx.wikiLink.updateMany({
+        where: {
+          toPath: assignment.oldWikiPath,
+          fromPage: {
+            projectId
+          }
+        },
+        data: {
+          toPath: assignment.newWikiPath,
+          toPageId: page.id
+        }
+      });
+
+      await this.hydrateLinksToPage(tx, {
+        projectId,
+        pageId: page.id,
+        path: assignment.newWikiPath
+      });
+
+      await tx.projectRepository.update({
+        where: {
+          id: assignment.repository.id
+        },
+        data: {
+          wikiDocsLastSyncedAt: new Date(),
+          wikiDocsLastSyncError: null
+        }
+      });
+    });
+  }
+
+  async assignDocsPages(projectId: string, dto: AssignWikiDocsPagesDto, user: AuthenticatedUser): Promise<WikiDocsAssignResult> {
+    await this.accessService.ensureProjectWritable(user.userId, user.globalRole, projectId);
+    const repositories = await this.ensureAllRepositoryWikiDocsPrefixes(projectId);
+    const repositoriesById = new Map(repositories.map((repository) => [repository.id, repository]));
+    const requestedPageIds = [...new Set(dto.assignments.map((assignment) => assignment.pageId.trim()).filter(Boolean))];
+    const pages = await this.prisma.wikiPage.findMany({
+      where: {
+        projectId,
+        id: {
+          in: requestedPageIds
+        },
+        deletedAt: null,
+        currentRevisionId: {
+          not: null
+        },
+        docsBinding: {
+          is: null
+        }
+      },
+      select: {
+        id: true,
+        projectId: true,
+        title: true,
+        path: true,
+        currentRevisionId: true,
+        currentRevision: {
+          select: {
+            id: true,
+            contentMarkdown: true
+          }
+        },
+        draft: {
+          select: {
+            title: true,
+            contentMarkdown: true
+          }
+        }
+      }
+    });
+    const pagesById = new Map((pages as WikiDocsUnboundPageRecord[]).map((page) => [page.id, page]));
+    const results: WikiDocsAssignPageResult[] = [];
+    const prepared: PreparedDocsAssignment[] = [];
+    const seenWikiPaths = new Set<string>();
+    const seenDocsKeys = new Set<string>();
+
+    for (const rawAssignment of dto.assignments) {
+      const pageId = rawAssignment.pageId.trim();
+      const repositoryId = rawAssignment.repositoryId.trim();
+      const repository = repositoriesById.get(repositoryId);
+      const fallbackRepository =
+        repository ??
+        ({
+          id: repositoryId || "unknown",
+          name: "Unknown repository",
+          projectId,
+          pathWithNamespace: "",
+          defaultBranch: "",
+          wikiDocsPrefix: null,
+          wikiDocsLastSyncedAt: null,
+          wikiDocsLastSyncError: null
+        } satisfies WikiDocsRepositoryRecord);
+      const page =
+        pagesById.get(pageId) ??
+        ({
+          id: pageId || "unknown",
+          projectId,
+          title: "Unknown wiki page",
+          path: "",
+          currentRevisionId: null,
+          currentRevision: null,
+          draft: null
+        } satisfies WikiDocsUnboundPageRecord);
+
+      if (!repository || !repository.wikiDocsPrefix) {
+        results.push(
+          this.buildDocsAssignmentResult({
+            page,
+            repository: fallbackRepository,
+            oldWikiPath: page.path,
+            newWikiPath: page.path,
+            docsPath: "",
+            status: "conflict",
+            reason: "Repository is not available for Docs sync"
+          })
+        );
+        continue;
+      }
+
+      if (!pagesById.has(pageId) || !page.currentRevision) {
+        results.push(
+          this.buildDocsAssignmentResult({
+            page,
+            repository,
+            oldWikiPath: page.path,
+            newWikiPath: page.path,
+            docsPath: "",
+            status: "conflict",
+            reason: "Wiki page is not a published unbound page"
+          })
+        );
+        continue;
+      }
+
+      let slug: string;
+      let relativeFolderPath: string;
+      try {
+        slug = this.normalizeSlug(rawAssignment.slug);
+        relativeFolderPath = this.normalizeFolderPath(rawAssignment.folderPath);
+      } catch (error) {
+        results.push(
+          this.buildDocsAssignmentResult({
+            page,
+            repository,
+            oldWikiPath: page.path,
+            newWikiPath: page.path,
+            docsPath: "",
+            status: "conflict",
+            reason: (error as Error).message || "Invalid assignment path"
+          })
+        );
+        continue;
+      }
+
+      const folderPath = relativeFolderPath ? `${repository.wikiDocsPrefix}/${relativeFolderPath}` : repository.wikiDocsPrefix;
+      const newWikiPath = this.composePath(folderPath, slug);
+      const docsPath = this.wikiPathToDocsPath(repository.wikiDocsPrefix, newWikiPath);
+      const docsKey = `${repository.id}:${docsPath}`;
+
+      if (seenWikiPaths.has(newWikiPath) || seenDocsKeys.has(docsKey)) {
+        results.push(
+          this.buildDocsAssignmentResult({
+            page,
+            repository,
+            oldWikiPath: page.path,
+            newWikiPath,
+            docsPath,
+            status: "conflict",
+            reason: "Another assignment uses the same destination"
+          })
+        );
+        continue;
+      }
+      seenWikiPaths.add(newWikiPath);
+      seenDocsKeys.add(docsKey);
+
+      const wikiPathAvailable = await this.ensureDocsWikiPathAvailable(projectId, newWikiPath, page.id, null);
+      if (!wikiPathAvailable) {
+        results.push(
+          this.buildDocsAssignmentResult({
+            page,
+            repository,
+            oldWikiPath: page.path,
+            newWikiPath,
+            docsPath,
+            status: "conflict",
+            reason: "Destination wiki path is already used"
+          })
+        );
+        continue;
+      }
+
+      const existingBinding = await this.prisma.wikiDocsBinding.findFirst({
+        where: {
+          OR: [
+            {
+              projectId,
+              wikiPath: newWikiPath
+            },
+            {
+              repositoryId: repository.id,
+              docsPath
+            }
+          ]
+        },
+        select: {
+          id: true
+        }
+      });
+      if (existingBinding) {
+        results.push(
+          this.buildDocsAssignmentResult({
+            page,
+            repository,
+            oldWikiPath: page.path,
+            newWikiPath,
+            docsPath,
+            status: "conflict",
+            reason: "Destination Docs path already has a binding"
+          })
+        );
+        continue;
+      }
+
+      try {
+        const contentMarkdown = page.currentRevision.contentMarkdown;
+        const contentHash = this.hashMarkdownContent(contentMarkdown);
+        const remoteFile = await this.gitlabService.getRepositoryTextFileForDocsSync(projectId, user, repository.id, docsPath);
+        if (remoteFile) {
+          const remoteHash = this.hashMarkdownContent(remoteFile.content);
+          if (remoteHash !== contentHash) {
+            results.push(
+              this.buildDocsAssignmentResult({
+                page,
+                repository,
+                oldWikiPath: page.path,
+                newWikiPath,
+                docsPath,
+                status: "conflict",
+                reason: "Destination Docs file exists with different content"
+              })
+            );
+            continue;
+          }
+        }
+
+        prepared.push({
+          page,
+          repository,
+          slug,
+          folderPath,
+          oldWikiPath: page.path,
+          newWikiPath,
+          docsPath,
+          contentMarkdown,
+          contentHash,
+          remoteFile,
+          mode: remoteFile ? "linked" : "exportedToGit"
+        });
+      } catch (error) {
+        results.push(
+          this.buildDocsAssignmentResult({
+            page,
+            repository,
+            oldWikiPath: page.path,
+            newWikiPath,
+            docsPath,
+            status: "error",
+            reason: (error as Error).message || "Failed to inspect destination Docs file"
+          })
+        );
+      }
+    }
+
+    const createAssignmentsByRepository = new Map<string, PreparedDocsAssignment[]>();
+    for (const assignment of prepared) {
+      if (assignment.mode !== "exportedToGit") {
+        continue;
+      }
+      const assignments = createAssignmentsByRepository.get(assignment.repository.id) ?? [];
+      assignments.push(assignment);
+      createAssignmentsByRepository.set(assignment.repository.id, assignments);
+    }
+
+    const commitIdByRepository = new Map<string, string>();
+    const failedCreateRepositoryIds = new Set<string>();
+    for (const [repositoryId, assignments] of createAssignmentsByRepository) {
+      const repository = assignments[0]?.repository;
+      if (!repository) {
+        continue;
+      }
+      try {
+        const commit = await this.gitlabService.commitRepositoryFileActions(
+          projectId,
+          user,
+          repositoryId,
+          assignments.map((assignment) => ({
+            action: "create",
+            filePath: assignment.docsPath,
+            content: assignment.contentMarkdown
+          })),
+          assignments.length === 1
+            ? `Assign wiki page ${assignments[0]!.newWikiPath} to Docs`
+            : `Assign ${assignments.length} wiki pages to Docs`
+        );
+        commitIdByRepository.set(repositoryId, commit.id);
+      } catch (error) {
+        failedCreateRepositoryIds.add(repositoryId);
+        const message = (error as Error).message || "Failed to commit Docs assignment";
+        for (const assignment of assignments) {
+          results.push(
+            this.buildDocsAssignmentResult({
+              page: assignment.page,
+              repository: assignment.repository,
+              oldWikiPath: assignment.oldWikiPath,
+              newWikiPath: assignment.newWikiPath,
+              docsPath: assignment.docsPath,
+              status: "error",
+              reason: message
+            })
+          );
+        }
+      }
+    }
+
+    for (const assignment of prepared) {
+      if (assignment.mode === "exportedToGit" && failedCreateRepositoryIds.has(assignment.repository.id)) {
+        continue;
+      }
+
+      await this.applyPreparedDocsAssignment({
+        projectId,
+        assignment,
+        commitId: assignment.mode === "exportedToGit" ? commitIdByRepository.get(assignment.repository.id) ?? null : null
+      });
+      results.push(
+        this.buildDocsAssignmentResult({
+          page: assignment.page,
+          repository: assignment.repository,
+          oldWikiPath: assignment.oldWikiPath,
+          newWikiPath: assignment.newWikiPath,
+          docsPath: assignment.docsPath,
+          status: assignment.mode,
+          reason: null
+        })
+      );
+    }
+
+    const totals = results.reduce(
+      (accumulator, result) => ({
+        assigned: accumulator.assigned + (result.status === "exportedToGit" || result.status === "linked" ? 1 : 0),
+        exportedToGit: accumulator.exportedToGit + (result.status === "exportedToGit" ? 1 : 0),
+        linked: accumulator.linked + (result.status === "linked" ? 1 : 0),
+        conflicts: accumulator.conflicts + (result.status === "conflict" ? 1 : 0),
+        errors: accumulator.errors + (result.status === "error" ? 1 : 0)
+      }),
+      {
+        assigned: 0,
+        exportedToGit: 0,
+        linked: 0,
+        conflicts: 0,
+        errors: 0
+      }
+    );
+
+    await this.auditService.log({
+      userId: user.userId,
+      projectId,
+      entityType: "wiki_docs_assignment",
+      entityId: projectId,
+      action: "wiki.docs.assign",
+      metadata: totals
+    });
+
+    return {
+      pages: results.sort((left, right) => left.oldWikiPath.localeCompare(right.oldWikiPath)),
+      totals
+    };
   }
 
   private async createPublishedPageFromDocs(params: {

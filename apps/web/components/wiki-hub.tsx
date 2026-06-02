@@ -6,7 +6,7 @@ import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 
 import { AppShell } from "./app-shell";
-import { LoadingState } from "./ui";
+import { LoadingState, Modal } from "./ui";
 import { WikiHistory } from "./wiki-history";
 import { WikiImportDraftEntry, WikiImportPanel } from "./wiki-import-panel";
 import { WikiMarkdown } from "./wiki-markdown";
@@ -20,6 +20,7 @@ import {
 } from "../lib/documents-collaboration";
 import { useUnsavedChangesGuard } from "../lib/use-unsaved-changes-guard";
 import {
+  assignWikiDocsPages,
   createWikiPage,
   deleteWikiPage,
   DraftConflictPayload,
@@ -36,6 +37,7 @@ import {
   searchWikiPages,
   syncWikiDocs,
   uploadWikiAsset,
+  WikiDocsAssignResult,
   WikiDocsSyncResult,
   WikiDocsSyncStatus,
   WikiDraftConflictError,
@@ -55,6 +57,17 @@ type WikiImportSelectionResult = {
   entries: WikiImportDraftEntry[];
   assetFilesByPath: Map<string, File>;
   warnings: string[];
+};
+
+type WikiDocsAssignRow = {
+  pageId: string;
+  title: string;
+  wikiPath: string;
+  repositoryId: string;
+  folderPath: string;
+  slug: string;
+  selected: boolean;
+  hasDraftChanges: boolean;
 };
 
 const WIKI_PATH_SEGMENT_PATTERN = /^[a-z0-9-]+$/;
@@ -420,6 +433,40 @@ function composeWikiPath(folderPath: string, slug: string): string {
   return folderPath ? `${folderPath}/${slug}` : slug;
 }
 
+function splitWikiPagePath(path: string): { folderPath: string; slug: string } {
+  const normalized = normalizePath(path) ?? "";
+  const segments = normalized.split("/").filter(Boolean);
+  const slug = segments.pop() ?? "";
+  return {
+    folderPath: segments.join("/"),
+    slug
+  };
+}
+
+function buildDocsAssignmentPreview(
+  row: WikiDocsAssignRow,
+  repository: WikiDocsSyncStatus["repositories"][number] | null
+): { wikiPath: string; docsPath: string; gitPath: string } {
+  if (!repository) {
+    return {
+      wikiPath: row.wikiPath,
+      docsPath: "",
+      gitPath: ""
+    };
+  }
+
+  const normalizedFolder = normalizePath(row.folderPath) ?? "";
+  const normalizedSlug = slugify(row.slug);
+  const relativePath = composeWikiPath(normalizedFolder, normalizedSlug);
+  const wikiPath = composeWikiPath(repository.wikiDocsPrefix, relativePath || normalizedSlug || "page");
+  const docsPath = `Docs/${relativePath || normalizedSlug || "page"}.md`;
+  return {
+    wikiPath,
+    docsPath,
+    gitPath: `${repository.pathWithNamespace}/${docsPath}`
+  };
+}
+
 function isMarkdownImportFile(path: string): boolean {
   return /\.(md|markdown)$/i.test(path);
 }
@@ -768,6 +815,10 @@ export function WikiHub({
   const [docsSyncStatus, setDocsSyncStatus] = useState<WikiDocsSyncStatus | null>(null);
   const [docsSyncResult, setDocsSyncResult] = useState<WikiDocsSyncResult | null>(null);
   const [syncingDocs, setSyncingDocs] = useState(false);
+  const [showAssignDocsPanel, setShowAssignDocsPanel] = useState(false);
+  const [assignDocsRows, setAssignDocsRows] = useState<WikiDocsAssignRow[]>([]);
+  const [assignDocsResult, setAssignDocsResult] = useState<WikiDocsAssignResult | null>(null);
+  const [assigningDocs, setAssigningDocs] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createSlug, setCreateSlug] = useState("");
   const [createFolderPath, setCreateFolderPath] = useState("");
@@ -834,6 +885,41 @@ export function WikiHub({
     () => docsSyncStatus?.repositories.find((repository) => repository.repositoryId === createDocsRepositoryId) ?? null,
     [createDocsRepositoryId, docsSyncStatus]
   );
+  const docsRepositoriesById = useMemo(
+    () => new Map((docsSyncStatus?.repositories ?? []).map((repository) => [repository.repositoryId, repository])),
+    [docsSyncStatus]
+  );
+  const unassignedDocsPages = docsSyncStatus?.unassigned ?? docsSyncResult?.unassigned ?? [];
+  const assignDocsRowsWithPreview = useMemo(() => {
+    const destinationCounts = new Map<string, number>();
+    const rows = assignDocsRows.map((row) => {
+      const repository = docsRepositoriesById.get(row.repositoryId) ?? null;
+      const preview = buildDocsAssignmentPreview(row, repository);
+      const normalizedSlug = slugify(row.slug);
+      const destinationKey = `${row.repositoryId}:${preview.wikiPath}`;
+      destinationCounts.set(destinationKey, (destinationCounts.get(destinationKey) ?? 0) + 1);
+      return {
+        row,
+        repository,
+        preview,
+        normalizedSlug,
+        destinationKey
+      };
+    });
+
+    return rows.map((entry) => {
+      const pathConflict = existingWikiPaths.has(entry.preview.wikiPath) && entry.preview.wikiPath !== entry.row.wikiPath;
+      const duplicateConflict = (destinationCounts.get(entry.destinationKey) ?? 0) > 1;
+      const invalid = !entry.repository || !entry.normalizedSlug || pathConflict || duplicateConflict;
+      return {
+        ...entry,
+        pathConflict,
+        duplicateConflict,
+        invalid
+      };
+    });
+  }, [assignDocsRows, docsRepositoriesById, existingWikiPaths]);
+  const selectedAssignableRows = assignDocsRowsWithPreview.filter((entry) => entry.row.selected && !entry.invalid);
   const visibleCollaborators = useMemo(() => collaborators.slice(0, 6), [collaborators]);
   const hiddenCollaboratorsCount = useMemo(
     () => Math.max(collaborators.length - visibleCollaborators.length, 0),
@@ -1922,7 +2008,7 @@ export function WikiHub({
       await loadDocsSyncStatus(token);
       await refreshSearchResults(token);
       if (selectedPath) {
-      await loadPage(token, selectedPath);
+        await loadPage(token, selectedPath);
       }
       setSuccess(
         `Docs sync finished: ${result.totals.created} imported, ${result.totals.updatedFromGit + result.totals.updatedToGit} updated, ${result.totals.exportedToGit} exported, ${result.totals.linked} linked, ${result.totals.unassigned} unassigned, ${result.totals.conflicts} conflict(s), ${result.totals.errors} error(s).`
@@ -1939,6 +2025,97 @@ export function WikiHub({
     loadTree,
     projectId,
     refreshSearchResults,
+    selectedPath,
+    token
+  ]);
+
+  const openAssignDocsPanel = useCallback((): void => {
+    const defaultRepositoryId = docsSyncStatus?.repositories[0]?.repositoryId ?? "";
+    setAssignDocsRows(
+      unassignedDocsPages.map((page) => {
+        const split = splitWikiPagePath(page.wikiPath);
+        return {
+          pageId: page.pageId,
+          title: page.title,
+          wikiPath: page.wikiPath,
+          repositoryId: defaultRepositoryId,
+          folderPath: split.folderPath,
+          slug: split.slug,
+          selected: true,
+          hasDraftChanges: page.hasDraftChanges
+        };
+      })
+    );
+    setAssignDocsResult(null);
+    setShowAssignDocsPanel(true);
+  }, [docsSyncStatus, unassignedDocsPages]);
+
+  const updateAssignDocsRow = useCallback(
+    (pageId: string, patch: Partial<Pick<WikiDocsAssignRow, "repositoryId" | "folderPath" | "slug" | "selected">>): void => {
+      setAssignDocsRows((current) => current.map((row) => (row.pageId === pageId ? { ...row, ...patch } : row)));
+    },
+    []
+  );
+
+  const onAssignDocsPages = useCallback(async (): Promise<void> => {
+    if (!token) {
+      setError("Missing session token. Please sign in again.");
+      return;
+    }
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
+      return;
+    }
+    if (selectedAssignableRows.length === 0) {
+      setError("Select at least one valid wiki page assignment.");
+      return;
+    }
+
+    setAssigningDocs(true);
+    setError(null);
+    setSuccess(null);
+    setAssignDocsResult(null);
+
+    try {
+      const result = await assignWikiDocsPages(
+        projectId,
+        token,
+        selectedAssignableRows.map((entry) => ({
+          pageId: entry.row.pageId,
+          repositoryId: entry.row.repositoryId,
+          folderPath: normalizePath(entry.row.folderPath) ?? undefined,
+          slug: entry.normalizedSlug
+        }))
+      );
+      setAssignDocsResult(result);
+      await loadTree(token);
+      await loadDocsSyncStatus(token);
+      await refreshSearchResults(token);
+      const selectedResult = selectedPath ? result.pages.find((page) => page.oldWikiPath === selectedPath) : null;
+      if (selectedResult && (selectedResult.status === "exportedToGit" || selectedResult.status === "linked")) {
+        setSelectedPath(selectedResult.newWikiPath);
+        router.push(`/projects/${projectId}/wiki/${encodeWikiPath(selectedResult.newWikiPath)}`);
+        await loadPage(token, selectedResult.newWikiPath);
+      } else if (selectedPath) {
+        await loadPage(token, selectedPath);
+      }
+      setSuccess(
+        `Docs assignment finished: ${result.totals.assigned} assigned, ${result.totals.exportedToGit} exported, ${result.totals.linked} linked, ${result.totals.conflicts} conflict(s), ${result.totals.errors} error(s).`
+      );
+    } catch (assignError) {
+      setError((assignError as Error).message);
+    } finally {
+      setAssigningDocs(false);
+    }
+  }, [
+    canWrite,
+    loadDocsSyncStatus,
+    loadPage,
+    loadTree,
+    projectId,
+    refreshSearchResults,
+    router,
+    selectedAssignableRows,
     selectedPath,
     token
   ]);
@@ -2540,6 +2717,13 @@ export function WikiHub({
               <p className={docsSyncResult.totals.conflicts > 0 || docsSyncResult.totals.errors > 0 || docsSyncResult.totals.unassigned > 0 ? "alert alert-info" : "alert alert-success"}>
                 Docs sync: {docsSyncResult.totals.created} imported, {docsSyncResult.totals.updatedFromGit + docsSyncResult.totals.updatedToGit} updated, {docsSyncResult.totals.exportedToGit} exported, {docsSyncResult.totals.linked} linked, {docsSyncResult.totals.deletedFromWiki + docsSyncResult.totals.deletedFromGit} deleted, {docsSyncResult.totals.unassigned} unassigned, {docsSyncResult.totals.conflicts} conflict(s), {docsSyncResult.totals.errors} error(s).
               </p>
+              {canWrite && unassignedDocsPages.length > 0 ? (
+                <div className="inline-actions">
+                  <button type="button" className="button button-secondary" onClick={openAssignDocsPanel}>
+                    Assign pages
+                  </button>
+                </div>
+              ) : null}
               {docsSyncResult.repositories.some((repository) => repository.conflicts.length > 0 || repository.errors.length > 0) || docsSyncResult.unassigned.length > 0 ? (
                 <ul className="list">
                   {docsSyncResult.repositories.flatMap((repository) => [
@@ -2561,6 +2745,7 @@ export function WikiHub({
                     <li key={`${page.pageId}-unassigned`} className="list-item">
                       <strong>Unassigned wiki page</strong>
                       <span className="wiki-page-path">/{page.wikiPath}</span>
+                      {page.hasDraftChanges ? <span className="badge">Draft not exported</span> : null}
                       <span>{page.reason}</span>
                     </li>
                   ))}
@@ -2982,6 +3167,132 @@ export function WikiHub({
           ) : null}
         </section>
       </div>
+      {showAssignDocsPanel ? (
+        <Modal title="Assign wiki pages to Docs repositories" onClose={() => setShowAssignDocsPanel(false)} className="wiki-docs-assign-modal">
+          <div className="wiki-docs-assign-panel">
+            <div className="wiki-docs-assign-header">
+              <div>
+                <h2 className="section-heading">Assign pages</h2>
+                <p className="wiki-import-copy">Move unassigned wiki pages under a repository prefix and create or link their `Docs` Markdown file.</p>
+              </div>
+              <button type="button" className="button button-secondary" onClick={() => setShowAssignDocsPanel(false)} disabled={assigningDocs}>
+                Close
+              </button>
+            </div>
+
+            {assignDocsResult ? (
+              <div className={assignDocsResult.totals.conflicts > 0 || assignDocsResult.totals.errors > 0 ? "alert alert-info" : "alert alert-success"}>
+                Assigned {assignDocsResult.totals.assigned} page(s): {assignDocsResult.totals.exportedToGit} exported, {assignDocsResult.totals.linked} linked, {assignDocsResult.totals.conflicts} conflict(s), {assignDocsResult.totals.errors} error(s).
+              </div>
+            ) : null}
+
+            {assignDocsRowsWithPreview.length === 0 ? (
+              <p className="alert alert-info">No unassigned wiki pages are available.</p>
+            ) : (
+              <div className="wiki-docs-assign-list">
+                {assignDocsRowsWithPreview.map((entry) => {
+                  const rowResult = assignDocsResult?.pages.find((page) => page.pageId === entry.row.pageId) ?? null;
+                  const badgeLabel = rowResult
+                    ? rowResult.status === "exportedToGit"
+                      ? "Exported"
+                      : rowResult.status === "linked"
+                        ? "Linked"
+                        : rowResult.status === "conflict"
+                          ? "Conflict"
+                          : "Error"
+                    : entry.pathConflict || entry.duplicateConflict
+                      ? "Conflict"
+                      : entry.row.hasDraftChanges
+                        ? "Draft not exported"
+                        : "Ready";
+
+                  return (
+                    <div key={entry.row.pageId} className="wiki-docs-assign-row">
+                      <div className="wiki-docs-assign-row-main">
+                        <label className="wiki-docs-assign-check">
+                          <input
+                            type="checkbox"
+                            checked={entry.row.selected}
+                            disabled={assigningDocs}
+                            onChange={(event) => updateAssignDocsRow(entry.row.pageId, { selected: event.target.checked })}
+                          />
+                          <span>
+                            <strong>{entry.row.title}</strong>
+                            <span className="wiki-page-path">/{entry.row.wikiPath}</span>
+                          </span>
+                        </label>
+                        <span className="badge">{badgeLabel}</span>
+                      </div>
+
+                      <div className="wiki-docs-assign-grid">
+                        <label>
+                          Docs repository
+                          <select
+                            className="input"
+                            value={entry.row.repositoryId}
+                            disabled={assigningDocs}
+                            onChange={(event) => updateAssignDocsRow(entry.row.pageId, { repositoryId: event.target.value })}
+                          >
+                            {(docsSyncStatus?.repositories ?? []).map((repository) => (
+                              <option key={repository.repositoryId} value={repository.repositoryId}>
+                                {repository.name} - /{repository.wikiDocsPrefix}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Folder path in Docs
+                          <input
+                            className="input"
+                            value={entry.row.folderPath}
+                            maxLength={300}
+                            disabled={assigningDocs}
+                            placeholder="research/methods"
+                            onChange={(event) => updateAssignDocsRow(entry.row.pageId, { folderPath: event.target.value })}
+                          />
+                        </label>
+                        <label>
+                          Slug
+                          <input
+                            className="input"
+                            value={entry.row.slug}
+                            maxLength={120}
+                            disabled={assigningDocs}
+                            onChange={(event) => updateAssignDocsRow(entry.row.pageId, { slug: event.target.value })}
+                          />
+                        </label>
+                      </div>
+
+                      <div className="wiki-docs-assign-preview">
+                        <span>Wiki: /{entry.preview.wikiPath}</span>
+                        <span>Git: {entry.preview.gitPath || "Select a repository"}</span>
+                      </div>
+
+                      {entry.pathConflict ? <p className="wiki-docs-assign-warning">Destination wiki path already exists.</p> : null}
+                      {entry.duplicateConflict ? <p className="wiki-docs-assign-warning">Another selected row uses this destination.</p> : null}
+                      {rowResult?.reason ? <p className="wiki-docs-assign-warning">{rowResult.reason}</p> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="wiki-docs-assign-actions">
+              <button
+                type="button"
+                className="button"
+                onClick={() => void onAssignDocsPages()}
+                disabled={assigningDocs || selectedAssignableRows.length === 0}
+              >
+                {assigningDocs ? "Assigning..." : "Assign selected"}
+              </button>
+              <button type="button" className="button button-secondary" onClick={() => setShowAssignDocsPanel(false)} disabled={assigningDocs}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
       {isDraggingSidebarSplitter ? (
         <div className="wiki-drag-scrim" onPointerMove={onSidebarDragScrimPointerMove} onPointerUp={onSidebarDragScrimPointerUp} />
       ) : null}

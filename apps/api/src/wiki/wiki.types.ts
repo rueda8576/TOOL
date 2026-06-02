@@ -109,6 +109,7 @@ export type WikiDocsSyncRepositoryStatus = {
 
 export type WikiDocsSyncStatus = {
   repositories: WikiDocsSyncRepositoryStatus[];
+  unassigned: WikiDocsSyncUnassignedPage[];
 };
 
 export type WikiDocsSyncConflict = {
@@ -122,7 +123,31 @@ export type WikiDocsSyncUnassignedPage = {
   pageId: string;
   wikiPath: string;
   title: string;
+  hasDraftChanges: boolean;
   reason: string;
+};
+
+export type WikiDocsAssignPageResult = {
+  pageId: string;
+  title: string;
+  oldWikiPath: string;
+  newWikiPath: string;
+  repositoryId: string;
+  repositoryName: string;
+  docsPath: string;
+  status: "exportedToGit" | "linked" | "conflict" | "error";
+  reason: string | null;
+};
+
+export type WikiDocsAssignResult = {
+  pages: WikiDocsAssignPageResult[];
+  totals: {
+    assigned: number;
+    exportedToGit: number;
+    linked: number;
+    conflicts: number;
+    errors: number;
+  };
 };
 
 export type WikiDocsSyncRepositoryResult = {

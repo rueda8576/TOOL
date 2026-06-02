@@ -18,6 +18,7 @@ describe("WikiController HTTP", () => {
       importPages: jest.fn(),
       getDocsSyncStatus: jest.fn(),
       syncDocs: jest.fn(),
+      assignDocsPages: jest.fn(),
       listTree: jest.fn(),
       getByPath: jest.fn(),
       searchPages: jest.fn(),
@@ -203,6 +204,15 @@ describe("WikiController HTTP", () => {
             deleted: 0
           }
         }
+      ],
+      unassigned: [
+        {
+          pageId: "page-2",
+          wikiPath: "roadmap",
+          title: "Roadmap",
+          hasDraftChanges: false,
+          reason: "Wiki page is not under any repository Docs prefix"
+        }
       ]
     });
     wikiService.syncDocs.mockResolvedValue({
@@ -225,6 +235,7 @@ describe("WikiController HTTP", () => {
           pageId: "page-2",
           wikiPath: "roadmap",
           title: "Roadmap",
+          hasDraftChanges: false,
           reason: "Wiki page is not under any repository Docs prefix"
         }
       ]
@@ -253,7 +264,69 @@ describe("WikiController HTTP", () => {
     expect(syncResponse.body.totals.created).toBe(1);
     expect(syncResponse.body.totals.exportedToGit).toBe(1);
     expect(syncResponse.body.totals.linked).toBe(1);
+    expect(statusResponse.body.unassigned[0].hasDraftChanges).toBe(false);
     expect(syncResponse.body.unassigned[0].wikiPath).toBe("roadmap");
+  });
+
+  it("binds Docs assignment endpoint with validated body", async () => {
+    wikiService.assignDocsPages.mockResolvedValue({
+      pages: [
+        {
+          pageId: "page-1",
+          title: "Roadmap",
+          oldWikiPath: "roadmap",
+          newWikiPath: "backend/roadmap",
+          repositoryId: "repo-1",
+          repositoryName: "Backend",
+          docsPath: "Docs/roadmap.md",
+          status: "exportedToGit",
+          reason: null
+        }
+      ],
+      totals: {
+        assigned: 1,
+        exportedToGit: 1,
+        linked: 0,
+        conflicts: 0,
+        errors: 0
+      }
+    });
+
+    const response = await request(app.getHttpServer())
+      .post("/projects/project-1/wiki-pages/docs-sync/assign")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .send({
+        assignments: [
+          {
+            pageId: "page-1",
+            repositoryId: "repo-1",
+            folderPath: "",
+            slug: "roadmap"
+          }
+        ]
+      })
+      .expect(201);
+
+    expect(wikiService.assignDocsPages).toHaveBeenCalledWith(
+      "project-1",
+      {
+        assignments: [
+          {
+            pageId: "page-1",
+            repositoryId: "repo-1",
+            folderPath: "",
+            slug: "roadmap"
+          }
+        ]
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+    expect(response.body.totals.assigned).toBe(1);
+    expect(response.body.pages[0].newWikiPath).toBe("backend/roadmap");
   });
 
   it("imports markdown pages with bound params and body", async () => {

@@ -10,6 +10,7 @@ import { CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { RolesGuard } from "../common/roles.guard";
 import { AuthenticatedUser } from "../common/authenticated-user";
+import { AssignWikiDocsPagesDto } from "./dto/assign-wiki-docs-pages.dto";
 import { CreateWikiPageDto } from "./dto/create-wiki-page.dto";
 import { GetWikiByPathQueryDto } from "./dto/get-wiki-by-path-query.dto";
 import { ImportWikiPagesDto } from "./dto/import-wiki-pages.dto";
@@ -20,6 +21,7 @@ import { UpdateWikiPageDto } from "./dto/update-wiki-page.dto";
 import { WikiService } from "./wiki.service";
 import {
   WikiBacklinkView,
+  WikiDocsAssignResult,
   WikiDocsSyncResult,
   WikiDocsSyncStatus,
   WikiPageDetail,
@@ -75,6 +77,15 @@ export class WikiController {
     @CurrentUser() user: AuthenticatedUser
   ): Promise<WikiDocsSyncResult> {
     return this.wikiService.syncDocs(projectId, user);
+  }
+
+  @Post("projects/:projectId/wiki-pages/docs-sync/assign")
+  assignDocsPages(
+    @Param("projectId") projectId: string,
+    @Body() dto: AssignWikiDocsPagesDto,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WikiDocsAssignResult> {
+    return this.wikiService.assignDocsPages(projectId, dto, user);
   }
 
   @Get("projects/:projectId/wiki-pages/tree")
