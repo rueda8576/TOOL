@@ -19,7 +19,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell, openAccountSettings } from "../../../../components/app-shell";
-import { EmptyState, IconButton, LoadingState, StatusLine } from "../../../../components/ui";
+import { EmptyState, IconButton, LoadingState, MetricPill, ModuleCockpit, StatusLine, ToolbarGroup } from "../../../../components/ui";
 import { LoginResponse } from "../../../../lib/client-api";
 import {
   createProjectRepository,
@@ -686,21 +686,24 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
 
         {!loading && !repositoryConnected ? (
           <section className="panel module-entry-panel code-provision-panel">
-            <div className="stack-xs">
-              <p className="eyebrow">Repository cockpit</p>
-              <h2 className="section-heading">No repositories yet</h2>
-              <p>
-                {canWrite
+            <ModuleCockpit
+              eyebrow="Repository cockpit"
+              title="No repositories yet"
+              summary={
+                canWrite
                   ? "Create a managed GitLab repository for this project to start browsing code, branches, and merge requests."
-                  : "This project does not have managed GitLab repositories yet."}
-              </p>
-            </div>
-            {canWrite ? (
-              <button className="button" type="button" onClick={() => setShowRepositoryModal(true)}>
-                <Plus size={16} aria-hidden="true" />
-                New repository
-              </button>
-            ) : null}
+                  : "This project does not have managed GitLab repositories yet."
+              }
+              metrics={<MetricPill>{canWrite ? "Writable" : "Read only"}</MetricPill>}
+              actions={canWrite ? (
+                <ToolbarGroup>
+                  <button className="button" type="button" onClick={() => setShowRepositoryModal(true)}>
+                    <Plus size={16} aria-hidden="true" />
+                    New repository
+                  </button>
+                </ToolbarGroup>
+              ) : null}
+            />
           </section>
         ) : null}
 

@@ -113,6 +113,80 @@ export function Badge({ className, ...props }: HTMLAttributes<HTMLSpanElement>):
   return <span className={className ? `badge ${className}` : "badge"} {...props} />;
 }
 
+export function MetricPill({ className, ...props }: HTMLAttributes<HTMLSpanElement>): JSX.Element {
+  return <span className={className ? `metric-pill ${className}` : "metric-pill"} {...props} />;
+}
+
+export function ToolbarGroup({ className, ...props }: HTMLAttributes<HTMLDivElement>): JSX.Element {
+  return <div className={className ? `toolbar-group ${className}` : "toolbar-group"} {...props} />;
+}
+
+export function MetaRow({ className, ...props }: HTMLAttributes<HTMLDivElement>): JSX.Element {
+  return <div className={className ? `meta-row ${className}` : "meta-row"} {...props} />;
+}
+
+export function SectionHeader({
+  eyebrow,
+  title,
+  action,
+  className
+}: {
+  eyebrow?: string;
+  title: string;
+  action?: ReactNode;
+  className?: string;
+}): JSX.Element {
+  return (
+    <div className={className ? `section-header ${className}` : "section-header"}>
+      <div className="stack-xxs">
+        {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
+        <h3 className="section-heading">{title}</h3>
+      </div>
+      {action ? <div className="section-header-action">{action}</div> : null}
+    </div>
+  );
+}
+
+export function ModuleCockpit({
+  eyebrow,
+  title,
+  summary,
+  metrics,
+  actions,
+  icon,
+  className,
+  titleClassName = "section-heading",
+  titleLevel = "h2"
+}: {
+  eyebrow: string;
+  title: ReactNode;
+  summary?: ReactNode;
+  metrics?: ReactNode;
+  actions?: ReactNode;
+  icon?: ReactNode;
+  className?: string;
+  titleClassName?: string;
+  titleLevel?: "h2" | "h3";
+}): JSX.Element {
+  const Heading = titleLevel;
+  return (
+    <div className={className ? `module-cockpit ${className}` : "module-cockpit"}>
+      <div className="module-cockpit-copy">
+        <p className="eyebrow module-cockpit-eyebrow">
+          {icon ? <span className="module-cockpit-icon" aria-hidden="true">{icon}</span> : null}
+          <span>{eyebrow}</span>
+        </p>
+        <div className="module-cockpit-title-row">
+          <Heading className={titleClassName}>{title}</Heading>
+          {metrics ? <div className="module-cockpit-metrics">{metrics}</div> : null}
+        </div>
+        {summary ? <p className="module-cockpit-summary">{summary}</p> : null}
+      </div>
+      {actions ? <div className="module-cockpit-actions">{actions}</div> : null}
+    </div>
+  );
+}
+
 export function Tabs<TValue extends string>({
   tabs,
   value,

@@ -5,7 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../components/app-shell";
-import { LoadingState } from "../../components/ui";
+import { LoadingState, MetricPill, ModuleCockpit, ToolbarGroup } from "../../components/ui";
 import {
   AdminManagedUser,
   AdminUserHardDeleteCheck,
@@ -694,62 +694,64 @@ export default function ProjectsPage(): JSX.Element {
   return (
     <AppShell>
       <section className="panel module-entry-panel projects-directory-panel">
-        <div className="projects-toolbar-row module-entry-header">
-          <div className="module-entry-main">
-            <p className="eyebrow">{workspaceMode === "users" ? "Administration" : "Atlasium workspace"}</p>
-            <div className="module-entry-title-row">
-              <h2 className="section-heading">{workspaceTitle}</h2>
-              <span className="badge">{workspaceMode === "users" ? `${adminUsers.length} users` : `${projects.length} projects`}</span>
-              {workspaceMode === "projects" ? <span className="badge">{projects.filter((project) => project.isPinned).length} pinned</span> : null}
-            </div>
-            <p className="projects-toolbar-helper module-entry-summary">{workspaceHelper}</p>
-          </div>
-          <div className="projects-toolbar-actions module-entry-actions">
-            {workspaceMode === "projects" ? (
-              <label className="projects-order-control">
-                Order by
-                <select className="input" value={orderBy} onChange={(event) => setOrderBy(event.target.value as ProjectOrderBy)}>
-                  <option value="newest">Newest</option>
-                  <option value="key">Key</option>
-                  <option value="name">Name</option>
-                </select>
-              </label>
-            ) : null}
-            {isAdmin && workspaceMode === "projects" ? (
-              <button
-                className="button button-secondary projects-invite-toggle-button"
-                type="button"
-                onClick={() => {
-                  setInviteSuccess(null);
-                  setInviteError(null);
-                  setIsInviteOpen((current) => !current);
-                }}
-              >
-                {isInviteOpen ? "Close invite" : "Invite user"}
-              </button>
-            ) : null}
-            {isAdmin ? (
-              <button className="button button-secondary projects-invite-toggle-button" type="button" onClick={onToggleManageUsers}>
-                {workspaceMode === "users" ? "Back to projects" : "Manage users"}
-              </button>
-            ) : null}
-            {isAdmin && workspaceMode === "projects" ? (
-              <button
-                className="button"
-                type="button"
-                onClick={() => {
-                  setCreateSuccess(null);
-                  setCreateError(null);
-                  setDeleteSuccess(null);
-                  setDeleteError(null);
-                  setIsCreateOpen((current) => !current);
-                }}
-              >
-                {isCreateOpen ? "Close" : "New project"}
-              </button>
-            ) : null}
-          </div>
-        </div>
+        <ModuleCockpit
+          eyebrow={workspaceMode === "users" ? "Administration" : "Atlasium workspace"}
+          title={workspaceTitle}
+          summary={workspaceHelper}
+          metrics={
+            <>
+              <MetricPill>{workspaceMode === "users" ? `${adminUsers.length} users` : `${projects.length} projects`}</MetricPill>
+              {workspaceMode === "projects" ? <MetricPill>{projects.filter((project) => project.isPinned).length} pinned</MetricPill> : null}
+            </>
+          }
+          actions={
+            <ToolbarGroup className="projects-toolbar-actions">
+              {workspaceMode === "projects" ? (
+                <label className="projects-order-control">
+                  Order by
+                  <select className="input" value={orderBy} onChange={(event) => setOrderBy(event.target.value as ProjectOrderBy)}>
+                    <option value="newest">Newest</option>
+                    <option value="key">Key</option>
+                    <option value="name">Name</option>
+                  </select>
+                </label>
+              ) : null}
+              {isAdmin && workspaceMode === "projects" ? (
+                <button
+                  className="button button-secondary projects-invite-toggle-button"
+                  type="button"
+                  onClick={() => {
+                    setInviteSuccess(null);
+                    setInviteError(null);
+                    setIsInviteOpen((current) => !current);
+                  }}
+                >
+                  {isInviteOpen ? "Close invite" : "Invite user"}
+                </button>
+              ) : null}
+              {isAdmin ? (
+                <button className="button button-secondary projects-invite-toggle-button" type="button" onClick={onToggleManageUsers}>
+                  {workspaceMode === "users" ? "Back to projects" : "Manage users"}
+                </button>
+              ) : null}
+              {isAdmin && workspaceMode === "projects" ? (
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => {
+                    setCreateSuccess(null);
+                    setCreateError(null);
+                    setDeleteSuccess(null);
+                    setDeleteError(null);
+                    setIsCreateOpen((current) => !current);
+                  }}
+                >
+                  {isCreateOpen ? "Close" : "New project"}
+                </button>
+              ) : null}
+            </ToolbarGroup>
+          }
+        />
 
         {createSuccess ? <p className="alert alert-success">{createSuccess}</p> : null}
         {createError ? <p className="alert alert-error">{createError}</p> : null}

@@ -6,7 +6,7 @@ import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 
 import { AppShell } from "./app-shell";
-import { LoadingState, Modal } from "./ui";
+import { LoadingState, MetricPill, Modal, ModuleCockpit, ToolbarGroup } from "./ui";
 import { WikiHistory } from "./wiki-history";
 import { WikiImportDraftEntry, WikiImportPanel } from "./wiki-import-panel";
 import { WikiMarkdown } from "./wiki-markdown";
@@ -2676,18 +2676,20 @@ export function WikiHub({
         style={wikiLayoutStyle}
       >
         <aside ref={wikiSidebarRef} className="wiki-sidebar panel module-entry-panel">
-          <div className="wiki-sidebar-toolbar module-entry-header">
-            <div className="module-entry-main">
-              <p className="eyebrow">Wiki</p>
-              <div className="module-entry-title-row">
-                <h3 className="section-heading">Pages</h3>
-                <span className="badge">{canWrite ? "Writable" : "Read only"}</span>
-                {docsSyncStatus ? <span className="badge">{docsSyncStatus.repositories.length} Docs repos</span> : null}
-              </div>
-              <p className="module-entry-summary">Search, draft, publish, import, and sync project knowledge with traceable revisions.</p>
-            </div>
-            {canWrite ? (
-              <div className="inline-actions">
+          <ModuleCockpit
+            className="wiki-sidebar-toolbar"
+            eyebrow="Wiki"
+            title="Pages"
+            titleLevel="h3"
+            summary="Search, draft, publish, import, and sync project knowledge with traceable revisions."
+            metrics={
+              <>
+                <MetricPill>{canWrite ? "Writable" : "Read only"}</MetricPill>
+                {docsSyncStatus ? <MetricPill>{docsSyncStatus.repositories.length} Docs repos</MetricPill> : null}
+              </>
+            }
+            actions={canWrite ? (
+              <ToolbarGroup className="inline-actions">
                 <button
                   type="button"
                   className="button button-secondary"
@@ -2716,9 +2718,9 @@ export function WikiHub({
                 >
                   {syncingDocs ? "Syncing..." : "Sync Docs"}
                 </button>
-              </div>
+              </ToolbarGroup>
             ) : null}
-          </div>
+          />
 
           {docsSyncResult ? (
             <div className="wiki-import-summary">

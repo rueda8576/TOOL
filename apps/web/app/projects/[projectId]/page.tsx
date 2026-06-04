@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "../../../components/app-shell";
-import { Alert, Badge, EmptyState, LoadingState } from "../../../components/ui";
+import { Alert, Badge, EmptyState, LoadingState, MetricPill, ModuleCockpit } from "../../../components/ui";
 import {
   getProjectOverview,
   ProjectOverview,
@@ -237,17 +237,20 @@ export default function ProjectDetailPage({
         {!loading && overview ? (
           <>
             <section className="overview-command-band panel module-entry-panel">
-              <div className="overview-command-main module-entry-main">
-                <p className="eyebrow">Atlasium project archive</p>
-                <h2>{overview.project.key} - {overview.project.name}</h2>
-                <p className="module-entry-summary">{overview.project.description ?? "Live workspace for documents, wiki knowledge, code, meetings, tasks, and traceability."}</p>
-              </div>
-              <div className="overview-command-state module-entry-state" aria-label="Project status summary">
-                <Badge>{formatTitleCase(overview.access.projectRole)}</Badge>
-                <Badge>{overview.access.canWrite ? "Writable" : "Read only"}</Badge>
-                <Badge>{overview.attention.length} attention</Badge>
-                <Badge>{overview.modules.tasks.open} open tasks</Badge>
-              </div>
+              <ModuleCockpit
+                eyebrow="Atlasium project archive"
+                title={`${overview.project.key} - ${overview.project.name}`}
+                titleClassName="overview-command-title"
+                summary={overview.project.description ?? "Live workspace for documents, wiki knowledge, code, meetings, tasks, and traceability."}
+                metrics={
+                  <>
+                    <MetricPill>{formatTitleCase(overview.access.projectRole)}</MetricPill>
+                    <MetricPill>{overview.access.canWrite ? "Writable" : "Read only"}</MetricPill>
+                    <MetricPill>{overview.attention.length} attention</MetricPill>
+                    <MetricPill>{overview.modules.tasks.open} open tasks</MetricPill>
+                  </>
+                }
+              />
             </section>
 
             <div className="overview-command-layout">

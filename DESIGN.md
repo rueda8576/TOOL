@@ -14,6 +14,14 @@
 - Product copy should be specific, operational, and grounded in live product state. Avoid generic slogans, fake testimonials, buzzword stacking, launch-copy, demo language, and invented metrics.
 - In project context, the shell brand title may switch to `project.key`. The fallback outside project context, during token failure, or while loading is always `Atlasium`.
 
+## Atlasium v2 Direction
+
+- The next visual step is institutional editorial quality: precise, calm, archival, and premium without becoming decorative or marketing-led.
+- Prefer structure over ornament. Use layered paper surfaces, index lines, small caps, restrained dividers, and provenance metadata to express the archive metaphor.
+- Each screen should make its operational purpose obvious in the first viewport: current archive, current module, live state, available primary action, and the next useful surface below.
+- Avoid same-looking panels. Repeated containers should still show hierarchy through density, border strength, metadata placement, and action grouping.
+- A design pass is incomplete if it improves color but leaves scanning, truncation, loading states, focus, mobile layout, or action hierarchy unchanged.
+
 ## Visual System
 
 - Use the existing token system in `apps/web/app/globals.css` as the source for color, spacing, radius, shadow, and semantic state styling.
@@ -26,6 +34,38 @@
 - Radius and elevation stay restrained: prefer `--radius-sm` and `--radius-md`; avoid large rounded marketing cards. Shadows should be low and functional, not decorative.
 - Motion must be short, subtle, and state-oriented. Keep `prefers-reduced-motion` support. Do not add bounce, rotation, broad glow, parallax, or attention-seeking animation.
 - Forbidden decorative patterns: purple novelty gradients, sparkles, emojis-as-UI, orbs, bokeh, purely ornamental SVG art, random gradients, and page-wide visual effects.
+
+## Workspace Chrome
+
+- The shell should read as product infrastructure: compact, sticky, high contrast, and durable. It must not compete with module content.
+- Project context belongs in the shell brand and local module cockpit. Do not duplicate broad page headers above every route.
+- Active navigation should be readable through shape, color, and position, not only text color. Horizontal overflow must remain usable on mobile.
+- User/account utilities should feel persistent and quiet. Project exit stays clearly separated from account actions.
+- Public and auth pages are access gates for an invited research workspace. They should show Atlasium identity and archive-document visual language without sales claims.
+
+## Module Cockpit Anatomy
+
+- Every module entry cockpit should contain, in order: module/archive identity, title, concise operational summary, live status/metrics, and primary or mode actions.
+- Use shared cockpit primitives when possible. If a module needs custom markup, keep the same anatomy and class naming so CSS behavior stays consistent.
+- Status pills and metrics must be factual. Avoid vanity counters, invented progress, or labels that cannot be derived from current state.
+- Alerts belong near the action or surface they affect. Loading and empty states should reserve enough space to avoid layout jumps.
+- Dense modules should keep secondary setup, clone, create, import, and long-form edit flows in drawers, modals, collapsible panels, or local sections.
+
+## Dense Surface Rules
+
+- Lists, trees, task cards, calendar cells, repository rows, and activity feeds should optimize scanning: title first, metadata second, state/action last.
+- Use compact metadata rows for author, date, role, path, branch, status, counts, and provenance. Use monospace only for technical identifiers.
+- Tables and repeated rows need stable hover/focus states, predictable hit targets, and clear selected/current states.
+- Split panes, file trees, Monaco, PDF.js, Markdown previews, and calendars must keep local scroll and cannot expand the document horizontally.
+- Long labels, paths, refs, emails, and titles must wrap or truncate inside their pane on desktop and mobile.
+
+## Mobile Workspace Rules
+
+- Mobile layouts stack by workflow priority: cockpit first, primary controls second, active content third, secondary lists/details after.
+- Horizontal project navigation may scroll, but controls inside toolbars should wrap or become full-width groups rather than clipping.
+- Drawers and long-form editors may become bottom sheets on small screens, with stable close and save actions.
+- Splitter handles can be hidden on mobile only when panes stack and both panes remain reachable.
+- Text inside buttons, badges, cards, tabs, and calendar cells must fit without overlap at common mobile widths.
 
 ## Mark And Assets
 

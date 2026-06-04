@@ -66,8 +66,8 @@ export default function LoginPage(): JSX.Element {
             <AtlasiumMark size="md" />
             <p className="eyebrow">Atlasium</p>
           </div>
-          <h1 className="section-heading">Sign in</h1>
-          <p>Use your invited account to access Atlasium.</p>
+          <h1 className="section-heading">Archive sign in</h1>
+          <p>Use your invited account to enter Atlasium.</p>
         </div>
 
         <form className="form-grid" onSubmit={handleSubmit}>

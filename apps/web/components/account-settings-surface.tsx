@@ -23,7 +23,7 @@ import {
   GitlabSshKey,
   listGitlabSshKeys
 } from "../lib/gitlab";
-import { LoadingState } from "./ui";
+import { LoadingState, MetricPill, ModuleCockpit } from "./ui";
 
 export type AccountSettingsTab = "profile" | "security" | "notifications" | "git";
 
@@ -587,14 +587,12 @@ export function AccountSettingsSurface({
         <div className="account-column">
           {activeTab === "profile" ? (
           <section className="panel module-entry-panel stack-md account-section-card">
-            <div className="account-card-header">
-              <div className="stack-xs">
-                <p className="eyebrow">Profile</p>
-                <h2 className="section-heading">Atlasium identity</h2>
-                <p>Server-backed summary of your Atlasium account record and managed GitLab identity.</p>
-              </div>
-              {profile ? <span className="badge">{formatRoleLabel(profile.globalRole)}</span> : null}
-            </div>
+            <ModuleCockpit
+              eyebrow="Profile"
+              title="Atlasium identity"
+              summary="Server-backed summary of your account record and managed GitLab identity."
+              metrics={profile ? <MetricPill>{formatRoleLabel(profile.globalRole)}</MetricPill> : null}
+            />
 
             {profileLoading ? <LoadingState title="Loading account profile" detail="Preparing your Atlasium identity record." /> : null}
             {profileError ? <p className="alert alert-error">{profileError}</p> : null}
@@ -658,12 +656,13 @@ export function AccountSettingsSurface({
           ) : null}
 
           {activeTab === "security" ? (
-          <section className="panel stack-md account-section-card">
-            <div className="stack-xs">
-              <p className="eyebrow">Security</p>
-              <h2 className="section-heading">Change password</h2>
-              <p>Enter your current password before setting a new one. A successful change signs out your other active sessions.</p>
-            </div>
+          <section className="panel module-entry-panel stack-md account-section-card">
+            <ModuleCockpit
+              eyebrow="Security"
+              title="Change password"
+              summary="Enter your current password before setting a new one. A successful change signs out your other active sessions."
+              metrics={<MetricPill>Password</MetricPill>}
+            />
 
             {securityError ? <p className="alert alert-error">{securityError}</p> : null}
             {securitySuccess ? <p className="alert alert-success">{securitySuccess}</p> : null}
@@ -753,12 +752,13 @@ export function AccountSettingsSurface({
           ) : null}
 
           {activeTab === "notifications" ? (
-          <section className="panel stack-md account-section-card">
-            <div className="stack-xs">
-              <p className="eyebrow">Notifications</p>
-              <h2 className="section-heading">Delivery preferences</h2>
-              <p>Control which Atlasium events can notify you by email and how early task reminders are sent.</p>
-            </div>
+          <section className="panel module-entry-panel stack-md account-section-card">
+            <ModuleCockpit
+              eyebrow="Notifications"
+              title="Delivery preferences"
+              summary="Control which Atlasium events can notify you by email and how early task reminders are sent."
+              metrics={<MetricPill>{notificationPreferences?.emailEnabled ? "Email on" : "Email off"}</MetricPill>}
+            />
 
             {notificationsLoading ? <LoadingState title="Loading notification preferences" detail="Preparing delivery settings." /> : null}
             {notificationsError ? <p className="alert alert-error">{notificationsError}</p> : null}
@@ -936,12 +936,18 @@ export function AccountSettingsSurface({
 
         <div className="account-column">
           {activeTab === "git" ? (
-          <section className="panel stack-md account-section-card">
-            <div className="stack-xs">
-              <p className="eyebrow">GitLab & SSH access</p>
-              <h2 className="section-heading">Repository access</h2>
-              <p>GitLab web sign-in uses Atlasium SSO. Connect GitLab API access here, then manage SSH keys and HTTPS clone access for Atlasium Code.</p>
-            </div>
+          <section className="panel module-entry-panel stack-md account-section-card">
+            <ModuleCockpit
+              eyebrow="GitLab & SSH access"
+              title="Repository access"
+              summary="GitLab web sign-in uses Atlasium SSO. Connect GitLab API access here, then manage SSH keys and HTTPS clone access for Atlasium Code."
+              metrics={
+                <>
+                  <MetricPill>{connection?.connected ? "GitLab connected" : "GitLab disconnected"}</MetricPill>
+                  <MetricPill>{sshKeys.length} SSH key{sshKeys.length === 1 ? "" : "s"}</MetricPill>
+                </>
+              }
+            />
 
             <div className="account-tech-block stack-md">
               <div className="stack-xs">

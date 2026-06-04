@@ -5,7 +5,7 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useSta
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
-import { LoadingState } from "../../../../components/ui";
+import { LoadingState, MetricPill, ModuleCockpit } from "../../../../components/ui";
 import {
   createDocumentVersionUpload,
   createProjectDocument,
@@ -279,17 +279,18 @@ export default function ProjectDocumentsPage({
   return (
     <AppShell projectId={params.projectId}>
       <section className="panel module-entry-panel documents-page-toolbar">
-        <div className="module-entry-header">
-          <div className="module-entry-main">
-            <p className="eyebrow">Documents</p>
-            <div className="module-entry-title-row">
-              <h3 className="section-heading">Document library</h3>
-              <span className="badge">{documents.length} document{documents.length === 1 ? "" : "s"}</span>
-              <span className="badge">{canWrite ? "Writable" : "Read only"}</span>
-            </div>
-            <p className="module-entry-summary">Manage PDF and LaTeX archives, versions, compile state, and project document provenance.</p>
-          </div>
-          {canWrite ? (
+        <ModuleCockpit
+          eyebrow="Documents"
+          title="Document library"
+          titleLevel="h3"
+          summary="Manage PDF and LaTeX archives, versions, compile state, and project document provenance."
+          metrics={
+            <>
+              <MetricPill>{documents.length} document{documents.length === 1 ? "" : "s"}</MetricPill>
+              <MetricPill>{canWrite ? "Writable" : "Read only"}</MetricPill>
+            </>
+          }
+          actions={canWrite ? (
             <button
               className="button button-secondary"
               type="button"
@@ -300,7 +301,7 @@ export default function ProjectDocumentsPage({
               {showForm ? "Close" : "New document"}
             </button>
           ) : null}
-        </div>
+        />
         {success ? <p className="alert alert-success">{success}</p> : null}
         {error ? <p className="alert alert-error">{error}</p> : null}
         {retryDocumentId ? (

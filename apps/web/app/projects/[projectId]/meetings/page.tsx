@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { AppShell } from "../../../../components/app-shell";
-import { LoadingState } from "../../../../components/ui";
+import { LoadingState, MetricPill, ModuleCockpit, ToolbarGroup } from "../../../../components/ui";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
 import {
@@ -783,38 +783,43 @@ export default function ProjectMeetingsPage({
   return (
     <AppShell projectId={params.projectId}>
       <section className="panel module-entry-panel meetings-toolbar">
-        <div className="meetings-toolbar-row module-entry-header">
-          <div className="module-entry-main">
-            <p className="eyebrow">Meetings</p>
-            <div className="module-entry-title-row">
-              <h3 className="section-heading">Minutes</h3>
-              <span className="badge">{meetings.length} record{meetings.length === 1 ? "" : "s"}</span>
-              <span className="badge">{viewMode === "calendar" ? "Calendar" : "List"}</span>
-            </div>
-            <p className="module-entry-summary">Review meeting minutes, structured Markdown sections, action counts, and AI task extraction state.</p>
-          </div>
-          <div className="meetings-view-toggle">
-            <button
-              className={viewMode === "list" ? "button" : "button button-secondary"}
-              type="button"
-              onClick={() => setViewMode("list")}
-            >
-              List
-            </button>
-            <button
-              className={viewMode === "calendar" ? "button" : "button button-secondary"}
-              type="button"
-              onClick={() => setViewMode("calendar")}
-            >
-              Calendar
-            </button>
-          </div>
-          {canWrite ? (
-            <button className="button button-secondary" type="button" onClick={onNewMinuteClick}>
-              {showForm && formMode === "create" ? "Close" : "New minutes"}
-            </button>
-          ) : null}
-        </div>
+        <ModuleCockpit
+          eyebrow="Meetings"
+          title="Minutes"
+          titleLevel="h3"
+          summary="Review meeting minutes, structured Markdown sections, action counts, and AI task extraction state."
+          metrics={
+            <>
+              <MetricPill>{meetings.length} record{meetings.length === 1 ? "" : "s"}</MetricPill>
+              <MetricPill>{viewMode === "calendar" ? "Calendar" : "List"}</MetricPill>
+            </>
+          }
+          actions={
+            <ToolbarGroup className="meetings-toolbar-actions">
+              <div className="meetings-view-toggle">
+                <button
+                  className={viewMode === "list" ? "button" : "button button-secondary"}
+                  type="button"
+                  onClick={() => setViewMode("list")}
+                >
+                  List
+                </button>
+                <button
+                  className={viewMode === "calendar" ? "button" : "button button-secondary"}
+                  type="button"
+                  onClick={() => setViewMode("calendar")}
+                >
+                  Calendar
+                </button>
+              </div>
+              {canWrite ? (
+                <button className="button button-secondary" type="button" onClick={onNewMinuteClick}>
+                  {showForm && formMode === "create" ? "Close" : "New minutes"}
+                </button>
+              ) : null}
+            </ToolbarGroup>
+          }
+        />
         {success ? <p className="alert alert-success">{success}</p> : null}
         {error ? <p className="alert alert-error">{error}</p> : null}
       </section>

@@ -1,5 +1,21 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium UI/UX Quality Leap (2026-06-04)
+- [x] Register the approved implementation plan for the Atlasium v2 institutional-editorial redesign.
+- [x] Extend `DESIGN.md` with v2 workspace chrome, module cockpit, dense layout, state, and visual QA guidance.
+- [x] Refine global design tokens, shell, public/auth access surfaces, and shared frontend primitives.
+- [x] Apply the module redesign pass across Projects, Overview, Wiki, Documents, Code, Tasks, Meetings, and Account without backend contract changes.
+- [x] Run static audits, web type-check/build, diff hygiene, and visual verification.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Extended `DESIGN.md` with the Atlasium v2 institutional-editorial direction, workspace chrome rules, module cockpit anatomy, dense surface rules, mobile workspace behavior, and stricter visual QA expectations.
+- Refined `apps/web/app/globals.css` with clearer semantic tokens, shell/public/auth polish, shared cockpit primitives, denser list/table/module styling, state tokenization, Account drawer polish, and preserved `.module-entry-panel` amber accent ownership.
+- Added shared frontend primitives in `components/ui.tsx` and migrated module cockpits/entry surfaces across Projects, Overview, Wiki, Documents, Code empty state, Tasks, Meetings, and Account while leaving backend/API/schema/auth/storage/realtime/PDF.js/Monaco contracts unchanged.
+- Improved public home and login into an institutional access gate; tightened AppShell, Projects directory, Overview command center, Wiki/Documents panes, Code cockpit styling, Tasks board readability, Meetings list/calendar states, and Account settings hierarchy.
+- Verification passed: static `rg` audits for obsolete active branding, forbidden decorative/user-facing wording, old ellipsis actions, and `module-entry-panel` accent ownership; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; `git diff --check`.
+- Visual QA used `next start` and Playwright screenshots in `/tmp/atlasium-v2-visual` for `/`, `/login`, `/projects`, project Overview, Wiki, Documents library/detail, Code, Tasks, Meetings, `/account`, and Account drawer at desktop and mobile sizes. Protected routes used a temporary localStorage session because no live API/auth session was available; Account loaded/drawer screenshots used Playwright-only API fixtures to verify the polished loaded state.
+
 ## Atlasium Design Canon and Web Redesign (2026-06-04)
 - [x] Register the approved implementation plan for the Atlasium design canon and web redesign.
 - [x] Create `DESIGN.md` as the permanent Atlasium brand, visual design, UI/UX, and verification contract.

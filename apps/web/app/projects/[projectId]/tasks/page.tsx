@@ -5,7 +5,7 @@ import { DragEvent, FormEvent, MouseEvent, useCallback, useEffect, useMemo, useS
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
-import { LoadingState } from "../../../../components/ui";
+import { LoadingState, MetricPill, ModuleCockpit } from "../../../../components/ui";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
 import {
@@ -360,22 +360,23 @@ export default function ProjectTasksPage({
   return (
     <AppShell projectId={params.projectId}>
       <section className="panel module-entry-panel task-toolbar">
-        <div className="task-toolbar-row module-entry-header">
-          <div className="module-entry-main">
-            <p className="eyebrow">Tasks</p>
-            <div className="module-entry-title-row">
-              <h3 className="section-heading">Board</h3>
-              <span className="badge">{tasks.filter((task) => task.status !== "done").length} open</span>
-              <span className="badge">{tasks.filter((task) => task.priority === "critical" || task.priority === "high").length} urgent</span>
-            </div>
-            <p className="module-entry-summary">Track project work by status, priority, assignee, and meeting provenance.</p>
-          </div>
-          {canWrite ? (
+        <ModuleCockpit
+          eyebrow="Tasks"
+          title="Board"
+          titleLevel="h3"
+          summary="Track project work by status, priority, assignee, and meeting provenance."
+          metrics={
+            <>
+              <MetricPill>{tasks.filter((task) => task.status !== "done").length} open</MetricPill>
+              <MetricPill>{tasks.filter((task) => task.priority === "critical" || task.priority === "high").length} urgent</MetricPill>
+            </>
+          }
+          actions={canWrite ? (
             <button className="button button-secondary" type="button" onClick={onNewTaskClick}>
               {showForm && formMode === "create" ? "Close" : "New task"}
             </button>
           ) : null}
-        </div>
+        />
         {success ? <p className="alert alert-success">{success}</p> : null}
         {error ? <p className="alert alert-error">{error}</p> : null}
       </section>
