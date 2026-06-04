@@ -1,5 +1,22 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Design Canon and Web Redesign (2026-06-04)
+- [x] Register the approved implementation plan for the Atlasium design canon and web redesign.
+- [x] Create `DESIGN.md` as the permanent Atlasium brand, visual design, UI/UX, and verification contract.
+- [x] Update `AGENTS.md`, `CLAUDE.md`, `README.md`, and `tasks/LESSONS.md` to reference `DESIGN.md` before UI/design-adjacent work.
+- [x] Refine web design foundations, missing utilities, functional tokens, and module entry surfaces.
+- [x] Apply component, icon, and copy consistency improvements without changing backend contracts.
+- [x] Run static audits, web type-check/build, diff hygiene, and visual verification where available.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Added `DESIGN.md` as the canonical Atlasium brand, digital identity, UI/UX, copy, layout, component, state, motion, accessibility, and visual verification guide. Atlasium is now the only active product brand; historical names are documented only as invalid active fallbacks.
+- Updated `AGENTS.md`, `CLAUDE.md`, `README.md`, and `tasks/LESSONS.md` so future UI/design-adjacent planning and changes consult `DESIGN.md` first while keeping technical lessons in `tasks/LESSONS.md`.
+- Refined the web design foundation in `apps/web/app/globals.css` with functional state tokens, missing utility classes, shared module-entry layout classes, CSS warning cleanup, and preserved `.module-entry-panel` amber top accent ownership.
+- Upgraded entry surfaces and copy consistency across Projects, Overview, Wiki, Documents, Code, Tasks, Meetings, and Account without backend/API/schema changes. The Tasks overflow trigger now uses a lucide icon button instead of `···`.
+- Verification passed: static `rg` audits for obsolete active branding, decorative language, missing CSS utilities, user-facing `tranche`/ellipsis wording, and `module-entry-panel` accent ownership; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; `git diff --check`.
+- Visual verification used `next start` plus temporary Playwright Chromium screenshots in `/tmp/atlasium-visual` for `/`, `/login`, `/projects`, project Overview, Wiki, Documents library/detail, Code, Tasks, Meetings, and Account. Public/auth routes were captured normally; protected module routes were captured with JavaScript disabled to inspect SSR initial layout without the unauthenticated client redirect. Full authenticated interaction checks were not run because no API/auth session/test data was active locally.
+
 ## Wiki Docs Assignment Panel (2026-06-02)
 - [x] Register the approved implementation plan for assigning unassigned Wiki pages to Docs repos.
 - [x] Add API DTO, endpoint, service flow, and result/status types.

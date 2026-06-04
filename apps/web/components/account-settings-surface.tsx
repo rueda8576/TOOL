@@ -586,12 +586,12 @@ export function AccountSettingsSurface({
       <section className="account-settings-layout">
         <div className="account-column">
           {activeTab === "profile" ? (
-          <section className="panel stack-md account-section-card">
+          <section className="panel module-entry-panel stack-md account-section-card">
             <div className="account-card-header">
               <div className="stack-xs">
                 <p className="eyebrow">Profile</p>
                 <h2 className="section-heading">Atlasium identity</h2>
-                <p>Server-backed summary of your Atlasium account record. Profile editing stays out of scope for this tranche.</p>
+                <p>Server-backed summary of your Atlasium account record and managed GitLab identity.</p>
               </div>
               {profile ? <span className="badge">{formatRoleLabel(profile.globalRole)}</span> : null}
             </div>

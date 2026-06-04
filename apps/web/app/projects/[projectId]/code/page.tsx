@@ -839,7 +839,9 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                 </div>
               </div>
 
-              {connectedRepository.description ? <p className="code-cockpit-description">{connectedRepository.description}</p> : null}
+              <p className="code-cockpit-description">
+                {connectedRepository.description ?? "Browse repository files, history, branches, merge requests, clone access, and archive downloads."}
+              </p>
             </section>
 
             {!gitlabConnected ? (

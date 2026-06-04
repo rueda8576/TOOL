@@ -2676,8 +2676,16 @@ export function WikiHub({
         style={wikiLayoutStyle}
       >
         <aside ref={wikiSidebarRef} className="wiki-sidebar panel module-entry-panel">
-          <div className="wiki-sidebar-toolbar">
-            <h3 className="section-heading">Pages</h3>
+          <div className="wiki-sidebar-toolbar module-entry-header">
+            <div className="module-entry-main">
+              <p className="eyebrow">Wiki</p>
+              <div className="module-entry-title-row">
+                <h3 className="section-heading">Pages</h3>
+                <span className="badge">{canWrite ? "Writable" : "Read only"}</span>
+                {docsSyncStatus ? <span className="badge">{docsSyncStatus.repositories.length} Docs repos</span> : null}
+              </div>
+              <p className="module-entry-summary">Search, draft, publish, import, and sync project knowledge with traceable revisions.</p>
+            </div>
             {canWrite ? (
               <div className="inline-actions">
                 <button

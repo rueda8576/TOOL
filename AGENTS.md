@@ -2,11 +2,12 @@
 # Extra files to take in account
 ## Project instructions
 Please consult the following files when working on this project:
+- `DESIGN.md` (permanent Atlasium brand, digital design, UI/UX, copy, and visual verification canon)
 - `tasks/LESSONS.md` (important lessons & coding conventions)
 - `tasks/TODO.md` (list of pending tasks)
 
 ## How to use these files
-When making changes, read and respect the guidelines in LESSONS.md, and consider tasks listed in TODO.md.
+Before any planning or change, read and respect DESIGN.md, read and respect the guidelines in LESSONS.md, and consider tasks listed in TODO.md. DESIGN.md is authoritative for brand, UI, UX, copy, metadata, navigation, visual assets, and design verification.
 
 # Workflow Orchestration
 

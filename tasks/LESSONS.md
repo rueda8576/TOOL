@@ -19,15 +19,9 @@
 - Do not split a dense technical settings workflow into competing nested cards inside a narrow secondary column. If a section combines long labels, action buttons, and optional detail, merge the related controls into one coherent panel and collapse heavy forms by default.
 - When adding shared visual accent classes, audit later page-specific shorthand rules like `border-color`; they can silently override one side of the shared accent through CSS cascade.
 
-## Anti-vibe-coded product quality
-- Avoid novelty-first UI: no random purple gradients, sparkles, emojis-as-UI, fake testimonials, decorative social links, or generic launch-copy.
-- Consistency is the premium signal: use one spacing scale, one radius scale, one elevation model, one icon system, and shared components instead of page-specific visual improvisation.
-- Motion must be functional and subtle; avoid bounce, rotation, aggressive card lift, glow, and page-wide animation unless it directly communicates product state.
-- Every async action needs visible state: disabled controls, progress labels or spinners, and stable loading/empty/error surfaces.
-- Prefer skeletons or reserved-size loading surfaces for data-heavy modules instead of alert text that shifts layout.
-- Treat metadata as product surface: title, description, favicon/icon, OpenGraph, and Twitter metadata must be intentional and Atlasium-specific.
-- Keep copy operational and specific to Atlasium; avoid generic slogans, buzzword stacking, placeholder/demo language, and vague value claims.
-- Before shipping UI, audit mobile layout, button/link behavior, placeholder text, dead links, visual rhythm, spacing, radii, and motion restraint.
+## Design canon
+- Durable Atlasium brand, digital design, UI/UX, copy, metadata, navigation, visual assets, and visual verification rules live in `DESIGN.md`.
+- Read `DESIGN.md` before planning or changing product surfaces. Keep this file for implementation lessons, technical gotchas, and corrected failure patterns rather than duplicating the design canon.
 
 ## Collaboration preferences
 - After every implemented change, always provide the user with the exact commit message to use.
@@ -119,19 +113,12 @@
 - If immutable wiki revisions already store author and timestamp, expose a dedicated revision-detail endpoint for history preview rather than overloading the revision summary list with full markdown content.
 
 ## Branding consistency
-- Avoid demo-like descriptive copy in production headers; project headers should prioritize concise identity context (e.g., `KEY - Name`) over marketing text.
-- Keep product naming aligned across visible UI brand labels and metadata title to avoid split identity between sidebar and browser tab.
-- In project-scoped navigation, the sidebar brand can switch from global product name to operational project identifier (`project.key`) while preserving a stable fallback (`WorkMesh`) when context/token fetch fails.
+- Keep product naming aligned across visible UI brand labels and metadata title to avoid split identity between shell and browser tab.
+- In project-scoped navigation, the shell brand can switch from global product name to operational project identifier (`project.key`) while preserving a stable fallback (`Atlasium`) when context/token fetch fails.
 - Keep deployment naming consistent end-to-end (`/opt/<brand>`, `/var/lib/<brand>/storage`, nginx site name) to avoid mixed legacy identifiers during infrastructure migration.
 
 ## Atlasium visual identity
-- Treat Atlasium as a contemporary institution: sober, rigorous, editorial, and modern rather than generic SaaS, flat corporate dashboard, or old academic portal.
-- Preserve the "living archive" visual metaphor: document layers, tabs, indexes, margins, annotations, versions, provenance, and traceability should guide UI/UX decisions.
-- Use the graphite + amber identity as the default palette, with cool off-white backgrounds and steel blue/mineral green only as functional support colors.
-- Keep `Source Serif 4` for editorial/identity moments and `Inter` for operational UI, forms, navigation, tables, and repeated controls.
-- Reuse `AtlasiumMark` for compact brand expression in sidebar, auth, favicon-like, and small-space contexts; do not introduce alternate marks without explicitly revisiting the identity.
-- Avoid decorative gradients, orb/bokeh backgrounds, and visual effects that weaken the living-archive identity or reduce operational clarity.
-- Future redesigns should preserve these identity tokens and criteria unless the user explicitly decides to change Atlasium's visual identity.
+- Canonical Atlasium identity rules now live in `DESIGN.md`; update that file for durable brand and UI/UX direction.
 
 ## Monorepo Docker builds
 - In multi-stage Dockerfiles for PNPM workspaces, do not assume copying only root `node_modules` is enough for build scripts; ensure filtered dependencies are installed in the build stage before running `pnpm --filter <pkg> build` to avoid missing local binaries like `tsc`.
@@ -205,7 +192,7 @@
   - readers must be filtered away from unpublished pages in tree/search/path lookups
   - editors can open and edit them normally
   - UI that depends on published revisions (`History`, published metadata, revision badges) must degrade explicitly instead of assuming `published` is always present
-- When that wiki contract changes, update existing specs and mocks in the same tranche:
+- When that wiki contract changes, update existing specs and mocks in the same change:
   - tree expectations must include any new page-shape fields such as `isUnpublished`
   - read-access tests must mock whatever the current access helper now needs (`currentRevisionId`, `getProjectAccess`, etc.), not the previous helper contract
 

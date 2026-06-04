@@ -730,9 +730,9 @@ export default function ProjectMeetingsPage({
     }
 
     const confirmed = await confirm({
-      title: "Delete minute",
-      message: "Delete this minute?",
-      confirmLabel: "Delete minute",
+      title: "Delete minutes",
+      message: "Delete these meeting minutes?",
+      confirmLabel: "Delete minutes",
       destructive: true
     });
     if (!confirmed) {
@@ -783,7 +783,16 @@ export default function ProjectMeetingsPage({
   return (
     <AppShell projectId={params.projectId}>
       <section className="panel module-entry-panel meetings-toolbar">
-        <div className="meetings-toolbar-row">
+        <div className="meetings-toolbar-row module-entry-header">
+          <div className="module-entry-main">
+            <p className="eyebrow">Meetings</p>
+            <div className="module-entry-title-row">
+              <h3 className="section-heading">Minutes</h3>
+              <span className="badge">{meetings.length} record{meetings.length === 1 ? "" : "s"}</span>
+              <span className="badge">{viewMode === "calendar" ? "Calendar" : "List"}</span>
+            </div>
+            <p className="module-entry-summary">Review meeting minutes, structured Markdown sections, action counts, and AI task extraction state.</p>
+          </div>
           <div className="meetings-view-toggle">
             <button
               className={viewMode === "list" ? "button" : "button button-secondary"}
@@ -802,7 +811,7 @@ export default function ProjectMeetingsPage({
           </div>
           {canWrite ? (
             <button className="button button-secondary" type="button" onClick={onNewMinuteClick}>
-              {showForm && formMode === "create" ? "Close" : "New minute"}
+              {showForm && formMode === "create" ? "Close" : "New minutes"}
             </button>
           ) : null}
         </div>
@@ -821,7 +830,7 @@ export default function ProjectMeetingsPage({
           >
             <div className="meetings-editor-modal-header">
               <h3 id="meetings-editor-title" className="section-heading">
-                {formMode === "edit" ? "Edit minute" : "Create minute"}
+                {formMode === "edit" ? "Edit minutes" : "Create minutes"}
               </h3>
               <button className="button button-secondary" type="button" onClick={closeForm} disabled={submitting}>
                 Close
@@ -906,7 +915,7 @@ export default function ProjectMeetingsPage({
               </label>
               <div className="meetings-editor-modal-footer">
                 <button className="button" type="submit" disabled={!canWrite || submitting}>
-                  {submitting ? "Saving..." : formMode === "edit" ? "Save changes" : "Create minute"}
+                  {submitting ? "Saving..." : formMode === "edit" ? "Save changes" : "Create minutes"}
                 </button>
                 <button className="button button-secondary" type="button" disabled={submitting} onClick={closeForm}>
                   Cancel
@@ -921,7 +930,7 @@ export default function ProjectMeetingsPage({
 
       {!loading && viewMode === "list" ? (
         <section className="meetings-list">
-          {meetingsByDate.size === 0 ? <p className="alert alert-info">{canWrite ? "No minutes yet. Create the first one." : "No minutes available yet."}</p> : null}
+          {meetingsByDate.size === 0 ? <p className="alert alert-info">{canWrite ? "No meeting minutes yet. Create the first record." : "No meeting minutes available yet."}</p> : null}
           {Array.from(meetingsByDate.entries()).map(([dateKey, items]) => (
             <article key={dateKey} className="panel minutes-list-group">
               <h3 className="section-heading">{displayDay(dateKey)}</h3>

@@ -1,5 +1,6 @@
 "use client";
 
+import { MoreHorizontal } from "lucide-react";
 import { DragEvent, FormEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -359,8 +360,16 @@ export default function ProjectTasksPage({
   return (
     <AppShell projectId={params.projectId}>
       <section className="panel module-entry-panel task-toolbar">
-        <div className="task-toolbar-row">
-          <h3 className="section-heading">Board</h3>
+        <div className="task-toolbar-row module-entry-header">
+          <div className="module-entry-main">
+            <p className="eyebrow">Tasks</p>
+            <div className="module-entry-title-row">
+              <h3 className="section-heading">Board</h3>
+              <span className="badge">{tasks.filter((task) => task.status !== "done").length} open</span>
+              <span className="badge">{tasks.filter((task) => task.priority === "critical" || task.priority === "high").length} urgent</span>
+            </div>
+            <p className="module-entry-summary">Track project work by status, priority, assignee, and meeting provenance.</p>
+          </div>
           {canWrite ? (
             <button className="button button-secondary" type="button" onClick={onNewTaskClick}>
               {showForm && formMode === "create" ? "Close" : "New task"}
@@ -503,7 +512,7 @@ export default function ProjectTasksPage({
                         onClick={(event) => onCardActionsClick(task.id, event)}
                         disabled={activeTaskActionId === task.id}
                       >
-                        ···
+                        <MoreHorizontal size={16} aria-hidden="true" />
                       </button>
                     ) : null}
                   </div>

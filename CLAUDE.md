@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Files to Read First
 
 Always consult these files when working on this project:
+- `DESIGN.md` — permanent Atlasium brand, digital design, UI/UX, copy, and visual verification canon; read before planning or changing product surfaces
 - `tasks/LESSONS.md` — accumulated coding conventions and hard-won lessons; read and respect all of them
 - `tasks/TODO.md` — pending tasks; plan changes there and mark items complete as you go
 
@@ -101,6 +102,8 @@ After any schema change run `pnpm db:generate` before building dependent package
 GitHub Actions (`push` to `main` and PRs): install deps → generate Prisma client → test → build. Deploy triggers from successful CI completion on `main` using GHCR images with immutable `sha-*` tags. Migrations run via a dedicated `migrate` compose service before app startup.
 
 ## Critical Conventions (from LESSONS.md)
+
+**Design canon**: `DESIGN.md` is authoritative for Atlasium brand, UI, UX, copy, metadata, navigation, visual assets, and design verification. `Atlasium` is the only active brand; historical names such as `WorkMesh` must not be used in active UI or fallback copy.
 
 **Environment**: Load `.env` programmatically at process startup — do not assume shell sourcing. Normalize relative `STORAGE_ROOT` to absolute using the `.env` directory as anchor.
 

@@ -133,6 +133,7 @@ Operational docs:
 ## Project Conventions
 
 - Product releases are versioned with annotated Git tags and GitHub Releases, for example `v0.3.0`; package versions currently remain `0.1.0`.
+- Atlasium brand, digital design, UI/UX, copy, metadata, navigation, and visual verification rules are tracked in `DESIGN.md`.
 - Implementation notes and completed verification logs are tracked in `tasks/TODO.md`.
 - Durable coding and operational lessons are tracked in `tasks/LESSONS.md`.
-- Keep changes minimal, verify before marking work complete, and preserve the Atlasium visual identity and operational clarity documented in the lessons file.
+- Keep changes minimal, verify before marking work complete, and preserve the Atlasium design canon documented in `DESIGN.md`.

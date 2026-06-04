@@ -237,12 +237,12 @@ export default function ProjectDetailPage({
         {!loading && overview ? (
           <>
             <section className="overview-command-band panel module-entry-panel">
-              <div className="overview-command-main">
+              <div className="overview-command-main module-entry-main">
                 <p className="eyebrow">Atlasium project archive</p>
                 <h2>{overview.project.key} - {overview.project.name}</h2>
-                <p>{overview.project.description ?? "Operational research workspace for documents, wiki knowledge, code, meetings, tasks, and traceability."}</p>
+                <p className="module-entry-summary">{overview.project.description ?? "Live workspace for documents, wiki knowledge, code, meetings, tasks, and traceability."}</p>
               </div>
-              <div className="overview-command-state" aria-label="Project status summary">
+              <div className="overview-command-state module-entry-state" aria-label="Project status summary">
                 <Badge>{formatTitleCase(overview.access.projectRole)}</Badge>
                 <Badge>{overview.access.canWrite ? "Writable" : "Read only"}</Badge>
                 <Badge>{overview.attention.length} attention</Badge>

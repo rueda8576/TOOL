@@ -688,18 +688,23 @@ export default function ProjectsPage(): JSX.Element {
 
   const workspaceTitle = workspaceMode === "users" ? "Manage users" : "Project directory";
   const workspaceHelper = workspaceMode === "users"
-    ? "Admins can edit account roles, adjust per-project permissions, and revoke access."
-    : "Pinned projects always stay at the top.";
+    ? "Audit account access, project roles, and destructive-action blockers from one admin surface."
+    : "Browse active research archives, keep priority projects pinned, and open new work from the directory.";
 
   return (
     <AppShell>
-      <section className="panel projects-directory-panel">
-        <div className="projects-toolbar-row">
-          <div>
-            <h2 className="section-heading">{workspaceTitle}</h2>
-            <p className="projects-toolbar-helper">{workspaceHelper}</p>
+      <section className="panel module-entry-panel projects-directory-panel">
+        <div className="projects-toolbar-row module-entry-header">
+          <div className="module-entry-main">
+            <p className="eyebrow">{workspaceMode === "users" ? "Administration" : "Atlasium workspace"}</p>
+            <div className="module-entry-title-row">
+              <h2 className="section-heading">{workspaceTitle}</h2>
+              <span className="badge">{workspaceMode === "users" ? `${adminUsers.length} users` : `${projects.length} projects`}</span>
+              {workspaceMode === "projects" ? <span className="badge">{projects.filter((project) => project.isPinned).length} pinned</span> : null}
+            </div>
+            <p className="projects-toolbar-helper module-entry-summary">{workspaceHelper}</p>
           </div>
-          <div className="projects-toolbar-actions">
+          <div className="projects-toolbar-actions module-entry-actions">
             {workspaceMode === "projects" ? (
               <label className="projects-order-control">
                 Order by
