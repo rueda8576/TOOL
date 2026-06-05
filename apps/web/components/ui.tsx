@@ -1,6 +1,7 @@
 import { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type HeaderVariant = "default" | "archive";
 
 function buttonClassName(variant: ButtonVariant, className?: string): string {
   const variantClass =
@@ -37,6 +38,10 @@ export function IconButton({
 
 export function Panel({ className, ...props }: HTMLAttributes<HTMLElement>): JSX.Element {
   return <section className={className ? `panel ${className}` : "panel"} {...props} />;
+}
+
+export function ArchiveEntryPanel({ className, ...props }: HTMLAttributes<HTMLElement>): JSX.Element {
+  return <section className={className ? `panel archive-entry-panel ${className}` : "panel archive-entry-panel"} {...props} />;
 }
 
 export function Alert({
@@ -162,7 +167,8 @@ export function WorkspaceHeader({
   metadata,
   actions,
   className,
-  titleLevel = "h2"
+  titleLevel = "h2",
+  variant = "default"
 }: {
   eyebrow?: string;
   title: ReactNode;
@@ -171,12 +177,19 @@ export function WorkspaceHeader({
   actions?: ReactNode;
   className?: string;
   titleLevel?: "h1" | "h2" | "h3";
+  variant?: HeaderVariant;
 }): JSX.Element {
   const Heading = titleLevel;
+  const headerClassName = [
+    "workspace-header",
+    variant === "archive" ? "workspace-header-archive" : null,
+    className
+  ].filter(Boolean).join(" ");
+  const eyebrowClassName = variant === "archive" ? "eyebrow archive-header-tab" : "eyebrow";
   return (
-    <header className={className ? `workspace-header ${className}` : "workspace-header"}>
+    <header className={headerClassName}>
       <div className="workspace-header-copy">
-        {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
+        {eyebrow ? <p className={eyebrowClassName}>{eyebrow}</p> : null}
         <Heading className="workspace-title">{title}</Heading>
         {summary ? <p className="workspace-summary">{summary}</p> : null}
         {metadata ? <div className="workspace-header-metadata">{metadata}</div> : null}
@@ -217,7 +230,8 @@ export function ModuleCockpit({
   icon,
   className,
   titleClassName = "section-heading",
-  titleLevel = "h2"
+  titleLevel = "h2",
+  variant = "default"
 }: {
   eyebrow: string;
   title: ReactNode;
@@ -228,12 +242,19 @@ export function ModuleCockpit({
   className?: string;
   titleClassName?: string;
   titleLevel?: "h2" | "h3";
+  variant?: HeaderVariant;
 }): JSX.Element {
   const Heading = titleLevel;
+  const cockpitClassName = [
+    "module-cockpit",
+    variant === "archive" ? "module-cockpit-archive" : null,
+    className
+  ].filter(Boolean).join(" ");
+  const eyebrowClassName = variant === "archive" ? "eyebrow module-cockpit-eyebrow archive-header-tab" : "eyebrow module-cockpit-eyebrow";
   return (
-    <div className={className ? `module-cockpit ${className}` : "module-cockpit"}>
+    <div className={cockpitClassName}>
       <div className="module-cockpit-copy">
-        <p className="eyebrow module-cockpit-eyebrow">
+        <p className={eyebrowClassName}>
           {icon ? <span className="module-cockpit-icon" aria-hidden="true">{icon}</span> : null}
           <span>{eyebrow}</span>
         </p>

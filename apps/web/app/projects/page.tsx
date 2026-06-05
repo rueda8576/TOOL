@@ -5,7 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../components/app-shell";
-import { ArchiveIndex, ArchiveRow, LoadingState, MetadataStrip, WorkspaceHeader } from "../../components/ui";
+import { ArchiveEntryPanel, ArchiveIndex, ArchiveRow, LoadingState, MetadataStrip, WorkspaceHeader } from "../../components/ui";
 import {
   AdminManagedUser,
   AdminUserHardDeleteCheck,
@@ -715,8 +715,9 @@ export default function ProjectsPage(): JSX.Element {
 
   return (
     <AppShell>
-      <section className="panel module-entry-panel projects-directory-panel">
+      <ArchiveEntryPanel className="projects-directory-panel">
         <WorkspaceHeader
+          variant="archive"
           eyebrow={workspaceMode === "users" ? "Administration" : "Atlasium workspace"}
           title={workspaceTitle}
           summary={workspaceHelper}
@@ -1332,7 +1333,7 @@ export default function ProjectsPage(): JSX.Element {
             </section>
           </div>
         )}
-      </section>
+      </ArchiveEntryPanel>
       {confirmDialog}
     </AppShell>
   );

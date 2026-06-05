@@ -2706,6 +2706,7 @@ export function WikiHub({
       >
         <aside ref={wikiSidebarRef} className="wiki-sidebar archive-index-panel">
           <ModuleCockpit
+            variant="archive"
             className="wiki-sidebar-toolbar"
             eyebrow="Wiki"
             title="Pages"

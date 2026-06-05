@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { AppShell } from "../../../../components/app-shell";
-import { LoadingState, MetadataStrip, WorkspaceHeader } from "../../../../components/ui";
+import { ArchiveEntryPanel, LoadingState, MetadataStrip, WorkspaceHeader } from "../../../../components/ui";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
 import {
@@ -782,8 +782,9 @@ export default function ProjectMeetingsPage({
 
   return (
     <AppShell projectId={params.projectId}>
-      <section className="panel module-entry-panel meetings-toolbar">
+      <ArchiveEntryPanel className="meetings-toolbar">
         <WorkspaceHeader
+          variant="archive"
           eyebrow="Meetings"
           title="Minutes"
           titleLevel="h2"
@@ -824,7 +825,7 @@ export default function ProjectMeetingsPage({
         />
         {success ? <p className="alert alert-success">{success}</p> : null}
         {error ? <p className="alert alert-error">{error}</p> : null}
-      </section>
+      </ArchiveEntryPanel>
 
       {showForm && canWrite ? (
         <div className="meetings-editor-modal-backdrop" onClick={closeForm}>
@@ -836,9 +837,12 @@ export default function ProjectMeetingsPage({
             onClick={(event) => event.stopPropagation()}
           >
             <div className="meetings-editor-modal-header">
-              <h3 id="meetings-editor-title" className="section-heading">
-                {formMode === "edit" ? "Edit minutes" : "Create minutes"}
-              </h3>
+              <div className="meetings-editor-modal-title">
+                <p className="eyebrow archive-header-tab">Meetings</p>
+                <h3 id="meetings-editor-title" className="section-heading">
+                  {formMode === "edit" ? "Edit minutes" : "Create minutes"}
+                </h3>
+              </div>
               <button className="button button-secondary" type="button" onClick={closeForm} disabled={submitting}>
                 Close
               </button>

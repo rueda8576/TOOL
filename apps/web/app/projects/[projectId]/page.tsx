@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "../../../components/app-shell";
-import { Alert, ArchiveIndex, ArchiveRow, Badge, EmptyState, LoadingState, MetadataStrip, WorkspaceHeader } from "../../../components/ui";
+import { Alert, ArchiveEntryPanel, ArchiveIndex, ArchiveRow, Badge, EmptyState, LoadingState, MetadataStrip, WorkspaceHeader } from "../../../components/ui";
 import {
   getProjectOverview,
   ProjectOverview,
@@ -236,8 +236,9 @@ export default function ProjectDetailPage({
 
         {!loading && overview ? (
           <>
-            <section className="overview-command-band panel module-entry-panel">
+            <ArchiveEntryPanel className="overview-command-band">
               <WorkspaceHeader
+                variant="archive"
                 eyebrow="Atlasium project archive"
                 title={`${overview.project.key} - ${overview.project.name}`}
                 className="overview-workspace-header"
@@ -253,7 +254,7 @@ export default function ProjectDetailPage({
                   />
                 }
               />
-            </section>
+            </ArchiveEntryPanel>
 
             <div className="overview-command-layout">
               <section className="panel overview-attention-panel" aria-labelledby="overview-attention-title">

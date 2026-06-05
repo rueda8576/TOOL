@@ -5,7 +5,7 @@ import { DragEvent, FormEvent, MouseEvent, useCallback, useEffect, useMemo, useS
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
-import { LoadingState, MetadataStrip, WorkspaceHeader } from "../../../../components/ui";
+import { ArchiveEntryPanel, LoadingState, MetadataStrip, WorkspaceHeader } from "../../../../components/ui";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
 import {
@@ -359,8 +359,9 @@ export default function ProjectTasksPage({
 
   return (
     <AppShell projectId={params.projectId}>
-      <section className="panel module-entry-panel task-toolbar">
+      <ArchiveEntryPanel className="task-toolbar">
         <WorkspaceHeader
+          variant="archive"
           eyebrow="Tasks"
           title="Board"
           titleLevel="h2"
@@ -381,7 +382,7 @@ export default function ProjectTasksPage({
         />
         {success ? <p className="alert alert-success">{success}</p> : null}
         {error ? <p className="alert alert-error">{error}</p> : null}
-      </section>
+      </ArchiveEntryPanel>
 
       {showForm && canWrite ? (
         <section className="panel">

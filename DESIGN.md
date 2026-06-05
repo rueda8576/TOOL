@@ -53,7 +53,8 @@
 - Gradients are allowed only for paper/index texture, skeleton loading, selected/current rows, focus rings, previews, or state feedback. Do not use gradients as novelty decoration, especially purple/blue marketing gradients, broad dark glows, or page-wide effects.
 - Cards and panels have different jobs. Panels group workflows; cards represent repeated actionable objects, dialogs, drawers, or framed tools. Passive information should usually be grouped with spacing, headings, dividers, and metadata rhythm instead of another box.
 - Avoid cards inside cards. If a surface starts to look like nested filing containers, remove a wrapper, reduce border/elevation strength, or convert inner blocks into unframed rows.
-- Status dots, side strips, badges, pills, and top accents must map to a named state, permission, role, count, priority, selection, or measurable fact. If the user cannot infer what changed or what action follows, use text or remove the indicator.
+- Status dots, side strips, badges, pills, and header tabs must map to a named state, permission, role, count, priority, selection, module identity, or measurable fact. If the user cannot infer what changed or what action follows, use text or remove the indicator.
+- Full-width amber top bars are not an Atlasium archive signal. Entry surfaces should use a compact institutional archive tab attached to the local header/eyebrow, leaving the panel border neutral unless a real functional state requires emphasis.
 - Never use emojis as interface icons, navigation, bullets, or status markers. Use the established `lucide-react` icon system and keep icon weight, size, and labels consistent.
 - When auditing a design pass, check the whole viewport, not only isolated components. Repeated local accents can cancel each other out; a signal only works when the rest of the page is quiet.
 - Maintain a rough 70/20/10 color balance: about 70% graphite, paper, and quiet neutral structure; about 20% supporting surface contrast; no more than about 10% amber, blue, green, warning, danger, or other attention color. Avoid "homogeneous goo" where similar tints of the same hue blur icons, cards, borders, and backgrounds together.
@@ -113,7 +114,7 @@
 
 ## Workspace Patterns
 
-- The first visible module surface should be an operational entry panel or cockpit. It should carry concise identity, live state, and the primary action. Use `.module-entry-panel` for the amber top accent and preserve `border-top-color: var(--brand)` if overriding border styles.
+- The first visible module surface should be an operational entry panel or cockpit. It should carry concise identity, live state, and the primary action. Use `ArchiveEntryPanel` plus an archive-variant `WorkspaceHeader`/`ModuleCockpit` for the compact institutional tab; do not use full-width amber top borders as active styling.
 - `/projects` prioritizes the project directory. Project creation, invites, and admin management stay secondary and intentionally opened.
 - Project Overview is a command center: attention, near-term work, equal module state, and recent provenance from live local data. Avoid static module-description cards and decorative dashboards.
 - Wiki is a knowledge hub: tree/search, draft/publish state, revisions, backlinks, Docs assignment/sync, Markdown rendering, and conflict actions should remain visible and traceable.
@@ -125,7 +126,7 @@
 
 ## Components And States
 
-- Prefer shared primitives from `apps/web/components/ui.tsx` before adding new ad hoc controls: `Button`, `IconButton`, `Panel`, `Alert`, `LoadingState`, `SkeletonBlock`, `EmptyState`, `Badge`, `Tabs`, `Modal`, and `ConfirmDialog`.
+- Prefer shared primitives from `apps/web/components/ui.tsx` before adding new ad hoc controls: `Button`, `IconButton`, `Panel`, `ArchiveEntryPanel`, `WorkspaceHeader`, `Alert`, `LoadingState`, `SkeletonBlock`, `EmptyState`, `Badge`, `Tabs`, `Modal`, and `ConfirmDialog`.
 - Use `lucide-react` icons for icon buttons and familiar actions. Icon-only buttons need an accessible label and tooltip/title. Text buttons are for clear commands.
 - Every async action needs visible state: disabled control, progress copy/spinner, and stable success/error feedback.
 - Use `LoadingState`, `SkeletonBlock`, or reserved-size surfaces for data-heavy loading. Avoid alert-only loading that shifts layout.
@@ -153,7 +154,7 @@
 
 Before shipping UI/design work:
 
-- Run static audits for obsolete active branding (`WorkMesh`, `Doctoral OS`, `Academic Slate`), forbidden decorative language, dead links, missing CSS utilities, and `module-entry-panel` accent ownership.
+- Run static audits for obsolete active branding (`WorkMesh`, `Doctoral OS`, `Academic Slate`), forbidden decorative language, dead links, missing CSS utilities, and active full-width amber top bars.
 - Run type-check/build for affected packages, at minimum `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit` and `pnpm --filter @doctoral/web build` for frontend work.
 - Verify desktop and mobile layouts for public/auth, `/projects`, project Overview, Wiki, Documents library/detail, Code, Tasks, Meetings, and Account.
 - Check topbar sticky behavior, active navigation, truncation, local scroll, dialogs/drawers, loading/empty/error states, focus outlines, and permission-gated actions.

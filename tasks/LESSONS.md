@@ -40,6 +40,7 @@
 ## Local runtime verification
 - If a newly added endpoint returns `Cannot <METHOD> /...` but code contains the route, first check for stale Node processes occupying the API port (`ss -ltnp | rg :4000`) before changing backend code.
 - Always verify route registration in Nest startup logs and confirm behavior with a direct `curl` call (`401` without token is expected for guarded routes; `404` indicates route missing or wrong process).
+- When using Windows Chrome headless from WSL for visual QA snapshots, verify `window.innerWidth` before diagnosing mobile clipping. A `--window-size=390,...` bitmap can still lay out at a wider CSS viewport, producing cropped screenshots that are not real page overflow.
 
 ## Design system rollout
 - For full visual redesigns, start by centralizing tokens and component primitives in `globals.css`; then migrate pages to those primitives and remove inline styles to keep consistency.

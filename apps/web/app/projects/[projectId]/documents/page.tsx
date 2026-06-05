@@ -5,7 +5,7 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useSta
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
-import { ArchiveIndex, ArchiveRow, LoadingState, MetadataStrip, WorkspaceHeader } from "../../../../components/ui";
+import { ArchiveEntryPanel, ArchiveIndex, ArchiveRow, LoadingState, MetadataStrip, WorkspaceHeader } from "../../../../components/ui";
 import {
   createDocumentVersionUpload,
   createProjectDocument,
@@ -278,8 +278,9 @@ export default function ProjectDocumentsPage({
 
   return (
     <AppShell projectId={params.projectId}>
-      <section className="panel module-entry-panel documents-page-toolbar">
+      <ArchiveEntryPanel className="documents-page-toolbar">
         <WorkspaceHeader
+          variant="archive"
           eyebrow="Documents"
           title="Document library"
           summary="Manage PDF and LaTeX archives, versions, compile state, and project document provenance."
@@ -313,7 +314,7 @@ export default function ProjectDocumentsPage({
             </Link>
           </p>
         ) : null}
-      </section>
+      </ArchiveEntryPanel>
 
       {showForm && canWrite ? (
         <section className="panel">

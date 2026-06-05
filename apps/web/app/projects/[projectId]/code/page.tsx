@@ -18,7 +18,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell, openAccountSettings } from "../../../../components/app-shell";
-import { EmptyState, IconButton, LoadingState, MetadataStrip, StatusLine, WorkspaceHeader } from "../../../../components/ui";
+import { ArchiveEntryPanel, EmptyState, IconButton, LoadingState, MetadataStrip, StatusLine, WorkspaceHeader } from "../../../../components/ui";
 import { LoginResponse } from "../../../../lib/client-api";
 import {
   createProjectRepository,
@@ -684,8 +684,9 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
         {success ? <StatusLine tone="success">{success}</StatusLine> : null}
 
         {!loading && !repositoryConnected ? (
-          <section className="panel module-entry-panel code-provision-panel">
+          <ArchiveEntryPanel className="code-provision-panel">
             <WorkspaceHeader
+              variant="archive"
               eyebrow="Repository cockpit"
               title="No repositories yet"
               summary={
@@ -701,13 +702,14 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                 </button>
               ) : null}
             />
-          </section>
+          </ArchiveEntryPanel>
         ) : null}
 
         {!loading && connectedRepository ? (
           <>
-            <section className="panel module-entry-panel code-cockpit">
+            <ArchiveEntryPanel className="code-cockpit">
               <WorkspaceHeader
+                variant="archive"
                 eyebrow="Repository cockpit"
                 title={connectedRepository.name}
                 summary={connectedRepository.description ?? "Browse repository files, history, branches, merge requests, clone access, and archive downloads."}
@@ -842,7 +844,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                 </div>
               </div>
 
-            </section>
+            </ArchiveEntryPanel>
 
             {!gitlabConnected ? (
               <section className="panel code-connect-required">

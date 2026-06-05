@@ -1,5 +1,22 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Institutional Archive Tab Accent (2026-06-05)
+- [x] Register the approved plan before design/UI edits.
+- [x] Update `DESIGN.md` so entry surfaces use a contextual archive tab instead of full-width amber top bars.
+- [x] Add frontend primitives and CSS for archive entry panels, archive header tabs, and dialog header tabs.
+- [x] Migrate active module entry panels, Wiki sidebar, and Meetings modal away from full-width amber bars.
+- [x] Run static audits, web type-check/build, diff hygiene, and visual verification.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Replaced the old full-width amber entry accent with a compact institutional archive tab attached to `WorkspaceHeader`/`ModuleCockpit` eyebrow text.
+- Updated `DESIGN.md` so active UI no longer treats full-width amber top bars as an Atlasium archive signal, and changed verification language to audit for active full-width amber top bars.
+- Added `ArchiveEntryPanel` and archive header variants, then migrated Projects, Overview, Documents, Code provision/cockpit, Tasks, Meetings, Wiki sidebar, and the Meetings editor modal away from `module-entry-panel`.
+- Removed active `.module-entry-panel` CSS, its amber `::before` wash, the Overview override, the Wiki `archive-index-panel` top border, and the Meetings modal top border.
+- Added a mobile containment adjustment for the shell/content area so entry panels and controls do not inherit an oversized scroll width on narrow viewports.
+- Verification passed: `rg` audits for `module-entry-panel` in active code/design and full-width amber `border-top` rules; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; `git diff --check`.
+- Visual QA used `next start` plus Chrome snapshots in `C:\Users\Luis\AppData\Local\Temp\atlasium-archive-tab-qa`. Authenticated API/session data was not available, so protected route QA used SSR snapshots with scripts removed to inspect Projects, Wiki, and Meetings entry surfaces without client redirect. Chrome headless from WSL reported a wider CSS viewport than the requested 390px bitmap, so final mobile review used measured layout width to avoid false clipping.
+
 ## Atlasium UI/UX v3 Archive Operating Workspace (2026-06-05)
 - [x] Register the v3 implementation plan before design/UI edits.
 - [x] Extend `DESIGN.md` with the Archive Operating Workspace canon and anti-vibe implementation rules.
