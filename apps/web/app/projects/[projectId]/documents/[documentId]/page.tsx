@@ -12,6 +12,7 @@ import {
   useState
 } from "react";
 import { useRouter } from "next/navigation";
+import { FileText } from "lucide-react";
 import type { editor as MonacoEditorApi } from "monaco-editor";
 import { MonacoBinding } from "y-monaco";
 import { WebsocketProvider } from "y-websocket";
@@ -1369,9 +1370,7 @@ export default function DocumentDetailPage({
               void loadLatexFileContent(currentVersion.id, node.path, token);
             }}
           >
-            <span className="documents-tree-file-dot" aria-hidden>
-              •
-            </span>
+            <FileText className="documents-tree-file-icon" size={13} aria-hidden="true" />
             <span>{node.name}</span>
           </button>
         );

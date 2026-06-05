@@ -1000,7 +1000,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                             <strong className="code-commit-title">{commit.title}</strong>
                             <p className="text-muted code-commit-meta">
                               {commit.authorName}
-                              <span className="code-commit-dot">-</span>
+                              <span className="code-meta-separator" aria-hidden="true">/</span>
                               {relativeDate(commit.authoredDate)}
                             </p>
                           </div>
@@ -1107,9 +1107,9 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                             </div>
                             <p className="text-muted code-mr-meta">
                               <span className="code-mr-branches">{mr.sourceBranch} - {mr.targetBranch}</span>
-                              <span className="code-commit-dot">-</span>
+                              <span className="code-meta-separator" aria-hidden="true">/</span>
                               {mr.author ? mr.author.name : "Unknown"}
-                              <span className="code-commit-dot">-</span>
+                              <span className="code-meta-separator" aria-hidden="true">/</span>
                               {relativeDate(mr.updatedAt)}
                             </p>
                           </div>

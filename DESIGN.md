@@ -35,6 +35,23 @@
 - Motion must be short, subtle, and state-oriented. Keep `prefers-reduced-motion` support. Do not add bounce, rotation, broad glow, parallax, or attention-seeking animation.
 - Forbidden decorative patterns: purple novelty gradients, sparkles, emojis-as-UI, orbs, bokeh, purely ornamental SVG art, random gradients, and page-wide visual effects.
 
+## Anti-Vibe-Coded Canon
+
+- Atlasium must look intentionally designed for a research archive, not statistically assembled from generic SaaS patterns. Every visible color, container, indicator, icon, and visual effect must either support the archive metaphor or communicate product state.
+- Treat color as a limited shared budget. Amber is the Atlasium/archive signal; graphite and paper tones carry structure; blue, green, warning, and danger are functional states only. Do not add arbitrary accent colors to make local components look styled.
+- Gradients are allowed only for paper/index texture, skeleton loading, selected/current rows, focus rings, previews, or state feedback. Do not use gradients as novelty decoration, especially purple/blue marketing gradients, broad dark glows, or page-wide effects.
+- Cards and panels have different jobs. Panels group workflows; cards represent repeated actionable objects, dialogs, drawers, or framed tools. Passive information should usually be grouped with spacing, headings, dividers, and metadata rhythm instead of another box.
+- Avoid cards inside cards. If a surface starts to look like nested filing containers, remove a wrapper, reduce border/elevation strength, or convert inner blocks into unframed rows.
+- Status dots, side strips, badges, pills, and top accents must map to a named state, permission, role, count, priority, selection, or measurable fact. If the user cannot infer what changed or what action follows, use text or remove the indicator.
+- Never use emojis as interface icons, navigation, bullets, or status markers. Use the established `lucide-react` icon system and keep icon weight, size, and labels consistent.
+- When auditing a design pass, check the whole viewport, not only isolated components. Repeated local accents can cancel each other out; a signal only works when the rest of the page is quiet.
+- Maintain a rough 70/20/10 color balance: about 70% graphite, paper, and quiet neutral structure; about 20% supporting surface contrast; no more than about 10% amber, blue, green, warning, danger, or other attention color. Avoid "homogeneous goo" where similar tints of the same hue blur icons, cards, borders, and backgrounds together.
+- Icons are not visual assets by default. Use them for actions, navigation, file type, wayfinding, state, or recognizably repeated module identity. Do not place generic informational icons inside colored rounded-square boxes just to make a card look designed.
+- Keep a strict serif budget. `Source Serif 4` belongs to Atlasium identity, public/auth hero titles, and true high-level headings. Dense rows, compact panels, small cards, badges, metadata, toolbars, tabs, form labels, and operational counters should use `Inter` for scanning.
+- Do not use glassmorphism as a style. Avoid frosted panels, translucent cards, noise/glass badges, and blur-led readability. `backdrop-filter` is allowed only as minimal separation behind modals or drawers, never as the main surface treatment.
+- Motion should make state legible, not make components feel generated. Do not add hover lift, image zoom, slow appear animations, decorative transforms, or stacked animations. Spinner, skeleton, focus, and short hover/focus transitions are acceptable when they communicate state.
+- Shadows should separate layers and overlays only. Do not use shadows to make buttons, cards, or icons look artificially premium when color, spacing, border, or typography would communicate the hierarchy more cleanly.
+
 ## Workspace Chrome
 
 - The shell should read as product infrastructure: compact, sticky, high contrast, and durable. It must not compete with module content.

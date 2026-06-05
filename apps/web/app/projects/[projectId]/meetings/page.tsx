@@ -1034,7 +1034,7 @@ export default function ProjectMeetingsPage({
                     aria-label={`${ariaDayLabel}. ${hasMinutes ? `Has ${count} minute${count === 1 ? "" : "s"}.` : "No minutes."}`}
                   >
                     <span>{cell.dayNumber}</span>
-                    {hasMinutes ? <span className="minutes-day-dot" aria-hidden="true" /> : null}
+                    {hasMinutes ? <span className="minutes-day-presence" aria-hidden="true" /> : null}
                   </button>
                 );
               })}

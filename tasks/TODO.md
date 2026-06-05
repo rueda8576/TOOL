@@ -1,5 +1,36 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Vibe-Coded Refinement: Color, Icons, Serif, Glass, Motion (2026-06-05)
+- [x] Register the approved follow-up refinement plan before design/UI edits.
+- [x] Extend `DESIGN.md` with 70/20/10 color balance, icon discipline, serif budget, glass, motion, and shadow rules.
+- [x] Refine Overview icon containers, dense serif usage, blur/glass, and decorative shadow/motion patterns without workflow changes.
+- [x] Run static audits, web type-check/build, diff hygiene, and visual verification.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Extended `DESIGN.md` with the second anti-vibe-coded refinement layer: 70/20/10 color balance, icon discipline, serif budget, no glassmorphism, motion restraint, and shadow restraint.
+- Flattened Overview icon treatment by removing generic colored rounded-square containers while keeping lucide icons for module/state wayfinding.
+- Reduced serif usage in dense operational surfaces including status values, list item titles, document metadata headings, kanban column headings, wiki preview headings, and account metadata labels.
+- Removed decorative hover shadow from Overview module cards and removed the strong blur from the Account drawer header; kept minimal modal backdrop blur for overlay separation.
+- Verification passed: static audits for `backdrop-filter`, `transform:`, `animation:`, `box-shadow`, `font-heading`, Overview icon selectors, obsolete branding, forbidden decorative terms, and `module-entry-panel` accent ownership; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; `git diff --check`.
+- Visual QA used `next start` and Chrome headless screenshots in `C:\Users\Luis\AppData\Local\Temp\atlasium-vibe-refinement-qa` for `/`, `/login`, `/projects`, project Overview, Wiki, Documents library/detail, Code, Tasks, Meetings, and Account at desktop/mobile sizes. Public/auth rendered normally; protected routes redirected to login because no authenticated API/session was available locally, so authenticated module interaction checks were not run.
+
+## Atlasium Anti-Vibe-Coded Design Hardening (2026-06-05)
+- [x] Register the approved focused hardening plan before UI/design edits.
+- [x] Add an explicit anti-vibe-coded design canon to `DESIGN.md`.
+- [x] Refine global visual signals so accent strips, gradients, cards, dots, and badges are semantic.
+- [x] Clean weak frontend indicators without changing product flows or backend contracts.
+- [x] Run static audits, web type-check/build, diff hygiene, and visual verification.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Added an Anti-Vibe-Coded Canon to `DESIGN.md` covering color budget, gradients, card/panel usage, status indicators, iconography, and viewport-level audits.
+- Removed the global amber strip from `.list-item`, softened `status-card`, reduced Overview module-card ornament, tokenized low-risk hardcoded UI colors, and preserved `.module-entry-panel` as the primary amber archive accent.
+- Replaced weak `dot` patterns with semantic indicators: Code metadata separators, Documents file icons, and Meetings presence markers with existing accessible count labels.
+- Added a `tasks/LESSONS.md` implementation lesson so future audits distinguish real status indicators from separators or decorative markers.
+- Verification passed: static `rg` audits for obsolete active branding, forbidden decorative language, old `dot` classes, strips/cards/status surfaces, and `module-entry-panel` accent ownership; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; `git diff --check`.
+- Visual QA used `next start` and Chrome headless screenshots in `C:\Users\Luis\AppData\Local\Temp\atlasium-anti-vibe-qa` for `/`, `/login`, `/projects`, project Overview, Wiki, Documents library/detail, Code, Tasks, Meetings, and Account at desktop/mobile sizes. Public/auth rendered normally; protected routes used JavaScript-disabled SSR because no authenticated API/session was available, and protected mobile screenshots redirected to login.
+
 ## Wiki Sidebar Actions and Sync Result Refinement (2026-06-05)
 - [x] Register the approved implementation plan for compact Wiki sidebar actions and single Sync Docs feedback.
 - [x] Refine `WikiHub` sidebar cockpit/actions without changing Wiki flows or backend contracts.
