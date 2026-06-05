@@ -785,7 +785,6 @@ export default function ProjectMeetingsPage({
       <ArchiveEntryPanel className="meetings-toolbar">
         <WorkspaceHeader
           variant="archive"
-          eyebrow="Meetings"
           title="Minutes"
           titleLevel="h2"
           summary="Review meeting minutes, structured Markdown sections, action counts, and AI task extraction state."
@@ -838,7 +837,6 @@ export default function ProjectMeetingsPage({
           >
             <div className="meetings-editor-modal-header">
               <div className="meetings-editor-modal-title">
-                <p className="eyebrow archive-header-tab">Meetings</p>
                 <h3 id="meetings-editor-title" className="section-heading">
                   {formMode === "edit" ? "Edit minutes" : "Create minutes"}
                 </h3>

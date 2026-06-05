@@ -185,11 +185,10 @@ export function WorkspaceHeader({
     variant === "archive" ? "workspace-header-archive" : null,
     className
   ].filter(Boolean).join(" ");
-  const eyebrowClassName = variant === "archive" ? "eyebrow archive-header-tab" : "eyebrow";
   return (
     <header className={headerClassName}>
       <div className="workspace-header-copy">
-        {eyebrow ? <p className={eyebrowClassName}>{eyebrow}</p> : null}
+        {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
         <Heading className="workspace-title">{title}</Heading>
         {summary ? <p className="workspace-summary">{summary}</p> : null}
         {metadata ? <div className="workspace-header-metadata">{metadata}</div> : null}
@@ -233,7 +232,7 @@ export function ModuleCockpit({
   titleLevel = "h2",
   variant = "default"
 }: {
-  eyebrow: string;
+  eyebrow?: string;
   title: ReactNode;
   summary?: ReactNode;
   metrics?: ReactNode;
@@ -250,14 +249,15 @@ export function ModuleCockpit({
     variant === "archive" ? "module-cockpit-archive" : null,
     className
   ].filter(Boolean).join(" ");
-  const eyebrowClassName = variant === "archive" ? "eyebrow module-cockpit-eyebrow archive-header-tab" : "eyebrow module-cockpit-eyebrow";
   return (
     <div className={cockpitClassName}>
       <div className="module-cockpit-copy">
-        <p className={eyebrowClassName}>
-          {icon ? <span className="module-cockpit-icon" aria-hidden="true">{icon}</span> : null}
-          <span>{eyebrow}</span>
-        </p>
+        {eyebrow || icon ? (
+          <p className="eyebrow module-cockpit-eyebrow">
+            {icon ? <span className="module-cockpit-icon" aria-hidden="true">{icon}</span> : null}
+            {eyebrow ? <span>{eyebrow}</span> : null}
+          </p>
+        ) : null}
         <div className="module-cockpit-title-row">
           <Heading className={titleClassName}>{title}</Heading>
           {metrics ? <div className="module-cockpit-metrics">{metrics}</div> : null}

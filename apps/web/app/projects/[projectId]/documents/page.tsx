@@ -281,7 +281,6 @@ export default function ProjectDocumentsPage({
       <ArchiveEntryPanel className="documents-page-toolbar">
         <WorkspaceHeader
           variant="archive"
-          eyebrow="Documents"
           title="Document library"
           summary="Manage PDF and LaTeX archives, versions, compile state, and project document provenance."
           titleLevel="h2"

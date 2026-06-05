@@ -362,7 +362,6 @@ export default function ProjectTasksPage({
       <ArchiveEntryPanel className="task-toolbar">
         <WorkspaceHeader
           variant="archive"
-          eyebrow="Tasks"
           title="Board"
           titleLevel="h2"
           summary="Track project work by status, priority, assignee, and meeting provenance."

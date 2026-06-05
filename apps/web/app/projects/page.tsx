@@ -718,7 +718,6 @@ export default function ProjectsPage(): JSX.Element {
       <ArchiveEntryPanel className="projects-directory-panel">
         <WorkspaceHeader
           variant="archive"
-          eyebrow={workspaceMode === "users" ? "Administration" : "Atlasium workspace"}
           title={workspaceTitle}
           summary={workspaceHelper}
           metadata={

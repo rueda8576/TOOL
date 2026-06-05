@@ -753,29 +753,6 @@ textarea {
   color: var(--brand);
 }
 
-.archive-header-tab {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  gap: 0.38rem;
-  border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line));
-  border-left: 3px solid var(--brand);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--surface-paper) 78%, var(--surface));
-  color: var(--brand-strong);
-  padding: 0.18rem 0.46rem 0.16rem 0.36rem;
-  font-family: var(--font-body), sans-serif;
-  font-size: 0.68rem;
-  font-weight: 820;
-  letter-spacing: 0.11em;
-  line-height: 1.1;
-  text-transform: uppercase;
-}
-
-.archive-header-tab .module-cockpit-icon {
-  color: var(--brand-strong);
-}
-
 .module-cockpit-actions {
   align-self: flex-start;
 }
@@ -814,6 +791,7 @@ textarea {
 }
 
 .workspace-header {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-4);
@@ -821,6 +799,30 @@ textarea {
   min-width: 0;
   padding-bottom: var(--space-3);
   border-bottom: 1px solid var(--line);
+}
+
+.module-cockpit-archive {
+  position: relative;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-header-archive,
+.module-cockpit-archive {
+  padding-bottom: var(--space-4);
+}
+
+.workspace-header-archive::after,
+.module-cockpit-archive::after,
+.meetings-editor-modal-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 2.65rem;
+  height: 1px;
+  background: var(--brand);
+  opacity: 0.72;
+  pointer-events: none;
 }
 
 .workspace-header-copy {
@@ -2946,10 +2948,13 @@ body.documents-workspace-dragging * {
 }
 
 .meetings-editor-modal-header {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 0.7rem;
+  padding-bottom: 0.78rem;
+  border-bottom: 1px solid var(--line);
   margin-bottom: 0.85rem;
 }
 

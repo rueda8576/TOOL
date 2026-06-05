@@ -2708,7 +2708,6 @@ export function WikiHub({
           <ModuleCockpit
             variant="archive"
             className="wiki-sidebar-toolbar"
-            eyebrow="Wiki"
             title="Pages"
             titleLevel="h3"
             metrics={

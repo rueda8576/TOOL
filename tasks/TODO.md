@@ -1,5 +1,21 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Paper Rule Accent Without Duplicate Labels (2026-06-05)
+- [x] Register the approved paper-rule refinement plan before design/UI edits.
+- [x] Update `DESIGN.md` so archive entry accents use a non-textual paper rule and do not duplicate active module navigation.
+- [x] Update shared primitives/CSS so archive variants render a subtle rule instead of a textual tab.
+- [x] Remove decorative duplicate eyebrows from active entry panels, Wiki sidebar, and Meetings editor modal.
+- [x] Run static audits, web type-check/build, diff hygiene, and visual verification.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Replaced the previous textual archive tab with a non-textual paper rule: a neutral divider with a short amber segment on archive `WorkspaceHeader`, archive `ModuleCockpit`, and the Meetings editor modal header.
+- Kept `ArchiveEntryPanel` and archive variants, but changed their meaning from a repeated module label to a subtle structural accent.
+- Removed decorative duplicate labels from Projects, Overview, Documents, Code, Tasks, Meetings, the Wiki sidebar, and the Meetings editor modal while preserving operational titles such as `Project directory`, project key/name, `Document library`, repo name/`No repositories yet`, `Board`, `Minutes`, and `Pages`.
+- Updated `DESIGN.md` to prohibit local accents that repeat the active module already shown in shell navigation, and added a matching correction to `tasks/LESSONS.md`.
+- Verification passed: static audits for `archive-header-tab`, `module-entry-panel`, old full-width amber `border-top` rules, and duplicate module `eyebrow` props; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; `git diff --check`.
+- Visual QA used `next start` plus Edge CDP screenshots in `C:\Users\Luis\AppData\Local\Temp\atlasium-paper-rule-qa` for `/`, `/login`, `/projects`, project Overview, Wiki, Documents library/detail, Code, Tasks, and Meetings at desktop/mobile sizes. No local authenticated API/session data was available, so protected route review used SSR snapshots with scripts disabled; Code remained in unauthenticated loading state.
+
 ## Atlasium Institutional Archive Tab Accent (2026-06-05)
 - [x] Register the approved plan before design/UI edits.
 - [x] Update `DESIGN.md` so entry surfaces use a contextual archive tab instead of full-width amber top bars.

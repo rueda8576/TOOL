@@ -239,7 +239,6 @@ export default function ProjectDetailPage({
             <ArchiveEntryPanel className="overview-command-band">
               <WorkspaceHeader
                 variant="archive"
-                eyebrow="Atlasium project archive"
                 title={`${overview.project.key} - ${overview.project.name}`}
                 className="overview-workspace-header"
                 summary={overview.project.description ?? "Live workspace for documents, wiki knowledge, code, meetings, tasks, and traceability."}

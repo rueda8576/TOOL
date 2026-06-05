@@ -687,7 +687,6 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
           <ArchiveEntryPanel className="code-provision-panel">
             <WorkspaceHeader
               variant="archive"
-              eyebrow="Repository cockpit"
               title="No repositories yet"
               summary={
                 canWrite
@@ -710,7 +709,6 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
             <ArchiveEntryPanel className="code-cockpit">
               <WorkspaceHeader
                 variant="archive"
-                eyebrow="Repository cockpit"
                 title={connectedRepository.name}
                 summary={connectedRepository.description ?? "Browse repository files, history, branches, merge requests, clone access, and archive downloads."}
                 metadata={
