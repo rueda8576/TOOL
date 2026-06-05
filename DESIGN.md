@@ -22,6 +22,17 @@
 - Avoid same-looking panels. Repeated containers should still show hierarchy through density, border strength, metadata placement, and action grouping.
 - A design pass is incomplete if it improves color but leaves scanning, truncation, loading states, focus, mobile layout, or action hierarchy unchanged.
 
+## Atlasium v3 Archive Operating Workspace
+
+- Atlasium v3 is an archive operating workspace, not a dashboard skin. Primary project surfaces should read as indexes, ledgers, work queues, document canvases, repository workbenches, and settings ledgers before they read as collections of cards.
+- The default grouping tools are alignment, proximity, dividers, metadata strips, row rhythm, and local workspace headers. A bounded card or panel must earn its border by framing an actionable object, editor, modal, drawer, form, or independent repeated record.
+- Public and auth pages should feel like institutional access points into a managed archive. They need a clear Atlasium mark, paper/index visual language, and direct access action; they should not become marketing pages, centered SaaS cards, or decorative hero compositions.
+- `/projects` is an archive directory. It should prioritize searchable row-based project access, pinned state, role, recency, and admin actions. Creation, invitation, and user administration remain secondary surfaces opened by explicit intent.
+- Project Overview is a command center. It should show attention, near-term work, equal module state, and recent provenance as operational queues and ledgers rather than a strip of static module cards.
+- Dense module pages should preserve their workbench mechanics while reducing ornamental chrome. Sidebars become index rails, main panes become active work surfaces, and toolbars stay compact and local to the thing they act on.
+- "Not vibe-coded" is a viewport-level quality bar: a screen should not reveal repeated card wrappers, colored icon boxes, decorative status dots, stacked pills, arbitrary side strips, glassy panels, hover lift, or generic dashboard composition when viewed at a glance.
+- Drastic design work is allowed when it improves hierarchy and specificity, but it must keep product contracts stable: no backend/API/schema/auth/storage/realtime/PDF.js/Monaco/business workflow changes unless explicitly scoped.
+
 ## Visual System
 
 - Use the existing token system in `apps/web/app/globals.css` as the source for color, spacing, radius, shadow, and semantic state styling.

@@ -62,44 +62,48 @@ export default function LoginPage(): JSX.Element {
     <main className="login-shell">
       <section className="panel login-panel">
         <div className="login-header">
-          <div className="auth-brand-lockup auth-brand-lockup-left">
-            <AtlasiumMark size="md" />
-            <p className="eyebrow">Atlasium</p>
+          <div>
+            <div className="auth-brand-lockup auth-brand-lockup-left">
+              <AtlasiumMark size="md" />
+              <p className="eyebrow">Atlasium</p>
+            </div>
+            <h1 className="section-heading">Archive sign in</h1>
           </div>
-          <h1 className="section-heading">Archive sign in</h1>
-          <p>Use your invited account to enter Atlasium.</p>
+          <p className="login-access-note">Use your invited account to enter the Atlasium workspace.</p>
         </div>
 
-        <form className="form-grid" onSubmit={handleSubmit}>
-          <label>
-            Email or username
-            <input
-              className="input"
-              type="text"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="username"
-            />
-          </label>
-          <label>
-            Password
-            <input
-              className="input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-            />
-          </label>
+        <div className="login-form-panel">
+          <form className="form-grid" onSubmit={handleSubmit}>
+            <label>
+              Email or username
+              <input
+                className="input"
+                type="text"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="username"
+              />
+            </label>
+            <label>
+              Password
+              <input
+                className="input"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete="current-password"
+              />
+            </label>
 
-          {error ? <p className="alert alert-error">{error}</p> : null}
+            {error ? <p className="alert alert-error">{error}</p> : null}
 
-          <button className="button" disabled={loading} type="submit">
-            {loading ? "Signing in..." : "Sign in"}
-          </button>
-        </form>
+            <button className="button" disabled={loading} type="submit">
+              {loading ? "Signing in..." : "Sign in"}
+            </button>
+          </form>
+        </div>
       </section>
     </main>
   );

@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "../../../components/app-shell";
-import { Alert, Badge, EmptyState, LoadingState, MetricPill, ModuleCockpit } from "../../../components/ui";
+import { Alert, ArchiveIndex, ArchiveRow, Badge, EmptyState, LoadingState, MetadataStrip, WorkspaceHeader } from "../../../components/ui";
 import {
   getProjectOverview,
   ProjectOverview,
@@ -28,7 +28,7 @@ import {
   ProjectOverviewSeverity
 } from "../../../lib/project-overview";
 
-type ModuleCard = {
+type ModuleLedgerRow = {
   id: ProjectOverviewModule;
   label: string;
   href: string;
@@ -113,7 +113,7 @@ function moduleHref(projectId: string, module: ProjectOverviewModule): string {
   }
 }
 
-function buildModuleCards(projectId: string, overview: ProjectOverview): ModuleCard[] {
+function buildModuleLedger(projectId: string, overview: ProjectOverview): ModuleLedgerRow[] {
   const { modules } = overview;
   return [
     {
@@ -224,7 +224,7 @@ export default function ProjectDetailPage({
     void loadOverview(storedToken);
   }, [loadOverview, router]);
 
-  const moduleCards = useMemo(() => (overview ? buildModuleCards(params.projectId, overview) : []), [overview, params.projectId]);
+  const moduleLedger = useMemo(() => (overview ? buildModuleLedger(params.projectId, overview) : []), [overview, params.projectId]);
   const nextTasks = overview?.modules.tasks.next ?? [];
   const nextMeetings = overview?.modules.meetings.next ?? [];
 
@@ -237,18 +237,20 @@ export default function ProjectDetailPage({
         {!loading && overview ? (
           <>
             <section className="overview-command-band panel module-entry-panel">
-              <ModuleCockpit
+              <WorkspaceHeader
                 eyebrow="Atlasium project archive"
                 title={`${overview.project.key} - ${overview.project.name}`}
-                titleClassName="overview-command-title"
+                className="overview-workspace-header"
                 summary={overview.project.description ?? "Live workspace for documents, wiki knowledge, code, meetings, tasks, and traceability."}
-                metrics={
-                  <>
-                    <MetricPill>{formatTitleCase(overview.access.projectRole)}</MetricPill>
-                    <MetricPill>{overview.access.canWrite ? "Writable" : "Read only"}</MetricPill>
-                    <MetricPill>{overview.attention.length} attention</MetricPill>
-                    <MetricPill>{overview.modules.tasks.open} open tasks</MetricPill>
-                  </>
+                metadata={
+                  <MetadataStrip
+                    items={[
+                      formatTitleCase(overview.access.projectRole),
+                      overview.access.canWrite ? "Writable" : "Read only",
+                      `${overview.attention.length} attention`,
+                      `${overview.modules.tasks.open} open tasks`
+                    ]}
+                  />
                 }
               />
             </section>
@@ -316,24 +318,33 @@ export default function ProjectDetailPage({
               </aside>
             </div>
 
-            <section className="overview-module-strip" aria-label="Project modules">
-              {moduleCards.map((card) => {
-                const Icon = card.icon;
+            <ArchiveIndex className="overview-module-ledger" aria-label="Project modules">
+              <div className="archive-index-header">
+                <div className="stack-xxs">
+                  <p className="eyebrow">Modules</p>
+                  <h3 className="section-heading">Archive state</h3>
+                </div>
+                <Badge>{moduleLedger.length} modules</Badge>
+              </div>
+              {moduleLedger.map((moduleRow) => {
+                const Icon = moduleRow.icon;
                 return (
-                  <Link key={card.id} className="overview-module-card panel" href={card.href}>
-                    <span className="overview-module-icon" aria-hidden="true">
-                      <Icon size={18} />
-                    </span>
-                    <span className="overview-module-copy">
-                      <span className="overview-module-label">{card.label}</span>
-                      <strong>{card.metric}</strong>
-                      <span>{card.detail}</span>
-                      <small>{card.status}</small>
-                    </span>
-                  </Link>
+                  <ArchiveRow key={moduleRow.id} className="overview-module-row">
+                    <Link className="overview-module-row-link" href={moduleRow.href}>
+                      <span className="overview-module-icon" aria-hidden="true">
+                        <Icon size={17} />
+                      </span>
+                      <span className="overview-module-copy">
+                        <span className="overview-module-label">{moduleRow.label}</span>
+                        <strong>{moduleRow.metric}</strong>
+                        <span>{moduleRow.detail}</span>
+                      </span>
+                      <span className="overview-module-status">{moduleRow.status}</span>
+                    </Link>
+                  </ArchiveRow>
                 );
               })}
-            </section>
+            </ArchiveIndex>
 
             <section className="panel overview-provenance-panel" aria-labelledby="overview-provenance-title">
               <div className="overview-panel-heading">

@@ -1,5 +1,23 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium UI/UX v3 Archive Operating Workspace (2026-06-05)
+- [x] Register the v3 implementation plan before design/UI edits.
+- [x] Extend `DESIGN.md` with the Archive Operating Workspace canon and anti-vibe implementation rules.
+- [x] Add shared frontend primitives and global CSS foundations for archive indexes, entity rows, metadata strips, workspace headers, and state rails.
+- [x] Redesign public/auth access gates, AppShell hierarchy, Projects directory, and Project Overview around ledger/index surfaces instead of repeated card stacks.
+- [x] Refine module workspaces across Wiki, Documents, Code, Tasks, Meetings, and Account with denser row-based hierarchy while preserving backend/API/auth/PDF.js/Monaco/realtime contracts.
+- [x] Run static audits, web type-check/build, diff hygiene, and visual verification.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Added the Atlasium v3 Archive Operating Workspace canon to `DESIGN.md`, making index/ledger/queue/document-canvas surfaces the preferred language over generic dashboards and stacked cards.
+- Added shared frontend primitives for `WorkspaceHeader`, `MetadataStrip`, `ArchiveIndex`, `ArchiveRow`, and `StateRail`, then used them to reduce repeated bespoke markup and improve hierarchy.
+- Redesigned public home, login, and invite access surfaces as institutional access gates with Atlasium mark usage, paper/index texture, calmer copy, and corrected mobile containment.
+- Reworked Projects into an archive directory, Project Overview into a command ledger, and Documents library into row-based archive indexes while preserving current routes and data flows.
+- Refined Wiki, Code, Tasks, Meetings, and Account surfaces with denser operational headers, factual metadata strips, reduced passive card chrome, flatter module rows, and fewer decorative accents.
+- Verification passed: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; `git diff --check`; static audits for obsolete active branding, old module-card classes, duplicated Wiki sync copy, forbidden decorative terms, visual effects, hardcoded color remnants, and `.module-entry-panel` ownership.
+- Visual QA used `next start` and Chrome headless screenshots in `C:\Users\Luis\AppData\Local\Temp\atlasium-v3-qa` for `/`, `/login`, `/accept-invite`, `/projects`, project Overview, Wiki, Documents library/detail, Code, Tasks, Meetings, and Account at desktop/mobile sizes. Public/auth rendered normally; protected routes redirected or rendered unauthenticated SSR because no local API/session/test data was available, so authenticated interaction checks were not run.
+
 ## Atlasium Vibe-Coded Refinement: Color, Icons, Serif, Glass, Motion (2026-06-05)
 - [x] Register the approved follow-up refinement plan before design/UI edits.
 - [x] Extend `DESIGN.md` with 70/20/10 color balance, icon discipline, serif budget, glass, motion, and shadow rules.

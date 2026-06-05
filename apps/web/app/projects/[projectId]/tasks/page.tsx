@@ -5,7 +5,7 @@ import { DragEvent, FormEvent, MouseEvent, useCallback, useEffect, useMemo, useS
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
-import { LoadingState, MetricPill, ModuleCockpit } from "../../../../components/ui";
+import { LoadingState, MetadataStrip, WorkspaceHeader } from "../../../../components/ui";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
 import {
@@ -360,16 +360,18 @@ export default function ProjectTasksPage({
   return (
     <AppShell projectId={params.projectId}>
       <section className="panel module-entry-panel task-toolbar">
-        <ModuleCockpit
+        <WorkspaceHeader
           eyebrow="Tasks"
           title="Board"
-          titleLevel="h3"
+          titleLevel="h2"
           summary="Track project work by status, priority, assignee, and meeting provenance."
-          metrics={
-            <>
-              <MetricPill>{tasks.filter((task) => task.status !== "done").length} open</MetricPill>
-              <MetricPill>{tasks.filter((task) => task.priority === "critical" || task.priority === "high").length} urgent</MetricPill>
-            </>
+          metadata={
+            <MetadataStrip
+              items={[
+                `${tasks.filter((task) => task.status !== "done").length} open`,
+                `${tasks.filter((task) => task.priority === "critical" || task.priority === "high").length} urgent`
+              ]}
+            />
           }
           actions={canWrite ? (
             <button className="button button-secondary" type="button" onClick={onNewTaskClick}>

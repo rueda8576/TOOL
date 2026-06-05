@@ -5,7 +5,7 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useSta
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../../../components/app-shell";
-import { LoadingState, MetricPill, ModuleCockpit } from "../../../../components/ui";
+import { ArchiveIndex, ArchiveRow, LoadingState, MetadataStrip, WorkspaceHeader } from "../../../../components/ui";
 import {
   createDocumentVersionUpload,
   createProjectDocument,
@@ -279,16 +279,18 @@ export default function ProjectDocumentsPage({
   return (
     <AppShell projectId={params.projectId}>
       <section className="panel module-entry-panel documents-page-toolbar">
-        <ModuleCockpit
+        <WorkspaceHeader
           eyebrow="Documents"
           title="Document library"
-          titleLevel="h3"
           summary="Manage PDF and LaTeX archives, versions, compile state, and project document provenance."
-          metrics={
-            <>
-              <MetricPill>{documents.length} document{documents.length === 1 ? "" : "s"}</MetricPill>
-              <MetricPill>{canWrite ? "Writable" : "Read only"}</MetricPill>
-            </>
+          titleLevel="h2"
+          metadata={
+            <MetadataStrip
+              items={[
+                `${documents.length} document${documents.length === 1 ? "" : "s"}`,
+                canWrite ? "Writable" : "Read only"
+              ]}
+            />
           }
           actions={canWrite ? (
             <button
@@ -426,32 +428,38 @@ export default function ProjectDocumentsPage({
       ) : null}
 
       <section className="panel">
-        <h3 className="section-heading">Documents</h3>
+        <WorkspaceHeader
+          eyebrow="Library"
+          title="Documents"
+          titleLevel="h3"
+          metadata={newestDocument ? <MetadataStrip items={[`Most recently updated: ${newestDocument.title}`]} /> : null}
+        />
         {loading ? <LoadingState title="Loading documents" detail="Preparing the project document archive." /> : null}
         {!loading && documents.length === 0 ? <p className="alert alert-info">{canWrite ? "No documents yet. Create your first one." : "No documents available yet."}</p> : null}
         {!loading && documents.length > 0 ? (
-          <ul className="list">
+          <ArchiveIndex className="documents-library-index">
             {documents.map((document) => (
-              <li className="list-item" key={document.id}>
-                <div className="documents-list-row">
-                  <div>
-                    <strong>{document.title}</strong>
-                    <p className="documents-list-meta">
-                      Type: {document.type} {document.authors.length > 0 ? `| Authors: ${document.authors.join(", ")}` : ""}
-                    </p>
-                    <p className="documents-list-meta">
-                      {document.tags.length > 0 ? `Tags: ${document.tags.join(", ")}` : "No tags"}
-                    </p>
+              <ArchiveRow className="documents-library-row" key={document.id}>
+                <div className="archive-row-main">
+                  <div className="stack-xxs">
+                    <h4 className="archive-row-title">{document.title}</h4>
+                    <MetadataStrip
+                      items={[
+                        `Type ${document.type}`,
+                        document.authors.length > 0 ? `Authors ${document.authors.join(", ")}` : "No authors",
+                        document.tags.length > 0 ? `Tags ${document.tags.join(", ")}` : "No tags"
+                      ]}
+                    />
                     {document.latestMainVersion ? (
-                      <p className="documents-list-meta">
+                      <p className="archive-row-detail">
                         main v{document.latestMainVersion.versionNumber} -{" "}
                         {compileStatusLabel(document.latestMainVersion.compileStatus)}
                       </p>
                     ) : (
-                      <p className="documents-list-meta">No version uploaded yet</p>
+                      <p className="archive-row-detail">No version uploaded yet</p>
                     )}
                   </div>
-                  <div className="inline-actions">
+                  <div className="archive-row-actions">
                     <Link className="button button-secondary" href={`/projects/${params.projectId}/documents/${document.id}`}>
                       Open
                     </Link>
@@ -469,14 +477,9 @@ export default function ProjectDocumentsPage({
                     ) : null}
                   </div>
                 </div>
-              </li>
+              </ArchiveRow>
             ))}
-          </ul>
-        ) : null}
-        {!loading && newestDocument ? (
-          <p className="documents-list-meta">
-            Most recently updated: <strong>{newestDocument.title}</strong>
-          </p>
+          </ArchiveIndex>
         ) : null}
       </section>
       {confirmDialog}

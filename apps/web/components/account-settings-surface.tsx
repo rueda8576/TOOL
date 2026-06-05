@@ -23,7 +23,7 @@ import {
   GitlabSshKey,
   listGitlabSshKeys
 } from "../lib/gitlab";
-import { LoadingState, MetricPill, ModuleCockpit } from "./ui";
+import { LoadingState, MetadataStrip, WorkspaceHeader } from "./ui";
 
 export type AccountSettingsTab = "profile" | "security" | "notifications" | "git";
 
@@ -586,12 +586,13 @@ export function AccountSettingsSurface({
       <section className="account-settings-layout">
         <div className="account-column">
           {activeTab === "profile" ? (
-          <section className="panel module-entry-panel stack-md account-section-card">
-            <ModuleCockpit
+          <section className="panel stack-md account-section-card">
+            <WorkspaceHeader
               eyebrow="Profile"
               title="Atlasium identity"
               summary="Server-backed summary of your account record and managed GitLab identity."
-              metrics={profile ? <MetricPill>{formatRoleLabel(profile.globalRole)}</MetricPill> : null}
+              titleLevel="h2"
+              metadata={profile ? <MetadataStrip items={[formatRoleLabel(profile.globalRole), profile.username]} /> : null}
             />
 
             {profileLoading ? <LoadingState title="Loading account profile" detail="Preparing your Atlasium identity record." /> : null}
@@ -656,12 +657,13 @@ export function AccountSettingsSurface({
           ) : null}
 
           {activeTab === "security" ? (
-          <section className="panel module-entry-panel stack-md account-section-card">
-            <ModuleCockpit
+          <section className="panel stack-md account-section-card">
+            <WorkspaceHeader
               eyebrow="Security"
               title="Change password"
               summary="Enter your current password before setting a new one. A successful change signs out your other active sessions."
-              metrics={<MetricPill>Password</MetricPill>}
+              titleLevel="h2"
+              metadata={<MetadataStrip items={["Password"]} />}
             />
 
             {securityError ? <p className="alert alert-error">{securityError}</p> : null}
@@ -752,12 +754,13 @@ export function AccountSettingsSurface({
           ) : null}
 
           {activeTab === "notifications" ? (
-          <section className="panel module-entry-panel stack-md account-section-card">
-            <ModuleCockpit
+          <section className="panel stack-md account-section-card">
+            <WorkspaceHeader
               eyebrow="Notifications"
               title="Delivery preferences"
               summary="Control which Atlasium events can notify you by email and how early task reminders are sent."
-              metrics={<MetricPill>{notificationPreferences?.emailEnabled ? "Email on" : "Email off"}</MetricPill>}
+              titleLevel="h2"
+              metadata={<MetadataStrip items={[notificationPreferences?.emailEnabled ? "Email on" : "Email off"]} />}
             />
 
             {notificationsLoading ? <LoadingState title="Loading notification preferences" detail="Preparing delivery settings." /> : null}
@@ -936,16 +939,19 @@ export function AccountSettingsSurface({
 
         <div className="account-column">
           {activeTab === "git" ? (
-          <section className="panel module-entry-panel stack-md account-section-card">
-            <ModuleCockpit
+          <section className="panel stack-md account-section-card">
+            <WorkspaceHeader
               eyebrow="GitLab & SSH access"
               title="Repository access"
               summary="GitLab web sign-in uses Atlasium SSO. Connect GitLab API access here, then manage SSH keys and HTTPS clone access for Atlasium Code."
-              metrics={
-                <>
-                  <MetricPill>{connection?.connected ? "GitLab connected" : "GitLab disconnected"}</MetricPill>
-                  <MetricPill>{sshKeys.length} SSH key{sshKeys.length === 1 ? "" : "s"}</MetricPill>
-                </>
+              titleLevel="h2"
+              metadata={
+                <MetadataStrip
+                  items={[
+                    connection?.connected ? "GitLab connected" : "GitLab disconnected",
+                    `${sshKeys.length} SSH key${sshKeys.length === 1 ? "" : "s"}`
+                  ]}
+                />
               }
             />
 

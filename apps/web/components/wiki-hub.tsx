@@ -2704,7 +2704,7 @@ export function WikiHub({
           .trim()}
         style={wikiLayoutStyle}
       >
-        <aside ref={wikiSidebarRef} className="wiki-sidebar panel module-entry-panel">
+        <aside ref={wikiSidebarRef} className="wiki-sidebar archive-index-panel">
           <ModuleCockpit
             className="wiki-sidebar-toolbar"
             eyebrow="Wiki"
@@ -3000,7 +3000,7 @@ export function WikiHub({
           </div>
         ) : null}
 
-        <section className="wiki-main panel module-entry-panel">
+        <section className="wiki-main workspace-surface">
           <div className="wiki-main-header">
             <div>
               <h2 className="section-heading">{pageDetail?.page.title ?? "Wiki page"}</h2>

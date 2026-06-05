@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { AppShell } from "../../../../components/app-shell";
-import { LoadingState, MetricPill, ModuleCockpit, ToolbarGroup } from "../../../../components/ui";
+import { LoadingState, MetadataStrip, WorkspaceHeader } from "../../../../components/ui";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
 import {
@@ -783,19 +783,21 @@ export default function ProjectMeetingsPage({
   return (
     <AppShell projectId={params.projectId}>
       <section className="panel module-entry-panel meetings-toolbar">
-        <ModuleCockpit
+        <WorkspaceHeader
           eyebrow="Meetings"
           title="Minutes"
-          titleLevel="h3"
+          titleLevel="h2"
           summary="Review meeting minutes, structured Markdown sections, action counts, and AI task extraction state."
-          metrics={
-            <>
-              <MetricPill>{meetings.length} record{meetings.length === 1 ? "" : "s"}</MetricPill>
-              <MetricPill>{viewMode === "calendar" ? "Calendar" : "List"}</MetricPill>
-            </>
+          metadata={
+            <MetadataStrip
+              items={[
+                `${meetings.length} record${meetings.length === 1 ? "" : "s"}`,
+                viewMode === "calendar" ? "Calendar" : "List"
+              ]}
+            />
           }
           actions={
-            <ToolbarGroup className="meetings-toolbar-actions">
+            <div className="meetings-toolbar-actions">
               <div className="meetings-view-toggle">
                 <button
                   className={viewMode === "list" ? "button" : "button button-secondary"}
@@ -817,7 +819,7 @@ export default function ProjectMeetingsPage({
                   {showForm && formMode === "create" ? "Close" : "New minutes"}
                 </button>
               ) : null}
-            </ToolbarGroup>
+            </div>
           }
         />
         {success ? <p className="alert alert-success">{success}</p> : null}

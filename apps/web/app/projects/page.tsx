@@ -5,7 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../components/app-shell";
-import { LoadingState, MetricPill, ModuleCockpit, ToolbarGroup } from "../../components/ui";
+import { ArchiveIndex, ArchiveRow, LoadingState, MetadataStrip, WorkspaceHeader } from "../../components/ui";
 import {
   AdminManagedUser,
   AdminUserHardDeleteCheck,
@@ -52,6 +52,14 @@ function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
 function parseProjectCreatedAt(project: ProjectSummary): number {
   const timestamp = Date.parse(project.createdAt);
   return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function formatProjectDate(project: ProjectSummary): string {
+  const timestamp = parseProjectCreatedAt(project);
+  if (!timestamp) {
+    return "Date unavailable";
+  }
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(timestamp);
 }
 
 function compareProjectsWithinGroup(left: ProjectSummary, right: ProjectSummary, orderBy: ProjectOrderBy): number {
@@ -102,6 +110,7 @@ export default function ProjectsPage(): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [orderBy, setOrderBy] = useState<ProjectOrderBy>("newest");
+  const [projectQuery, setProjectQuery] = useState("");
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("projects");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isInviteOpen, setIsInviteOpen] = useState(false);
@@ -219,6 +228,19 @@ export default function ProjectsPage(): JSX.Element {
       }),
     [orderBy, projects]
   );
+
+  const filteredDirectoryProjects = useMemo(() => {
+    const query = projectQuery.trim().toLowerCase();
+    if (!query) {
+      return sortedProjects;
+    }
+
+    return sortedProjects.filter((project) =>
+      project.key.toLowerCase().includes(query) ||
+      project.name.toLowerCase().includes(query) ||
+      (project.description ?? "").toLowerCase().includes(query)
+    );
+  }, [projectQuery, sortedProjects]);
 
   const filteredInviteProjects = useMemo(() => {
     const query = inviteProjectQuery.trim().toLowerCase();
@@ -694,28 +716,21 @@ export default function ProjectsPage(): JSX.Element {
   return (
     <AppShell>
       <section className="panel module-entry-panel projects-directory-panel">
-        <ModuleCockpit
+        <WorkspaceHeader
           eyebrow={workspaceMode === "users" ? "Administration" : "Atlasium workspace"}
           title={workspaceTitle}
           summary={workspaceHelper}
-          metrics={
-            <>
-              <MetricPill>{workspaceMode === "users" ? `${adminUsers.length} users` : `${projects.length} projects`}</MetricPill>
-              {workspaceMode === "projects" ? <MetricPill>{projects.filter((project) => project.isPinned).length} pinned</MetricPill> : null}
-            </>
+          metadata={
+            <MetadataStrip
+              items={
+                workspaceMode === "users"
+                  ? [`${adminUsers.length} users`, `${filteredAdminUsers.length} shown`]
+                  : [`${projects.length} projects`, `${projects.filter((project) => project.isPinned).length} pinned`, `${filteredDirectoryProjects.length} shown`]
+              }
+            />
           }
           actions={
-            <ToolbarGroup className="projects-toolbar-actions">
-              {workspaceMode === "projects" ? (
-                <label className="projects-order-control">
-                  Order by
-                  <select className="input" value={orderBy} onChange={(event) => setOrderBy(event.target.value as ProjectOrderBy)}>
-                    <option value="newest">Newest</option>
-                    <option value="key">Key</option>
-                    <option value="name">Name</option>
-                  </select>
-                </label>
-              ) : null}
+            <div className="projects-command-actions">
               {isAdmin && workspaceMode === "projects" ? (
                 <button
                   className="button button-secondary projects-invite-toggle-button"
@@ -749,9 +764,31 @@ export default function ProjectsPage(): JSX.Element {
                   {isCreateOpen ? "Close" : "New project"}
                 </button>
               ) : null}
-            </ToolbarGroup>
+            </div>
           }
         />
+
+        {workspaceMode === "projects" ? (
+          <div className="projects-directory-controls">
+            <label className="projects-search-control">
+              Search
+              <input
+                className="input"
+                value={projectQuery}
+                onChange={(event) => setProjectQuery(event.target.value)}
+                placeholder="Search key, name, or description"
+              />
+            </label>
+            <label className="projects-order-control">
+              Order by
+              <select className="input" value={orderBy} onChange={(event) => setOrderBy(event.target.value as ProjectOrderBy)}>
+                <option value="newest">Newest</option>
+                <option value="key">Key</option>
+                <option value="name">Name</option>
+              </select>
+            </label>
+          </div>
+        ) : null}
 
         {createSuccess ? <p className="alert alert-success">{createSuccess}</p> : null}
         {createError ? <p className="alert alert-error">{createError}</p> : null}
@@ -991,49 +1028,66 @@ export default function ProjectsPage(): JSX.Element {
             {loading ? <LoadingState title="Loading projects" detail="Preparing the project directory." /> : null}
 
             {!loading && !listError ? (
-              sortedProjects.length > 0 ? (
-                <ul className="list projects-directory-list">
-                  {sortedProjects.map((project) => (
-                    <li className="list-item" key={project.id}>
-                      <div className="projects-list-header">
-                        <strong>
-                          {project.key} - {project.name}
-                        </strong>
-                        {project.isPinned ? <span className="badge projects-pinned-badge">Pinned</span> : null}
-                      </div>
-                      <p>{project.description ?? "No description"}</p>
-                      <div className="projects-list-actions">
-                        <Link className="button button-secondary" href={`/projects/${project.id}`}>
-                          Open project
-                        </Link>
-                        {isAdmin ? (
+              filteredDirectoryProjects.length > 0 ? (
+                <ArchiveIndex className="projects-directory-index">
+                  <div className="archive-index-header">
+                    <div className="stack-xxs">
+                      <p className="eyebrow">Directory</p>
+                      <h3 className="section-heading">Project access</h3>
+                    </div>
+                    <span className="projects-index-count">{filteredDirectoryProjects.length} shown</span>
+                  </div>
+                  {filteredDirectoryProjects.map((project) => (
+                    <ArchiveRow className="projects-directory-row" key={project.id}>
+                      <div className="archive-row-main">
+                        <div className="stack-xxs">
+                          <div className="projects-list-header">
+                            <h4 className="archive-row-title">
+                              <span className="projects-key">{project.key}</span> {project.name}
+                            </h4>
+                            {project.isPinned ? <span className="badge projects-pinned-badge">Pinned</span> : null}
+                          </div>
+                          <p className="archive-row-detail">{project.description ?? "No description"}</p>
+                          <MetadataStrip
+                            items={[
+                              `Created ${formatProjectDate(project)}`,
+                              project.isPinned ? "Pinned in directory" : "Unpinned"
+                            ]}
+                          />
+                        </div>
+                        <div className="archive-row-actions">
+                          <Link className="button button-secondary" href={`/projects/${project.id}`}>
+                            Open
+                          </Link>
                           <button
-                            className="button button-danger"
+                            className="button button-ghost"
                             type="button"
-                            disabled={deletingProjectId === project.id}
+                            disabled={pinBusyProjectId === project.id}
                             onClick={() => {
-                              void onDeleteProject(project);
+                              void onTogglePin(project);
                             }}
                           >
-                            {deletingProjectId === project.id ? "Deleting..." : "Delete"}
+                            {pinBusyProjectId === project.id ? "Saving..." : project.isPinned ? "Unpin" : "Pin"}
                           </button>
-                        ) : null}
-                        <button
-                          className="button button-ghost"
-                          type="button"
-                          disabled={pinBusyProjectId === project.id}
-                          onClick={() => {
-                            void onTogglePin(project);
-                          }}
-                        >
-                          {pinBusyProjectId === project.id ? "Saving..." : project.isPinned ? "Unpin" : "Pin"}
-                        </button>
+                          {isAdmin ? (
+                            <button
+                              className="button button-danger"
+                              type="button"
+                              disabled={deletingProjectId === project.id}
+                              onClick={() => {
+                                void onDeleteProject(project);
+                              }}
+                            >
+                              {deletingProjectId === project.id ? "Deleting..." : "Delete"}
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
-                    </li>
+                    </ArchiveRow>
                   ))}
-                </ul>
+                </ArchiveIndex>
               ) : (
-                <p className="alert alert-info">No projects found.</p>
+                <p className="alert alert-info">No projects match the current directory filters.</p>
               )
             ) : null}
           </>

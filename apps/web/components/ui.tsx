@@ -125,6 +125,67 @@ export function MetaRow({ className, ...props }: HTMLAttributes<HTMLDivElement>)
   return <div className={className ? `meta-row ${className}` : "meta-row"} {...props} />;
 }
 
+export function MetadataStrip({
+  items,
+  className
+}: {
+  items: Array<ReactNode>;
+  className?: string;
+}): JSX.Element {
+  return (
+    <div className={className ? `metadata-strip ${className}` : "metadata-strip"}>
+      {items.map((item, index) => (
+        <span key={index} className="metadata-strip-item">
+          {item}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function ArchiveIndex({ className, ...props }: HTMLAttributes<HTMLDivElement>): JSX.Element {
+  return <div className={className ? `archive-index ${className}` : "archive-index"} {...props} />;
+}
+
+export function ArchiveRow({ className, ...props }: HTMLAttributes<HTMLElement>): JSX.Element {
+  return <article className={className ? `archive-row ${className}` : "archive-row"} {...props} />;
+}
+
+export function StateRail({ className, ...props }: HTMLAttributes<HTMLDivElement>): JSX.Element {
+  return <div className={className ? `state-rail ${className}` : "state-rail"} {...props} />;
+}
+
+export function WorkspaceHeader({
+  eyebrow,
+  title,
+  summary,
+  metadata,
+  actions,
+  className,
+  titleLevel = "h2"
+}: {
+  eyebrow?: string;
+  title: ReactNode;
+  summary?: ReactNode;
+  metadata?: ReactNode;
+  actions?: ReactNode;
+  className?: string;
+  titleLevel?: "h1" | "h2" | "h3";
+}): JSX.Element {
+  const Heading = titleLevel;
+  return (
+    <header className={className ? `workspace-header ${className}` : "workspace-header"}>
+      <div className="workspace-header-copy">
+        {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
+        <Heading className="workspace-title">{title}</Heading>
+        {summary ? <p className="workspace-summary">{summary}</p> : null}
+        {metadata ? <div className="workspace-header-metadata">{metadata}</div> : null}
+      </div>
+      {actions ? <div className="workspace-header-actions">{actions}</div> : null}
+    </header>
+  );
+}
+
 export function SectionHeader({
   eyebrow,
   title,

@@ -99,62 +99,64 @@ function AcceptInviteForm(): JSX.Element {
           <p>Create your account to join Atlasium.</p>
         </div>
 
-        <form className="form-grid" onSubmit={onSubmit}>
-          <label>
-            Invitation token
-            <input
-              className="input"
-              value={token}
-              onChange={(event) => setToken(event.target.value)}
-              required
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </label>
+        <div className="login-form-panel">
+          <form className="form-grid" onSubmit={onSubmit}>
+            <label>
+              Invitation token
+              <input
+                className="input"
+                value={token}
+                onChange={(event) => setToken(event.target.value)}
+                required
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
 
-          <label>
-            Full name
-            <input className="input" value={name} onChange={(event) => setName(event.target.value)} required autoComplete="name" />
-          </label>
+            <label>
+              Full name
+              <input className="input" value={name} onChange={(event) => setName(event.target.value)} required autoComplete="name" />
+            </label>
 
-          <label>
-            Username
-            <input
-              className="input"
-              value={username}
-              onChange={(event) => setUsername(event.target.value.toLowerCase())}
-              minLength={2}
-              maxLength={32}
-              required
-              autoComplete="username"
-              spellCheck={false}
-            />
-          </label>
+            <label>
+              Username
+              <input
+                className="input"
+                value={username}
+                onChange={(event) => setUsername(event.target.value.toLowerCase())}
+                minLength={2}
+                maxLength={32}
+                required
+                autoComplete="username"
+                spellCheck={false}
+              />
+            </label>
 
-          <label>
-            Password
-            <input
-              className="input"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              minLength={8}
-              required
-              autoComplete="new-password"
-            />
-          </label>
+            <label>
+              Password
+              <input
+                className="input"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                minLength={8}
+                required
+                autoComplete="new-password"
+              />
+            </label>
 
-          {error ? <p className="alert alert-error">{error}</p> : null}
-          {successMessage ? <p className="alert alert-success">{successMessage}</p> : null}
+            {error ? <p className="alert alert-error">{error}</p> : null}
+            {successMessage ? <p className="alert alert-success">{successMessage}</p> : null}
 
-          <button className="button" disabled={loading} type="submit">
-            {loading ? "Creating account..." : "Create account"}
-          </button>
+            <button className="button" disabled={loading} type="submit">
+              {loading ? "Creating account..." : "Create account"}
+            </button>
 
-          <p className="projects-toolbar-helper">
-            Already have an account? <Link href="/login">Sign in</Link>.
-          </p>
-        </form>
+            <p className="projects-toolbar-helper">
+              Already have an account? <Link href="/login">Sign in</Link>.
+            </p>
+          </form>
+        </div>
       </section>
     </main>
   );
@@ -171,6 +173,9 @@ function AcceptInviteFallback(): JSX.Element {
           </div>
           <h1 className="section-heading">Accept invitation</h1>
           <p>Loading invite details...</p>
+        </div>
+        <div className="login-form-panel">
+          <p className="login-access-note">Preparing the invitation form.</p>
         </div>
       </section>
     </main>

@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Code2,
   Copy,
   Download,
   ExternalLink,
@@ -19,7 +18,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell, openAccountSettings } from "../../../../components/app-shell";
-import { EmptyState, IconButton, LoadingState, MetricPill, ModuleCockpit, StatusLine, ToolbarGroup } from "../../../../components/ui";
+import { EmptyState, IconButton, LoadingState, MetadataStrip, StatusLine, WorkspaceHeader } from "../../../../components/ui";
 import { LoginResponse } from "../../../../lib/client-api";
 import {
   createProjectRepository,
@@ -686,7 +685,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
 
         {!loading && !repositoryConnected ? (
           <section className="panel module-entry-panel code-provision-panel">
-            <ModuleCockpit
+            <WorkspaceHeader
               eyebrow="Repository cockpit"
               title="No repositories yet"
               summary={
@@ -694,14 +693,12 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                   ? "Create a managed GitLab repository for this project to start browsing code, branches, and merge requests."
                   : "This project does not have managed GitLab repositories yet."
               }
-              metrics={<MetricPill>{canWrite ? "Writable" : "Read only"}</MetricPill>}
+              metadata={<MetadataStrip items={[canWrite ? "Writable" : "Read only"]} />}
               actions={canWrite ? (
-                <ToolbarGroup>
-                  <button className="button" type="button" onClick={() => setShowRepositoryModal(true)}>
-                    <Plus size={16} aria-hidden="true" />
-                    New repository
-                  </button>
-                </ToolbarGroup>
+                <button className="button" type="button" onClick={() => setShowRepositoryModal(true)}>
+                  <Plus size={16} aria-hidden="true" />
+                  New repository
+                </button>
               ) : null}
             />
           </section>
@@ -710,56 +707,59 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
         {!loading && connectedRepository ? (
           <>
             <section className="panel module-entry-panel code-cockpit">
-              <div className="code-cockpit-row code-cockpit-summary">
-                <div className="code-cockpit-title">
-                  <p className="eyebrow">
-                    <Code2 size={15} aria-hidden="true" />
-                    Repository cockpit
-                  </p>
-                  <div className="code-cockpit-heading">
-                    <h2>{connectedRepository.name}</h2>
-                    <code>{connectedRepository.pathWithNamespace}</code>
-                  </div>
-                  <label className="code-repository-switcher">
-                    Repository
-                    <select
-                      className="input"
-                      value={connectedRepository.id}
-                      onChange={(event) => {
-                        setActiveRepositoryId(event.target.value);
-                        setBrowserRef("");
-                        setBrowserPath("");
-                        setSelectedFile(null);
-                        setContentError(null);
-                        setMergeRequestsError(null);
-                        setNewBranchName("");
-                        setNewBranchSourceRef("");
-                        setMergeRequestSourceBranch("");
-                        setMergeRequestTargetBranch("");
-                        setMergeRequestTitle("");
-                        setMergeRequestDescription("");
-                        setShowBranchModal(false);
-                        setShowMRModal(false);
-                      }}
-                    >
-                      {repositories.map((repository) => (
-                        <option key={repository.id} value={repository.id}>
-                          {repository.name} - {repository.pathWithNamespace}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <div className="code-cockpit-state" aria-label="Repository state">
+              <WorkspaceHeader
+                eyebrow="Repository cockpit"
+                title={connectedRepository.name}
+                summary={connectedRepository.description ?? "Browse repository files, history, branches, merge requests, clone access, and archive downloads."}
+                metadata={
+                  <MetadataStrip
+                    items={[
+                      connectedRepository.pathWithNamespace,
+                      connectedRepository.visibility,
+                      connectedRepository.managed ? "Managed" : "External",
+                      `${repositories.length} repositor${repositories.length === 1 ? "y" : "ies"}`,
+                      `Default ${connectedRepository.defaultBranch}`
+                    ]}
+                  />
+                }
+                actions={
+                  <div className="code-cockpit-state" aria-label="Repository state">
                   <span className={gitlabConnected ? "code-state-pill code-state-live" : "code-state-pill code-state-warning"}>
                     {gitlabConnected ? "GitLab API connected" : connection?.reconnectRequired ? "GitLab reconnect required" : "GitLab API disconnected"}
                   </span>
-                  <span className="badge">{connectedRepository.visibility}</span>
-                  {connectedRepository.managed ? <span className="badge">Managed</span> : null}
-                  <span className="badge">{repositories.length} repositor{repositories.length === 1 ? "y" : "ies"}</span>
-                  <span className="badge">Default {connectedRepository.defaultBranch}</span>
-                </div>
-              </div>
+                  </div>
+                }
+              />
+
+              <label className="code-repository-switcher">
+                Repository
+                <select
+                  className="input"
+                  value={connectedRepository.id}
+                  onChange={(event) => {
+                    setActiveRepositoryId(event.target.value);
+                    setBrowserRef("");
+                    setBrowserPath("");
+                    setSelectedFile(null);
+                    setContentError(null);
+                    setMergeRequestsError(null);
+                    setNewBranchName("");
+                    setNewBranchSourceRef("");
+                    setMergeRequestSourceBranch("");
+                    setMergeRequestTargetBranch("");
+                    setMergeRequestTitle("");
+                    setMergeRequestDescription("");
+                    setShowBranchModal(false);
+                    setShowMRModal(false);
+                  }}
+                >
+                  {repositories.map((repository) => (
+                    <option key={repository.id} value={repository.id}>
+                      {repository.name} - {repository.pathWithNamespace}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
               <div className="code-cockpit-row code-cockpit-controls">
                 <nav className="code-tabs" aria-label="Repository sections">
@@ -842,9 +842,6 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                 </div>
               </div>
 
-              <p className="code-cockpit-description">
-                {connectedRepository.description ?? "Browse repository files, history, branches, merge requests, clone access, and archive downloads."}
-              </p>
             </section>
 
             {!gitlabConnected ? (
