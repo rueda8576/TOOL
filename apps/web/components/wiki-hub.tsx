@@ -1,12 +1,13 @@
 "use client";
 
+import { Plus, RefreshCw, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ChangeEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 
 import { AppShell } from "./app-shell";
-import { LoadingState, MetricPill, Modal, ModuleCockpit, ToolbarGroup } from "./ui";
+import { LoadingState, MetricPill, Modal, ModuleCockpit } from "./ui";
 import { WikiHistory } from "./wiki-history";
 import { WikiImportDraftEntry, WikiImportPanel } from "./wiki-import-panel";
 import { WikiMarkdown } from "./wiki-markdown";
@@ -464,6 +465,35 @@ function buildDocsAssignmentPreview(
     wikiPath,
     docsPath,
     gitPath: `${repository.pathWithNamespace}/${docsPath}`
+  };
+}
+
+function pluralizeCount(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function formatDocsSyncSummary(result: WikiDocsSyncResult): { text: string; needsReview: boolean } {
+  const updated = result.totals.updatedFromGit + result.totals.updatedToGit;
+  const deleted = result.totals.deletedFromWiki + result.totals.deletedFromGit;
+  const needsReview = result.totals.conflicts > 0 || result.totals.errors > 0 || result.totals.unassigned > 0;
+  const counts = [
+    result.totals.created > 0 ? pluralizeCount(result.totals.created, "imported page", "imported pages") : null,
+    updated > 0 ? pluralizeCount(updated, "updated page", "updated pages") : null,
+    result.totals.exportedToGit > 0 ? pluralizeCount(result.totals.exportedToGit, "exported page", "exported pages") : null,
+    result.totals.linked > 0 ? pluralizeCount(result.totals.linked, "linked page", "linked pages") : null,
+    deleted > 0 ? pluralizeCount(deleted, "deleted page", "deleted pages") : null,
+    result.totals.unassigned > 0 ? pluralizeCount(result.totals.unassigned, "unassigned page", "unassigned pages") : null,
+    result.totals.conflicts > 0 ? pluralizeCount(result.totals.conflicts, "conflict") : null,
+    result.totals.errors > 0 ? pluralizeCount(result.totals.errors, "error") : null
+  ].filter((part): part is string => part !== null);
+
+  if (counts.length === 0) {
+    return { text: "Docs sync complete. No Docs changes detected.", needsReview };
+  }
+
+  return {
+    text: `${needsReview ? "Docs sync needs review." : "Docs sync complete."} ${counts.join(", ")}.`,
+    needsReview
   };
 }
 
@@ -2010,9 +2040,6 @@ export function WikiHub({
       if (selectedPath) {
         await loadPage(token, selectedPath);
       }
-      setSuccess(
-        `Docs sync finished: ${result.totals.created} imported, ${result.totals.updatedFromGit + result.totals.updatedToGit} updated, ${result.totals.exportedToGit} exported, ${result.totals.linked} linked, ${result.totals.unassigned} unassigned, ${result.totals.conflicts} conflict(s), ${result.totals.errors} error(s).`
-      );
     } catch (syncError) {
       setError((syncError as Error).message);
     } finally {
@@ -2658,6 +2685,8 @@ export function WikiHub({
     </div>
   );
 
+  const docsSyncSummary = docsSyncResult ? formatDocsSyncSummary(docsSyncResult) : null;
+
   return (
     <AppShell
       projectId={projectId}
@@ -2681,52 +2710,57 @@ export function WikiHub({
             eyebrow="Wiki"
             title="Pages"
             titleLevel="h3"
-            summary="Search, draft, publish, import, and sync project knowledge with traceable revisions."
             metrics={
               <>
                 <MetricPill>{canWrite ? "Writable" : "Read only"}</MetricPill>
                 {docsSyncStatus ? <MetricPill>{docsSyncStatus.repositories.length} Docs repos</MetricPill> : null}
               </>
             }
-            actions={canWrite ? (
-              <ToolbarGroup className="inline-actions">
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  onClick={() => {
-                    setShowImportPanel(false);
-                    setShowCreateForm((current) => !current);
-                  }}
-                >
-                  {showCreateForm ? "Close" : "New page"}
-                </button>
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  onClick={() => {
-                    setShowCreateForm(false);
-                    setShowImportPanel((current) => !current);
-                  }}
-                >
-                  {showImportPanel ? "Close import" : "Import Markdown"}
-                </button>
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  onClick={() => void onSyncDocs()}
-                  disabled={syncingDocs || (docsSyncStatus?.repositories.length ?? 0) === 0}
-                >
-                  {syncingDocs ? "Syncing..." : "Sync Docs"}
-                </button>
-              </ToolbarGroup>
-            ) : null}
           />
+
+          {canWrite ? (
+            <div className="wiki-sidebar-actions" role="group" aria-label="Wiki actions">
+              <button
+                type="button"
+                className="button button-secondary wiki-sidebar-action"
+                onClick={() => {
+                  setShowImportPanel(false);
+                  setShowCreateForm((current) => !current);
+                }}
+              >
+                <Plus size={15} aria-hidden="true" />
+                {showCreateForm ? "Close" : "New page"}
+              </button>
+              <button
+                type="button"
+                className="button button-secondary wiki-sidebar-action"
+                aria-label="Import Markdown"
+                title="Import Markdown"
+                onClick={() => {
+                  setShowCreateForm(false);
+                  setShowImportPanel((current) => !current);
+                }}
+              >
+                <Upload size={15} aria-hidden="true" />
+                {showImportPanel ? "Close" : "Import"}
+              </button>
+              <button
+                type="button"
+                className="button button-secondary wiki-sidebar-action"
+                aria-label="Sync Docs"
+                title="Sync Docs"
+                onClick={() => void onSyncDocs()}
+                disabled={syncingDocs || (docsSyncStatus?.repositories.length ?? 0) === 0}
+              >
+                <RefreshCw size={15} aria-hidden="true" />
+                {syncingDocs ? "Syncing" : "Sync"}
+              </button>
+            </div>
+          ) : null}
 
           {docsSyncResult ? (
             <div className="wiki-import-summary">
-              <p className={docsSyncResult.totals.conflicts > 0 || docsSyncResult.totals.errors > 0 || docsSyncResult.totals.unassigned > 0 ? "alert alert-info" : "alert alert-success"}>
-                Docs sync: {docsSyncResult.totals.created} imported, {docsSyncResult.totals.updatedFromGit + docsSyncResult.totals.updatedToGit} updated, {docsSyncResult.totals.exportedToGit} exported, {docsSyncResult.totals.linked} linked, {docsSyncResult.totals.deletedFromWiki + docsSyncResult.totals.deletedFromGit} deleted, {docsSyncResult.totals.unassigned} unassigned, {docsSyncResult.totals.conflicts} conflict(s), {docsSyncResult.totals.errors} error(s).
-              </p>
+              {docsSyncSummary ? <p className={docsSyncSummary.needsReview ? "alert alert-info" : "alert alert-success"}>{docsSyncSummary.text}</p> : null}
               {canWrite && unassignedDocsPages.length > 0 ? (
                 <div className="inline-actions">
                   <button type="button" className="button button-secondary" onClick={openAssignDocsPanel}>

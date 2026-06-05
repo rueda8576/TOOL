@@ -2888,6 +2888,29 @@ body.wiki-layout-dragging * {
   gap: 0.7rem;
 }
 
+.wiki-sidebar-actions {
+  margin-top: 0.64rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.38rem;
+}
+
+.wiki-sidebar-action {
+  min-width: 0;
+  min-height: 2.08rem;
+  gap: 0.32rem;
+  padding: 0.42rem 0.46rem;
+  border-color: color-mix(in srgb, var(--line-strong) 72%, var(--line));
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.wiki-sidebar-action svg {
+  flex: 0 0 auto;
+}
+
 .wiki-search-label {
   margin-top: 0.4rem;
   display: grid;
@@ -2975,6 +2998,15 @@ body.wiki-layout-dragging * {
 .wiki-import-summary {
   display: grid;
   gap: 0.45rem;
+}
+
+.wiki-import-summary .list-item {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.wiki-import-summary .wiki-page-path {
+  display: block;
 }
 
 .wiki-docs-assign-modal {

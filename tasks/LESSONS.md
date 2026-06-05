@@ -18,6 +18,7 @@
 - Keep action button labels concise; do not append keyboard shortcut hints in the visible label unless explicitly requested.
 - Do not split a dense technical settings workflow into competing nested cards inside a narrow secondary column. If a section combines long labels, action buttons, and optional detail, merge the related controls into one coherent panel and collapse heavy forms by default.
 - When adding shared visual accent classes, audit later page-specific shorthand rules like `border-color`; they can silently override one side of the shared accent through CSS cascade.
+- In narrow navigation sidebars, avoid dropping global cockpit/toolbars into the header when they create oversized boxed controls; use scoped compact action rows and keep the action result in one nearby place.
 
 ## Design canon
 - Durable Atlasium brand, digital design, UI/UX, copy, metadata, navigation, visual assets, and visual verification rules live in `DESIGN.md`.

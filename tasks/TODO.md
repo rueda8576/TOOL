@@ -1,5 +1,21 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Sidebar Actions and Sync Result Refinement (2026-06-05)
+- [x] Register the approved implementation plan for compact Wiki sidebar actions and single Sync Docs feedback.
+- [x] Refine `WikiHub` sidebar cockpit/actions without changing Wiki flows or backend contracts.
+- [x] Replace duplicated/verbose Sync Docs result copy with one compact sidebar result.
+- [x] Add scoped CSS and capture the user correction as a technical UX lesson.
+- [x] Run static audits, web type-check/build, diff hygiene, and visual verification.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Refined the Wiki sidebar cockpit by removing the long explanatory summary and moving `New page`, `Import`, and `Sync` into a scoped compact action row with lucide icons.
+- Removed the duplicated Sync Docs success path by clearing `setSuccess` usage for sync completion and rendering one compact result beside the sidebar action.
+- Replaced zero-heavy sync copy with `Docs sync complete. No Docs changes detected.` for no-op syncs, concise non-zero counts for successful changes, and `Docs sync needs review.` for conflicts/errors/unassigned pages.
+- Added scoped CSS for Wiki sidebar actions and sync detail rows, plus a `tasks/LESSONS.md` rule for avoiding oversized global toolbars in narrow sidebars.
+- Verification passed: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; `git diff --check`; static `rg` audits for the removed header copy and duplicated sync copy.
+- Visual QA used `next start` with Playwright fixtures and screenshots in `/tmp/atlasium-wiki-sidebar-qa` for desktop/mobile default, focus, create/import open states, Sync disabled, Syncing, no-change sync, and review sync. Fixtures were frontend-only and did not change API contracts.
+
 ## Atlasium UI/UX Quality Leap (2026-06-04)
 - [x] Register the approved implementation plan for the Atlasium v2 institutional-editorial redesign.
 - [x] Extend `DESIGN.md` with v2 workspace chrome, module cockpit, dense layout, state, and visual QA guidance.
