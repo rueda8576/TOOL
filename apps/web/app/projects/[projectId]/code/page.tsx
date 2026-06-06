@@ -910,7 +910,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                       </select>
                     </label>
                   ) : null}
-                  {activeTab === "files" ? <code className="code-current-path">/{browserPath || ""}</code> : null}
+                  {activeTab === "files" && browserPath ? <code className="code-current-path">/{browserPath}</code> : null}
                 </div>
 
                 <div className="code-cockpit-actions">
