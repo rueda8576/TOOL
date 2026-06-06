@@ -19,11 +19,19 @@ import { PublishWikiPageDto } from "./dto/publish-wiki-page.dto";
 import { SaveWikiDraftDto } from "./dto/save-wiki-draft.dto";
 import { SearchWikiPagesQueryDto } from "./dto/search-wiki-pages-query.dto";
 import { UpdateWikiPageDto } from "./dto/update-wiki-page.dto";
+import { WikiDocsStructureMigrationDto } from "./dto/wiki-docs-structure-migration.dto";
 import {
   WikiBacklinkView,
+  WikiDocsKind,
   WikiDocsAssignPageResult,
   WikiDocsAssignResult,
   WikiDocsSourceView,
+  WikiDocsStructureCounts,
+  WikiDocsStructureKind,
+  WikiDocsStructureMigrationPreview,
+  WikiDocsStructureMigrationPreviewRow,
+  WikiDocsStructureMigrationResult,
+  WikiDocsStructureMigrationResultRow,
   WikiDocsSyncConflict,
   WikiDocsSyncRepositoryResult,
   WikiDocsSyncRepositoryStatus,
@@ -48,6 +56,15 @@ const WIKI_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const WIKI_DOCS_ROOT = "Docs";
 const WIKI_DOCS_BINDING_STATUS_ACTIVE = "active";
 const WIKI_DOCS_BINDING_STATUS_DELETED = "deleted";
+const WIKI_DOCS_DEFAULT_KIND: WikiDocsKind = "research";
+const WIKI_DOCS_KIND_SEGMENTS: Record<WikiDocsKind, string> = {
+  research: "Research",
+  implementation: "Implementation"
+};
+const WIKI_DOCS_KIND_LABELS: Record<WikiDocsKind, string> = {
+  research: "Research",
+  implementation: "Implementation"
+};
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -173,10 +190,23 @@ type PreparedDocsAssignment = {
   oldWikiPath: string;
   newWikiPath: string;
   docsPath: string;
+  docsKind: WikiDocsKind;
   contentMarkdown: string;
   contentHash: string;
   remoteFile: RepositoryDocsMarkdownFile | null;
   mode: "exportedToGit" | "linked";
+};
+
+type WikiDocsStructureBindingRecord = WikiDocsBindingRecord & {
+  repository: WikiDocsRepositoryRecord;
+  wikiPage: NonNullable<WikiDocsBindingRecord["wikiPage"]> & {
+    projectId: string;
+    title: string;
+    draft: {
+      title: string;
+      contentMarkdown: string;
+    } | null;
+  };
 };
 
 @Injectable()
@@ -276,6 +306,41 @@ export class WikiService {
     return this.humanizeFileStem(this.stripMarkdownExtension(fileName)).slice(0, 300);
   }
 
+  private normalizeDocsKind(rawKind?: string | null): WikiDocsKind {
+    return rawKind === "implementation" ? "implementation" : WIKI_DOCS_DEFAULT_KIND;
+  }
+
+  private docsKindToGitSegment(kind: WikiDocsKind): string {
+    return WIKI_DOCS_KIND_SEGMENTS[kind];
+  }
+
+  private getDocsPathInfo(docsPath: string): {
+    docsPath: string;
+    relativePath: string;
+    kind: WikiDocsStructureKind;
+    canonical: boolean;
+    isOverview: boolean;
+  } {
+    const normalizedDocsPath = docsPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    const relativePath = normalizedDocsPath.startsWith(`${WIKI_DOCS_ROOT}/`)
+      ? normalizedDocsPath.slice(`${WIKI_DOCS_ROOT}/`.length)
+      : normalizedDocsPath;
+    const segments = relativePath.split("/").filter(Boolean);
+    const rawKind = segments[0];
+    const canonicalKind: WikiDocsKind | null =
+      rawKind === "Research" ? "research" : rawKind === "Implementation" ? "implementation" : null;
+    const fileName = segments[segments.length - 1] ?? "";
+    const fileStem = this.stripMarkdownExtension(fileName).toLowerCase();
+
+    return {
+      docsPath: normalizedDocsPath,
+      relativePath,
+      kind: canonicalKind ?? "legacy",
+      canonical: canonicalKind !== null,
+      isOverview: canonicalKind !== null && (fileStem === "readme" || fileStem === "index")
+    };
+  }
+
   private docsPathToWikiPath(prefix: string, docsPath: string): string {
     const normalizedDocsPath = docsPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
     const relativePath = normalizedDocsPath.startsWith(`${WIKI_DOCS_ROOT}/`)
@@ -286,11 +351,20 @@ export class WikiService {
       throw new BadRequestException("Docs path is required");
     }
 
-    const last = segments[segments.length - 1]!;
+    const rawKind = segments[0];
+    const canonicalKind: WikiDocsKind | null =
+      rawKind === "Research" ? "research" : rawKind === "Implementation" ? "implementation" : null;
+    const contentSegments = canonicalKind ? segments.slice(1) : segments;
+    if (contentSegments.length === 0) {
+      throw new BadRequestException("Docs path must include a Markdown file");
+    }
+
+    const last = contentSegments[contentSegments.length - 1]!;
     const fileStem = this.stripMarkdownExtension(last);
     const wikiSegments = [
+      ...(canonicalKind ? [canonicalKind] : []),
       prefix,
-      ...segments.slice(0, -1).map((segment) => this.toWikiPathSegment(segment, "folder")),
+      ...contentSegments.slice(0, -1).map((segment) => this.toWikiPathSegment(segment, "folder")),
       this.toWikiPathSegment(fileStem)
     ];
     return wikiSegments.join("/");
@@ -298,12 +372,34 @@ export class WikiService {
 
   private wikiPathToDocsPath(prefix: string, wikiPath: string): string {
     const normalizedWikiPath = this.normalizePath(wikiPath);
+    const segments = normalizedWikiPath.split("/").filter(Boolean);
+    const first = segments[0];
+    const second = segments[1];
+
+    if ((first === "research" || first === "implementation") && second === prefix) {
+      const relativeWikiPath = segments.length <= 2 ? "index" : segments.slice(2).join("/");
+      return `${WIKI_DOCS_ROOT}/${this.docsKindToGitSegment(first)}/${relativeWikiPath}.md`;
+    }
+
     if (normalizedWikiPath !== prefix && !normalizedWikiPath.startsWith(`${prefix}/`)) {
       throw new BadRequestException("Wiki page is outside the repository Docs prefix");
     }
 
     const relativeWikiPath = normalizedWikiPath === prefix ? "index" : normalizedWikiPath.slice(prefix.length + 1);
     return `${WIKI_DOCS_ROOT}/${relativeWikiPath}.md`;
+  }
+
+  private buildCanonicalDocsPath(kind: WikiDocsKind, relativePath: string): string {
+    const normalizedRelativePath = relativePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    return `${WIKI_DOCS_ROOT}/${this.docsKindToGitSegment(kind)}/${normalizedRelativePath || "index.md"}`;
+  }
+
+  private legacyDocsPathToCanonicalDocsPath(docsPath: string, kind: WikiDocsKind): string {
+    const info = this.getDocsPathInfo(docsPath);
+    if (info.canonical) {
+      return info.docsPath;
+    }
+    return this.buildCanonicalDocsPath(kind, info.relativePath);
   }
 
   private buildPreparedDocsPage(prefix: string, file: RepositoryDocsMarkdownFile): PreparedDocsPage {
@@ -417,12 +513,15 @@ export class WikiService {
       id: string;
       title: string;
       path: string;
+      docsPath: string | null;
+      repositoryName: string | null;
       isUnpublished: boolean;
       updatedAt: Date;
       hasDraftChanges: boolean;
       draftUpdatedAt: Date | null;
       draftUpdatedBy: WikiUserSummary | null;
-    }>
+    }>,
+    repositories: WikiDocsRepositoryRecord[]
   ): WikiTreeNode[] {
     type MutableNode = WikiTreeNode & { children: MutableNode[] };
     const root: MutableNode = {
@@ -434,11 +533,34 @@ export class WikiService {
 
     const folders = new Map<string, MutableNode>();
     folders.set("", root);
+    const repositoryNamesByPrefix = new Map(
+      repositories
+        .filter((repository) => repository.wikiDocsPrefix)
+        .map((repository) => [repository.wikiDocsPrefix as string, repository.name])
+    );
+
+    const folderDisplayName = (path: string, name: string): string | undefined => {
+      if (path === "research") {
+        return WIKI_DOCS_KIND_LABELS.research;
+      }
+      if (path === "implementation") {
+        return WIKI_DOCS_KIND_LABELS.implementation;
+      }
+      const segments = path.split("/").filter(Boolean);
+      if ((segments[0] === "research" || segments[0] === "implementation") && segments.length === 2) {
+        return repositoryNamesByPrefix.get(segments[1]!) ?? name;
+      }
+      if (segments.length === 1) {
+        return repositoryNamesByPrefix.get(segments[0]!) ?? undefined;
+      }
+      return undefined;
+    };
 
     for (const page of pages) {
       const segments = page.path.split("/");
       const folderSegments = segments.slice(0, -1);
       const pageName = segments[segments.length - 1] ?? page.path;
+      const docsInfo = page.docsPath ? this.getDocsPathInfo(page.docsPath) : null;
 
       let parentPath = "";
       for (let index = 0; index < folderSegments.length; index += 1) {
@@ -455,13 +577,21 @@ export class WikiService {
           path: currentPath,
           children: []
         };
+        const displayName = folderDisplayName(currentPath, segment);
+        if (displayName) {
+          folderNode.displayName = displayName;
+        }
+        const folderDocsKind = this.extractDocsKindFromWikiPath(currentPath);
+        if (folderDocsKind !== "legacy") {
+          folderNode.docsKind = folderDocsKind;
+        }
         folders.get(parentPath)?.children.push(folderNode);
         folders.set(currentPath, folderNode);
         parentPath = currentPath;
       }
 
       const parent = folders.get(parentPath) ?? root;
-      parent.children.push({
+      const pageNode: MutableNode = {
         type: "page",
         name: pageName,
         path: page.path,
@@ -472,7 +602,15 @@ export class WikiService {
         draftUpdatedAt: page.draftUpdatedAt?.toISOString() ?? null,
         draftUpdatedBy: page.draftUpdatedBy,
         children: []
-      });
+      };
+      if (docsInfo) {
+        pageNode.docsKind = docsInfo.kind;
+        pageNode.isDocsOverview = docsInfo.isOverview;
+      }
+      if (page.repositoryName) {
+        pageNode.repositoryName = page.repositoryName;
+      }
+      parent.children.push(pageNode);
     }
 
     const sortNodes = (nodes: MutableNode[]): MutableNode[] =>
@@ -482,6 +620,25 @@ export class WikiService {
           children: sortNodes(node.children)
         }))
         .sort((left, right) => {
+          const rootOrder = (node: MutableNode): number => {
+            if (!node.path.includes("/")) {
+              if (node.path === "research") {
+                return 0;
+              }
+              if (node.path === "implementation") {
+                return 1;
+              }
+            }
+            return 2;
+          };
+          const leftRootOrder = rootOrder(left);
+          const rightRootOrder = rootOrder(right);
+          if (leftRootOrder !== rightRootOrder) {
+            return leftRootOrder - rightRootOrder;
+          }
+          if (left.isDocsOverview !== right.isDocsOverview) {
+            return left.isDocsOverview ? -1 : 1;
+          }
           if (left.type !== right.type) {
             return left.type === "folder" ? -1 : 1;
           }
@@ -875,7 +1032,7 @@ export class WikiService {
   }
 
   private async ensureAllRepositoryWikiDocsPrefixes(projectId: string): Promise<WikiDocsRepositoryRecord[]> {
-    const repositories = await this.listDocsRepositories(projectId);
+    const repositories = (await this.listDocsRepositories(projectId)) ?? [];
     const ensured: WikiDocsRepositoryRecord[] = [];
     for (const repository of repositories) {
       ensured.push(await this.ensureRepositoryWikiDocsPrefix(repository));
@@ -944,6 +1101,7 @@ export class WikiService {
     if (!prefix || binding.status !== WIKI_DOCS_BINDING_STATUS_ACTIVE) {
       return null;
     }
+    const docsInfo = this.getDocsPathInfo(binding.docsPath);
 
     return {
       repositoryId: binding.repositoryId,
@@ -952,14 +1110,42 @@ export class WikiService {
       defaultBranch: binding.repository.defaultBranch,
       docsPath: binding.docsPath,
       docsRoot: WIKI_DOCS_ROOT,
-      wikiPrefix: prefix
+      wikiPrefix: prefix,
+      docsKind: docsInfo.kind,
+      isOverview: docsInfo.isOverview
     };
+  }
+
+  private emptyStructureCounts(): WikiDocsStructureCounts {
+    return {
+      research: 0,
+      implementation: 0,
+      legacy: 0,
+      migrationAvailable: false
+    };
+  }
+
+  private buildStructureCounts(docsPaths: string[]): WikiDocsStructureCounts {
+    const counts = this.emptyStructureCounts();
+    for (const docsPath of docsPaths) {
+      const info = this.getDocsPathInfo(docsPath);
+      if (info.kind === "research") {
+        counts.research += 1;
+      } else if (info.kind === "implementation") {
+        counts.implementation += 1;
+      } else {
+        counts.legacy += 1;
+      }
+    }
+    counts.migrationAvailable = counts.legacy > 0;
+    return counts;
   }
 
   private buildSyncRepositoryStatus(
     repository: WikiDocsRepositoryRecord,
     active: number,
-    deleted: number
+    deleted: number,
+    structure: WikiDocsStructureCounts
   ): WikiDocsSyncRepositoryStatus {
     return {
       repositoryId: repository.id,
@@ -973,30 +1159,36 @@ export class WikiService {
       bindings: {
         active,
         deleted
-      }
+      },
+      structure
     };
   }
 
   async getDocsSyncStatus(projectId: string, user: AuthenticatedUser): Promise<WikiDocsSyncStatus> {
     await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
     const repositories = await this.ensureAllRepositoryWikiDocsPrefixes(projectId);
-    const counts = await this.prisma.wikiDocsBinding.groupBy({
-      by: ["repositoryId", "status"],
+    const bindings = (await this.prisma.wikiDocsBinding.findMany({
       where: {
         projectId
       },
-      _count: {
-        _all: true
+      select: {
+        repositoryId: true,
+        docsPath: true,
+        status: true
       }
-    });
+    })) ?? [];
 
     const countByRepository = new Map<string, { active: number; deleted: number }>();
-    for (const row of counts) {
+    const docsPathsByRepository = new Map<string, string[]>();
+    for (const row of bindings) {
       const current = countByRepository.get(row.repositoryId) ?? { active: 0, deleted: 0 };
       if (row.status === WIKI_DOCS_BINDING_STATUS_DELETED) {
-        current.deleted += row._count._all;
+        current.deleted += 1;
       } else {
-        current.active += row._count._all;
+        current.active += 1;
+        const docsPaths = docsPathsByRepository.get(row.repositoryId) ?? [];
+        docsPaths.push(row.docsPath);
+        docsPathsByRepository.set(row.repositoryId, docsPaths);
       }
       countByRepository.set(row.repositoryId, current);
     }
@@ -1004,9 +1196,414 @@ export class WikiService {
     return {
       repositories: repositories.map((repository) => {
         const repositoryCounts = countByRepository.get(repository.id) ?? { active: 0, deleted: 0 };
-        return this.buildSyncRepositoryStatus(repository, repositoryCounts.active, repositoryCounts.deleted);
+        return this.buildSyncRepositoryStatus(
+          repository,
+          repositoryCounts.active,
+          repositoryCounts.deleted,
+          this.buildStructureCounts(docsPathsByRepository.get(repository.id) ?? [])
+        );
       }),
       unassigned: this.buildUnassignedDocsPages(await this.loadUnboundPublishedWikiPages(projectId), repositories)
+    };
+  }
+
+  private isLegacyDocsPath(docsPath: string): boolean {
+    return !this.getDocsPathInfo(docsPath).canonical;
+  }
+
+  private splitWikiPath(path: string): { slug: string; folderPath: string } {
+    const segments = path.split("/").filter(Boolean);
+    const slug = segments[segments.length - 1] ?? path;
+    return {
+      slug,
+      folderPath: segments.slice(0, -1).join("/")
+    };
+  }
+
+  private hasStructureBindingDraftChanges(binding: WikiDocsStructureBindingRecord): boolean {
+    return Boolean(
+      binding.wikiPage.draft &&
+        binding.wikiPage.currentRevision &&
+        (binding.wikiPage.draft.title !== binding.wikiPage.title ||
+          binding.wikiPage.draft.contentMarkdown !== binding.wikiPage.currentRevision.contentMarkdown)
+    );
+  }
+
+  private buildStructureMigrationRow(params: {
+    binding: WikiDocsStructureBindingRecord;
+    targetKind: WikiDocsKind;
+    conflicts: string[];
+  }): WikiDocsStructureMigrationPreviewRow {
+    const targetDocsPath = this.legacyDocsPathToCanonicalDocsPath(params.binding.docsPath, params.targetKind);
+    const prefix = params.binding.repository.wikiDocsPrefix;
+    const targetWikiPath = prefix ? this.docsPathToWikiPath(prefix, targetDocsPath) : params.binding.wikiPath;
+
+    return {
+      bindingId: params.binding.id,
+      pageId: params.binding.wikiPage.id,
+      title: params.binding.wikiPage.title,
+      repositoryId: params.binding.repositoryId,
+      repositoryName: params.binding.repository.name,
+      currentWikiPath: params.binding.wikiPath,
+      currentDocsPath: params.binding.docsPath,
+      targetKind: params.targetKind,
+      targetWikiPath,
+      targetDocsPath,
+      hasDraftChanges: this.hasStructureBindingDraftChanges(params.binding),
+      conflicts: params.conflicts
+    };
+  }
+
+  private async loadStructureMigrationBindings(
+    projectId: string,
+    bindingIds?: string[]
+  ): Promise<WikiDocsStructureBindingRecord[]> {
+    const bindings = await this.prisma.wikiDocsBinding.findMany({
+      where: {
+        projectId,
+        status: WIKI_DOCS_BINDING_STATUS_ACTIVE,
+        ...(bindingIds ? { id: { in: bindingIds } } : {})
+      },
+      orderBy: {
+        docsPath: "asc"
+      },
+      select: {
+        id: true,
+        projectId: true,
+        repositoryId: true,
+        wikiPageId: true,
+        docsPath: true,
+        wikiPath: true,
+        gitBlobId: true,
+        gitLastCommitId: true,
+        gitContentHash: true,
+        wikiRevisionId: true,
+        wikiContentHash: true,
+        status: true,
+        lastSyncedAt: true,
+        repository: {
+          select: {
+            id: true,
+            projectId: true,
+            name: true,
+            pathWithNamespace: true,
+            defaultBranch: true,
+            wikiDocsPrefix: true,
+            wikiDocsLastSyncedAt: true,
+            wikiDocsLastSyncError: true
+          }
+        },
+        wikiPage: {
+          select: {
+            id: true,
+            projectId: true,
+            title: true,
+            path: true,
+            slug: true,
+            folderPath: true,
+            deletedAt: true,
+            currentRevisionId: true,
+            currentRevision: {
+              select: {
+                id: true,
+                revisionNumber: true,
+                contentMarkdown: true
+              }
+            },
+            draft: {
+              select: {
+                title: true,
+                contentMarkdown: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    return bindings.filter((binding) => binding.wikiPage && this.isLegacyDocsPath(binding.docsPath)) as WikiDocsStructureBindingRecord[];
+  }
+
+  private async buildStructureMigrationPreviewRows(params: {
+    projectId: string;
+    user: AuthenticatedUser;
+    operationsByBindingId?: Map<string, WikiDocsKind>;
+  }): Promise<WikiDocsStructureMigrationPreviewRow[]> {
+    const bindingIds = params.operationsByBindingId ? [...params.operationsByBindingId.keys()] : undefined;
+    const bindings = await this.loadStructureMigrationBindings(params.projectId, bindingIds);
+    const rows: WikiDocsStructureMigrationPreviewRow[] = [];
+    const targetWikiPathCounts = new Map<string, number>();
+    const targetDocsPathCounts = new Map<string, number>();
+
+    for (const binding of bindings) {
+      const targetKind = params.operationsByBindingId?.get(binding.id) ?? WIKI_DOCS_DEFAULT_KIND;
+      const targetDocsPath = this.legacyDocsPathToCanonicalDocsPath(binding.docsPath, targetKind);
+      const targetWikiPath = binding.repository.wikiDocsPrefix
+        ? this.docsPathToWikiPath(binding.repository.wikiDocsPrefix, targetDocsPath)
+        : binding.wikiPath;
+      targetWikiPathCounts.set(targetWikiPath, (targetWikiPathCounts.get(targetWikiPath) ?? 0) + 1);
+      targetDocsPathCounts.set(`${binding.repositoryId}:${targetDocsPath}`, (targetDocsPathCounts.get(`${binding.repositoryId}:${targetDocsPath}`) ?? 0) + 1);
+    }
+
+    for (const binding of bindings) {
+      const targetKind = params.operationsByBindingId?.get(binding.id) ?? WIKI_DOCS_DEFAULT_KIND;
+      const targetDocsPath = this.legacyDocsPathToCanonicalDocsPath(binding.docsPath, targetKind);
+      const targetWikiPath = binding.repository.wikiDocsPrefix
+        ? this.docsPathToWikiPath(binding.repository.wikiDocsPrefix, targetDocsPath)
+        : binding.wikiPath;
+      const conflicts: string[] = [];
+
+      if (!binding.repository.wikiDocsPrefix) {
+        conflicts.push("Repository Docs prefix is missing");
+      }
+      if (!binding.wikiPageId || !binding.wikiPage.currentRevision) {
+        conflicts.push("Wiki page has no published revision");
+      }
+      if (this.hasStructureBindingDraftChanges(binding)) {
+        conflicts.push("Wiki page has unpublished draft changes");
+      }
+      if ((targetWikiPathCounts.get(targetWikiPath) ?? 0) > 1 || (targetDocsPathCounts.get(`${binding.repositoryId}:${targetDocsPath}`) ?? 0) > 1) {
+        conflicts.push("Another migration operation uses the same destination");
+      }
+
+      const targetWikiPage = await this.prisma.wikiPage.findFirst({
+        where: {
+          projectId: params.projectId,
+          path: targetWikiPath,
+          deletedAt: null,
+          id: {
+            not: binding.wikiPage.id
+          }
+        },
+        select: { id: true }
+      });
+      if (targetWikiPage) {
+        conflicts.push("Destination wiki path is already used");
+      }
+
+      const targetBinding = await this.prisma.wikiDocsBinding.findFirst({
+        where: {
+          OR: [
+            {
+              projectId: params.projectId,
+              wikiPath: targetWikiPath,
+              id: {
+                not: binding.id
+              }
+            },
+            {
+              repositoryId: binding.repositoryId,
+              docsPath: targetDocsPath,
+              id: {
+                not: binding.id
+              }
+            }
+          ]
+        },
+        select: { id: true }
+      });
+      if (targetBinding) {
+        conflicts.push("Destination Docs binding already exists");
+      }
+
+      const currentRemoteFile = await this.gitlabService.getRepositoryTextFileForDocsSync(
+        params.projectId,
+        params.user,
+        binding.repositoryId,
+        binding.docsPath
+      );
+      if (!currentRemoteFile) {
+        conflicts.push("Current Docs file is missing");
+      }
+      const targetRemoteFile = await this.gitlabService.getRepositoryTextFileForDocsSync(
+        params.projectId,
+        params.user,
+        binding.repositoryId,
+        targetDocsPath
+      );
+      if (targetRemoteFile) {
+        conflicts.push("Destination Docs file already exists");
+      }
+
+      rows.push(this.buildStructureMigrationRow({ binding, targetKind, conflicts: [...new Set(conflicts)] }));
+    }
+
+    return rows;
+  }
+
+  async getDocsStructureMigrationPreview(projectId: string, user: AuthenticatedUser): Promise<WikiDocsStructureMigrationPreview> {
+    await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
+    const rows = await this.buildStructureMigrationPreviewRows({ projectId, user });
+    return {
+      rows,
+      totals: {
+        legacy: rows.length,
+        ready: rows.filter((row) => row.conflicts.length === 0).length,
+        conflicts: rows.filter((row) => row.conflicts.length > 0).length
+      }
+    };
+  }
+
+  async applyDocsStructureMigration(
+    projectId: string,
+    dto: WikiDocsStructureMigrationDto,
+    user: AuthenticatedUser
+  ): Promise<WikiDocsStructureMigrationResult> {
+    await this.accessService.ensureProjectWritable(user.userId, user.globalRole, projectId);
+    const operationsByBindingId = new Map<string, WikiDocsKind>();
+    for (const operation of dto.operations) {
+      operationsByBindingId.set(operation.bindingId.trim(), this.normalizeDocsKind(operation.targetKind));
+    }
+
+    const previewRows = await this.buildStructureMigrationPreviewRows({ projectId, user, operationsByBindingId });
+    const bindingsById = new Map((await this.loadStructureMigrationBindings(projectId, [...operationsByBindingId.keys()])).map((binding) => [binding.id, binding]));
+    const resultRows: WikiDocsStructureMigrationResultRow[] = [];
+    const previewBindingIds = new Set(previewRows.map((row) => row.bindingId));
+
+    for (const [bindingId, targetKind] of operationsByBindingId) {
+      if (previewBindingIds.has(bindingId)) {
+        continue;
+      }
+      resultRows.push({
+        bindingId,
+        pageId: "",
+        title: "Unavailable Docs binding",
+        repositoryId: "",
+        repositoryName: "",
+        currentWikiPath: "",
+        currentDocsPath: "",
+        targetKind,
+        targetWikiPath: "",
+        targetDocsPath: "",
+        hasDraftChanges: false,
+        conflicts: ["Docs binding is not available for migration"],
+        status: "conflict",
+        reason: "Docs binding is not available for migration"
+      });
+    }
+
+    for (const previewRow of previewRows) {
+      const binding = bindingsById.get(previewRow.bindingId);
+      if (!binding) {
+        resultRows.push({ ...previewRow, status: "conflict", reason: "Docs binding is not available for migration" });
+        continue;
+      }
+      if (previewRow.conflicts.length > 0) {
+        resultRows.push({ ...previewRow, status: "conflict", reason: previewRow.conflicts.join("; ") });
+        continue;
+      }
+
+      try {
+        const currentRemoteFile = await this.gitlabService.getRepositoryTextFileForDocsSync(projectId, user, binding.repositoryId, binding.docsPath);
+        if (!currentRemoteFile) {
+          resultRows.push({ ...previewRow, status: "conflict", reason: "Current Docs file is missing" });
+          continue;
+        }
+        const contentHash = this.hashMarkdownContent(currentRemoteFile.content);
+        const commit = await this.gitlabService.commitRepositoryFileActions(
+          projectId,
+          user,
+          binding.repositoryId,
+          [
+            {
+              action: "create",
+              filePath: previewRow.targetDocsPath,
+              content: currentRemoteFile.content
+            },
+            {
+              action: "delete",
+              filePath: binding.docsPath,
+              lastCommitId: currentRemoteFile.lastCommitId
+            }
+          ],
+          `Move wiki docs file ${binding.docsPath} to ${previewRow.targetDocsPath}`
+        );
+        const movedRemoteFile = await this.gitlabService.getRepositoryTextFileForDocsSync(projectId, user, binding.repositoryId, previewRow.targetDocsPath);
+        const splitPath = this.splitWikiPath(previewRow.targetWikiPath);
+
+        await this.prisma.$transaction(async (tx) => {
+          await tx.wikiPage.update({
+            where: { id: binding.wikiPage.id },
+            data: {
+              slug: splitPath.slug,
+              folderPath: splitPath.folderPath,
+              path: previewRow.targetWikiPath
+            }
+          });
+
+          await tx.wikiDocsBinding.update({
+            where: { id: binding.id },
+            data: {
+              docsPath: previewRow.targetDocsPath,
+              wikiPath: previewRow.targetWikiPath,
+              gitBlobId: movedRemoteFile?.blobId ?? null,
+              gitLastCommitId: commit.id,
+              gitContentHash: contentHash,
+              wikiContentHash: contentHash,
+              status: WIKI_DOCS_BINDING_STATUS_ACTIVE,
+              lastSyncedAt: new Date()
+            }
+          });
+
+          await tx.wikiLink.updateMany({
+            where: {
+              toPageId: binding.wikiPage.id
+            },
+            data: {
+              toPath: previewRow.targetWikiPath
+            }
+          });
+
+          await tx.wikiLink.updateMany({
+            where: {
+              toPath: binding.wikiPath,
+              fromPage: {
+                projectId
+              }
+            },
+            data: {
+              toPath: previewRow.targetWikiPath,
+              toPageId: binding.wikiPage.id
+            }
+          });
+
+          await this.rebuildLinks(tx, {
+            projectId,
+            fromPageId: binding.wikiPage.id,
+            contentMarkdown: currentRemoteFile.content,
+            docsSource: binding.repository.wikiDocsPrefix
+              ? { prefix: binding.repository.wikiDocsPrefix, docsPath: previewRow.targetDocsPath }
+              : undefined
+          });
+
+          await this.hydrateLinksToPage(tx, {
+            projectId,
+            pageId: binding.wikiPage.id,
+            path: previewRow.targetWikiPath
+          });
+
+          await tx.projectRepository.update({
+            where: { id: binding.repositoryId },
+            data: {
+              wikiDocsLastSyncedAt: new Date(),
+              wikiDocsLastSyncError: null
+            }
+          });
+        });
+
+        resultRows.push({ ...previewRow, conflicts: [], status: "migrated", reason: null });
+      } catch (error) {
+        resultRows.push({ ...previewRow, status: "error", reason: (error as Error).message || "Docs structure migration failed" });
+      }
+    }
+
+    return {
+      rows: resultRows,
+      totals: {
+        migrated: resultRows.filter((row) => row.status === "migrated").length,
+        conflicts: resultRows.filter((row) => row.status === "conflict").length,
+        errors: resultRows.filter((row) => row.status === "error").length
+      }
     };
   }
 
@@ -1015,6 +1612,7 @@ export class WikiService {
       repositoryId: repository.id,
       name: repository.name,
       wikiDocsPrefix: repository.wikiDocsPrefix ?? "",
+      structure: this.emptyStructureCounts(),
       created: 0,
       updatedFromGit: 0,
       updatedToGit: 0,
@@ -1148,7 +1746,10 @@ export class WikiService {
   ): WikiDocsSyncUnassignedPage[] {
     const prefixes = new Set(repositories.map((repository) => repository.wikiDocsPrefix).filter(Boolean));
     return pages
-      .filter((page) => !prefixes.has(page.path.split("/")[0] ?? ""))
+      .filter((page) => {
+        const repositoryPrefix = this.extractRepositoryPrefixFromWikiPath(page.path);
+        return !repositoryPrefix || !prefixes.has(repositoryPrefix);
+      })
       .map((page) => ({
         pageId: page.id,
         wikiPath: page.path,
@@ -1156,6 +1757,19 @@ export class WikiService {
         hasDraftChanges: this.hasUnboundPageDraftChanges(page),
         reason: "Wiki page is not under any repository Docs prefix"
       }));
+  }
+
+  private extractRepositoryPrefixFromWikiPath(wikiPath: string): string | null {
+    const segments = wikiPath.split("/").filter(Boolean);
+    if (segments[0] === "research" || segments[0] === "implementation") {
+      return segments[1] ?? null;
+    }
+    return segments[0] ?? null;
+  }
+
+  private extractDocsKindFromWikiPath(wikiPath: string): WikiDocsStructureKind {
+    const first = wikiPath.split("/").filter(Boolean)[0];
+    return first === "research" || first === "implementation" ? first : "legacy";
   }
 
   private groupUnboundWikiPagesByRepository(params: {
@@ -1179,7 +1793,7 @@ export class WikiService {
 
     for (const page of params.pages) {
       pagesByWikiPath.set(page.path, page);
-      const prefix = page.path.split("/")[0] ?? "";
+      const prefix = this.extractRepositoryPrefixFromWikiPath(page.path) ?? "";
       const repository = repositoriesByPrefix.get(prefix);
       if (!repository) {
         unassigned.push({
@@ -1344,6 +1958,7 @@ export class WikiService {
     oldWikiPath: string;
     newWikiPath: string;
     docsPath: string;
+    docsKind?: WikiDocsKind;
     status: WikiDocsAssignPageResult["status"];
     reason: string | null;
   }): WikiDocsAssignPageResult {
@@ -1355,6 +1970,7 @@ export class WikiService {
       repositoryId: params.repository.id,
       repositoryName: params.repository.name,
       docsPath: params.docsPath,
+      docsKind: params.docsKind ?? WIKI_DOCS_DEFAULT_KIND,
       status: params.status,
       reason: params.reason
     };
@@ -1542,6 +2158,7 @@ export class WikiService {
 
       let slug: string;
       let relativeFolderPath: string;
+      const docsKind = this.normalizeDocsKind(rawAssignment.docsKind);
       try {
         slug = this.normalizeSlug(rawAssignment.slug);
         relativeFolderPath = this.normalizeFolderPath(rawAssignment.folderPath);
@@ -1553,6 +2170,7 @@ export class WikiService {
             oldWikiPath: page.path,
             newWikiPath: page.path,
             docsPath: "",
+            docsKind,
             status: "conflict",
             reason: (error as Error).message || "Invalid assignment path"
           })
@@ -1560,7 +2178,9 @@ export class WikiService {
         continue;
       }
 
-      const folderPath = relativeFolderPath ? `${repository.wikiDocsPrefix}/${relativeFolderPath}` : repository.wikiDocsPrefix;
+      const folderPath = relativeFolderPath
+        ? `${docsKind}/${repository.wikiDocsPrefix}/${relativeFolderPath}`
+        : `${docsKind}/${repository.wikiDocsPrefix}`;
       const newWikiPath = this.composePath(folderPath, slug);
       const docsPath = this.wikiPathToDocsPath(repository.wikiDocsPrefix, newWikiPath);
       const docsKey = `${repository.id}:${docsPath}`;
@@ -1573,6 +2193,7 @@ export class WikiService {
             oldWikiPath: page.path,
             newWikiPath,
             docsPath,
+            docsKind,
             status: "conflict",
             reason: "Another assignment uses the same destination"
           })
@@ -1591,6 +2212,7 @@ export class WikiService {
             oldWikiPath: page.path,
             newWikiPath,
             docsPath,
+            docsKind,
             status: "conflict",
             reason: "Destination wiki path is already used"
           })
@@ -1623,6 +2245,7 @@ export class WikiService {
             oldWikiPath: page.path,
             newWikiPath,
             docsPath,
+            docsKind,
             status: "conflict",
             reason: "Destination Docs path already has a binding"
           })
@@ -1644,6 +2267,7 @@ export class WikiService {
                 oldWikiPath: page.path,
                 newWikiPath,
                 docsPath,
+                docsKind,
                 status: "conflict",
                 reason: "Destination Docs file exists with different content"
               })
@@ -1660,6 +2284,7 @@ export class WikiService {
           oldWikiPath: page.path,
           newWikiPath,
           docsPath,
+          docsKind,
           contentMarkdown,
           contentHash,
           remoteFile,
@@ -1673,6 +2298,7 @@ export class WikiService {
             oldWikiPath: page.path,
             newWikiPath,
             docsPath,
+            docsKind,
             status: "error",
             reason: (error as Error).message || "Failed to inspect destination Docs file"
           })
@@ -1723,6 +2349,7 @@ export class WikiService {
               oldWikiPath: assignment.oldWikiPath,
               newWikiPath: assignment.newWikiPath,
               docsPath: assignment.docsPath,
+              docsKind: assignment.docsKind,
               status: "error",
               reason: message
             })
@@ -1748,6 +2375,7 @@ export class WikiService {
           oldWikiPath: assignment.oldWikiPath,
           newWikiPath: assignment.newWikiPath,
           docsPath: assignment.docsPath,
+          docsKind: assignment.docsKind,
           status: assignment.mode,
           reason: null
         })
@@ -2392,6 +3020,12 @@ export class WikiService {
         const filesByPath = new Map(files.map((file) => [file.docsPath, file]));
         const seenDocsPaths = new Set<string>();
         const bindings = await this.loadDocsBindings(repository.id);
+        result.structure = this.buildStructureCounts([
+          ...files.map((file) => file.docsPath),
+          ...bindings
+            .filter((binding) => binding.status === WIKI_DOCS_BINDING_STATUS_ACTIVE)
+            .map((binding) => binding.docsPath)
+        ]);
         const bindingsByPath = new Map(bindings.map((binding) => [binding.docsPath, binding]));
         const prefix = repository.wikiDocsPrefix;
         if (!prefix) {
@@ -2559,8 +3193,9 @@ export class WikiService {
         throw new BadRequestException("Repository Docs prefix could not be assigned");
       }
 
+      const docsKind = this.normalizeDocsKind(dto.docsKind);
       const relativeFolderPath = this.normalizeFolderPath(dto.folderPath);
-      folderPath = relativeFolderPath ? `${prefix}/${relativeFolderPath}` : prefix;
+      folderPath = relativeFolderPath ? `${docsKind}/${prefix}/${relativeFolderPath}` : `${docsKind}/${prefix}`;
       slug = this.normalizeSlug(dto.slug);
       pagePath = this.composePath(folderPath, slug);
       docsPath = this.wikiPathToDocsPath(prefix, pagePath);
@@ -2823,6 +3458,7 @@ export class WikiService {
   async listTree(projectId: string, user: AuthenticatedUser): Promise<WikiTreeNode[]> {
     const access = await this.accessService.getProjectAccess(user.userId, user.globalRole, projectId);
     const canReadDraft = access.canWrite;
+    const repositories = await this.ensureAllRepositoryWikiDocsPrefixes(projectId);
 
     const pages = await this.prisma.wikiPage.findMany({
       where: {
@@ -2856,6 +3492,16 @@ export class WikiService {
               }
             }
           }
+        },
+        docsBinding: {
+          select: {
+            docsPath: true,
+            repository: {
+              select: {
+                name: true
+              }
+            }
+          }
         }
       }
     });
@@ -2875,13 +3521,16 @@ export class WikiService {
           id: page.id,
           title: page.title,
           path: page.path,
+          docsPath: page.docsBinding?.docsPath ?? null,
+          repositoryName: page.docsBinding?.repository.name ?? null,
           isUnpublished,
           updatedAt: page.updatedAt,
           hasDraftChanges,
           draftUpdatedAt: canReadDraft ? page.draft?.updatedAt ?? null : null,
           draftUpdatedBy: canReadDraft ? page.draft?.updatedBy ?? null : null
         };
-      })
+      }),
+      repositories
     );
   }
 

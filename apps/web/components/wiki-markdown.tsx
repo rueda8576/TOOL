@@ -104,10 +104,18 @@ function docsPathToWikiPath(docsSource: WikiDocsSourceView, docsPath: string): s
     return docsSource.wikiPrefix;
   }
 
-  const last = segments[segments.length - 1] ?? "index.md";
+  const rawKind = segments[0];
+  const canonicalKind = rawKind === "Research" ? "research" : rawKind === "Implementation" ? "implementation" : null;
+  const contentSegments = canonicalKind ? segments.slice(1) : segments;
+  if (contentSegments.length === 0) {
+    return canonicalKind ? `${canonicalKind}/${docsSource.wikiPrefix}` : docsSource.wikiPrefix;
+  }
+
+  const last = contentSegments[contentSegments.length - 1] ?? "index.md";
   return [
+    ...(canonicalKind ? [canonicalKind] : []),
     docsSource.wikiPrefix,
-    ...segments.slice(0, -1).map((segment) => toWikiPathSegment(segment, "folder")),
+    ...contentSegments.slice(0, -1).map((segment) => toWikiPathSegment(segment, "folder")),
     toWikiPathSegment(stripMarkdownExtension(last))
   ].join("/");
 }

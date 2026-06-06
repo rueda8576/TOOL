@@ -436,16 +436,21 @@ describe("WikiService", () => {
       wikiDocsLastSyncedAt: null,
       wikiDocsLastSyncError: null
     });
-    prisma.wikiDocsBinding.groupBy.mockResolvedValue([
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([
       {
         repositoryId: "repo-1",
+        docsPath: "Docs/Research/Intro.md",
         status: "active",
-        _count: { _all: 2 }
       },
       {
         repositoryId: "repo-1",
+        docsPath: "Docs/Implementation/Architecture.md",
+        status: "active",
+      },
+      {
+        repositoryId: "repo-1",
+        docsPath: "Docs/old.md",
         status: "deleted",
-        _count: { _all: 1 }
       }
     ]);
 
@@ -470,6 +475,12 @@ describe("WikiService", () => {
         bindings: {
           active: 2,
           deleted: 1
+        },
+        structure: {
+          research: 1,
+          implementation: 1,
+          legacy: 0,
+          migrationAvailable: false
         }
       })
     );
@@ -703,9 +714,9 @@ describe("WikiService", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           title: "My Note",
-          folderPath: "research-repo/research",
+          folderPath: "research/research-repo",
           slug: "my-note",
-          path: "research-repo/research/my-note"
+          path: "research/research-repo/my-note"
         })
       })
     );
@@ -1357,18 +1368,18 @@ describe("WikiService", () => {
       [
         {
           action: "create",
-          filePath: "Docs/roadmap.md",
+          filePath: "Docs/Research/roadmap.md",
           content: "# Roadmap"
         }
       ],
-      "Assign wiki page backend/roadmap to Docs"
+      "Assign wiki page research/backend/roadmap to Docs"
     );
     expect(tx.wikiPage.update).toHaveBeenCalledWith({
       where: { id: "page-1" },
       data: {
         slug: "roadmap",
-        folderPath: "backend",
-        path: "backend/roadmap"
+        folderPath: "research/backend",
+        path: "research/backend/roadmap"
       }
     });
     expect(tx.wikiDocsBinding.create).toHaveBeenCalledWith(
@@ -1376,8 +1387,8 @@ describe("WikiService", () => {
         data: expect.objectContaining({
           repositoryId: "repo-1",
           wikiPageId: "page-1",
-          docsPath: "Docs/roadmap.md",
-          wikiPath: "backend/roadmap",
+          docsPath: "Docs/Research/roadmap.md",
+          wikiPath: "research/backend/roadmap",
           gitLastCommitId: "commit-1",
           wikiRevisionId: "revision-1"
         })
@@ -1386,7 +1397,7 @@ describe("WikiService", () => {
     expect(tx.wikiLink.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { toPageId: "page-1" },
-        data: { toPath: "backend/roadmap" }
+        data: { toPath: "research/backend/roadmap" }
       })
     );
     expect(tx.wikiLink.updateMany).toHaveBeenCalledWith(
@@ -1398,7 +1409,7 @@ describe("WikiService", () => {
           }
         }),
         data: {
-          toPath: "backend/roadmap",
+          toPath: "research/backend/roadmap",
           toPageId: "page-1"
         }
       })
@@ -1642,6 +1653,357 @@ describe("WikiService", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it("previews legacy Docs structure migration into Research by default", async () => {
+    const { service, prisma, accessService, gitlabService } = makeService();
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([
+      {
+        id: "binding-1",
+        projectId: "project-1",
+        repositoryId: "repo-1",
+        wikiPageId: "page-1",
+        docsPath: "Docs/Guide.md",
+        wikiPath: "backend/guide",
+        gitBlobId: "blob-old",
+        gitLastCommitId: "commit-old",
+        gitContentHash: "hash-old",
+        wikiRevisionId: "revision-1",
+        wikiContentHash: "hash-old",
+        status: "active",
+        lastSyncedAt: null,
+        repository: {
+          id: "repo-1",
+          projectId: "project-1",
+          name: "Backend",
+          pathWithNamespace: "atlasium/backend",
+          defaultBranch: "main",
+          wikiDocsPrefix: "backend",
+          wikiDocsLastSyncedAt: null,
+          wikiDocsLastSyncError: null
+        },
+        wikiPage: {
+          id: "page-1",
+          projectId: "project-1",
+          title: "Guide",
+          path: "backend/guide",
+          slug: "guide",
+          folderPath: "backend",
+          deletedAt: null,
+          currentRevisionId: "revision-1",
+          currentRevision: {
+            id: "revision-1",
+            revisionNumber: 1,
+            contentMarkdown: "# Guide"
+          },
+          draft: null
+        }
+      }
+    ]);
+    prisma.wikiPage.findFirst.mockResolvedValue(null);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    gitlabService.getRepositoryTextFileForDocsSync
+      .mockResolvedValueOnce({
+        docsPath: "Docs/Guide.md",
+        relativePath: "Guide.md",
+        fileName: "Guide.md",
+        ref: "main",
+        blobId: "blob-old",
+        lastCommitId: "commit-old",
+        contentSha256: null,
+        content: "# Guide"
+      })
+      .mockResolvedValueOnce(null);
+
+    const preview = await service.getDocsStructureMigrationPreview("project-1", {
+      userId: "reader-1",
+      email: "reader@example.com",
+      globalRole: "reader"
+    });
+
+    expect(accessService.ensureProjectReadable).toHaveBeenCalledWith("reader-1", "reader", "project-1");
+    expect(preview.totals).toEqual({
+      legacy: 1,
+      ready: 1,
+      conflicts: 0
+    });
+    expect(preview.rows[0]).toEqual(
+      expect.objectContaining({
+        bindingId: "binding-1",
+        currentWikiPath: "backend/guide",
+        currentDocsPath: "Docs/Guide.md",
+        targetKind: "research",
+        targetWikiPath: "research/backend/guide",
+        targetDocsPath: "Docs/Research/Guide.md",
+        hasDraftChanges: false,
+        conflicts: []
+      })
+    );
+  });
+
+  it("reports structure migration conflicts before moving legacy Docs files", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([
+      {
+        id: "binding-1",
+        projectId: "project-1",
+        repositoryId: "repo-1",
+        wikiPageId: "page-1",
+        docsPath: "Docs/Guide.md",
+        wikiPath: "backend/guide",
+        gitBlobId: "blob-old",
+        gitLastCommitId: "commit-old",
+        gitContentHash: "hash-old",
+        wikiRevisionId: "revision-1",
+        wikiContentHash: "hash-old",
+        status: "active",
+        lastSyncedAt: null,
+        repository: {
+          id: "repo-1",
+          projectId: "project-1",
+          name: "Backend",
+          pathWithNamespace: "atlasium/backend",
+          defaultBranch: "main",
+          wikiDocsPrefix: "backend",
+          wikiDocsLastSyncedAt: null,
+          wikiDocsLastSyncError: null
+        },
+        wikiPage: {
+          id: "page-1",
+          projectId: "project-1",
+          title: "Guide",
+          path: "backend/guide",
+          slug: "guide",
+          folderPath: "backend",
+          deletedAt: null,
+          currentRevisionId: "revision-1",
+          currentRevision: {
+            id: "revision-1",
+            revisionNumber: 1,
+            contentMarkdown: "# Guide"
+          },
+          draft: {
+            title: "Guide",
+            contentMarkdown: "# Draft guide"
+          }
+        }
+      }
+    ]);
+    prisma.wikiPage.findFirst.mockResolvedValue({ id: "page-existing" });
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue({ id: "binding-existing" });
+    gitlabService.getRepositoryTextFileForDocsSync
+      .mockResolvedValueOnce({
+        docsPath: "Docs/Guide.md",
+        relativePath: "Guide.md",
+        fileName: "Guide.md",
+        ref: "main",
+        blobId: "blob-old",
+        lastCommitId: "commit-old",
+        contentSha256: null,
+        content: "# Guide"
+      })
+      .mockResolvedValueOnce({
+        docsPath: "Docs/Research/Guide.md",
+        relativePath: "Research/Guide.md",
+        fileName: "Guide.md",
+        ref: "main",
+        blobId: "blob-target",
+        lastCommitId: "commit-target",
+        contentSha256: null,
+        content: "# Existing"
+      });
+
+    const preview = await service.getDocsStructureMigrationPreview("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(preview.totals).toEqual({
+      legacy: 1,
+      ready: 0,
+      conflicts: 1
+    });
+    expect(preview.rows[0]?.conflicts).toEqual([
+      "Wiki page has unpublished draft changes",
+      "Destination wiki path is already used",
+      "Destination Docs binding already exists",
+      "Destination Docs file already exists"
+    ]);
+    expect(gitlabService.commitRepositoryFileActions).not.toHaveBeenCalled();
+  });
+
+  it("applies selected Docs structure migration to Implementation and rewrites wiki bindings", async () => {
+    const { service, prisma, gitlabService } = makeService();
+    const binding = {
+      id: "binding-1",
+      projectId: "project-1",
+      repositoryId: "repo-1",
+      wikiPageId: "page-1",
+      docsPath: "Docs/Guide.md",
+      wikiPath: "backend/guide",
+      gitBlobId: "blob-old",
+      gitLastCommitId: "commit-old",
+      gitContentHash: "hash-old",
+      wikiRevisionId: "revision-1",
+      wikiContentHash: "hash-old",
+      status: "active",
+      lastSyncedAt: null,
+      repository: {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Backend",
+        pathWithNamespace: "atlasium/backend",
+        defaultBranch: "main",
+        wikiDocsPrefix: "backend",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      },
+      wikiPage: {
+        id: "page-1",
+        projectId: "project-1",
+        title: "Guide",
+        path: "backend/guide",
+        slug: "guide",
+        folderPath: "backend",
+        deletedAt: null,
+        currentRevisionId: "revision-1",
+        currentRevision: {
+          id: "revision-1",
+          revisionNumber: 1,
+          contentMarkdown: "# Guide"
+        },
+        draft: null
+      }
+    };
+    const tx: any = {
+      wikiPage: {
+        update: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([])
+      },
+      wikiDocsBinding: {
+        update: jest.fn()
+      },
+      wikiLink: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+        updateMany: jest.fn()
+      },
+      projectRepository: {
+        update: jest.fn()
+      }
+    };
+    prisma.wikiDocsBinding.findMany.mockResolvedValue([binding]);
+    prisma.wikiPage.findFirst.mockResolvedValue(null);
+    prisma.wikiDocsBinding.findFirst.mockResolvedValue(null);
+    prisma.$transaction.mockImplementation(async (handler: (client: any) => Promise<any>) => handler(tx));
+    gitlabService.getRepositoryTextFileForDocsSync
+      .mockResolvedValueOnce({
+        docsPath: "Docs/Guide.md",
+        relativePath: "Guide.md",
+        fileName: "Guide.md",
+        ref: "main",
+        blobId: "blob-old",
+        lastCommitId: "commit-old",
+        contentSha256: null,
+        content: "# Guide\n\nSee [Architecture](Architecture.md)."
+      })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        docsPath: "Docs/Guide.md",
+        relativePath: "Guide.md",
+        fileName: "Guide.md",
+        ref: "main",
+        blobId: "blob-old",
+        lastCommitId: "commit-old",
+        contentSha256: null,
+        content: "# Guide\n\nSee [Architecture](Architecture.md)."
+      })
+      .mockResolvedValueOnce({
+        docsPath: "Docs/Implementation/Guide.md",
+        relativePath: "Implementation/Guide.md",
+        fileName: "Guide.md",
+        ref: "main",
+        blobId: "blob-new",
+        lastCommitId: "commit-new",
+        contentSha256: null,
+        content: "# Guide\n\nSee [Architecture](Architecture.md)."
+      });
+    gitlabService.commitRepositoryFileActions.mockResolvedValue({
+      id: "commit-new"
+    });
+
+    const result = await service.applyDocsStructureMigration(
+      "project-1",
+      {
+        operations: [
+          {
+            bindingId: "binding-1",
+            targetKind: "implementation"
+          }
+        ]
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(result.totals).toEqual({
+      migrated: 1,
+      conflicts: 0,
+      errors: 0
+    });
+    expect(gitlabService.commitRepositoryFileActions).toHaveBeenCalledWith(
+      "project-1",
+      expect.any(Object),
+      "repo-1",
+      [
+        {
+          action: "create",
+          filePath: "Docs/Implementation/Guide.md",
+          content: "# Guide\n\nSee [Architecture](Architecture.md)."
+        },
+        {
+          action: "delete",
+          filePath: "Docs/Guide.md",
+          lastCommitId: "commit-old"
+        }
+      ],
+      "Move wiki docs file Docs/Guide.md to Docs/Implementation/Guide.md"
+    );
+    expect(tx.wikiPage.update).toHaveBeenCalledWith({
+      where: { id: "page-1" },
+      data: {
+        slug: "guide",
+        folderPath: "implementation/backend",
+        path: "implementation/backend/guide"
+      }
+    });
+    expect(tx.wikiDocsBinding.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "binding-1" },
+        data: expect.objectContaining({
+          docsPath: "Docs/Implementation/Guide.md",
+          wikiPath: "implementation/backend/guide",
+          gitBlobId: "blob-new",
+          gitLastCommitId: "commit-new",
+          status: "active"
+        })
+      })
+    );
+    expect(tx.wikiLink.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            fromPageId: "page-1",
+            toPath: "implementation/backend/architecture"
+          })
+        ],
+        skipDuplicates: true
+      })
+    );
+  });
+
   it("builds tree with draft markers for editor users", async () => {
     const { service, prisma, accessService } = makeService();
     prisma.wikiPage.findMany.mockResolvedValue([
@@ -1701,6 +2063,118 @@ describe("WikiService", () => {
         ]
       }
     ]);
+  });
+
+  it("builds Docs taxonomy roots with repository labels and overview pages first", async () => {
+    const { service, prisma } = makeService();
+    prisma.projectRepository.findMany.mockResolvedValue([
+      {
+        id: "repo-1",
+        projectId: "project-1",
+        name: "Backend Repository",
+        pathWithNamespace: "atlasium/backend",
+        defaultBranch: "main",
+        wikiDocsPrefix: "backend",
+        wikiDocsLastSyncedAt: null,
+        wikiDocsLastSyncError: null
+      }
+    ]);
+    prisma.wikiPage.findMany.mockResolvedValue([
+      {
+        id: "page-methods",
+        title: "Methods",
+        path: "research/backend/methods",
+        updatedAt: new Date("2026-03-03T10:00:00.000Z"),
+        currentRevision: {
+          contentMarkdown: "# Methods"
+        },
+        draft: null,
+        docsBinding: {
+          docsPath: "Docs/Research/Methods.md",
+          repository: {
+            name: "Backend Repository"
+          }
+        }
+      },
+      {
+        id: "page-overview",
+        title: "Research Overview",
+        path: "research/backend/readme",
+        updatedAt: new Date("2026-03-03T10:00:00.000Z"),
+        currentRevision: {
+          contentMarkdown: "# Research Overview"
+        },
+        draft: null,
+        docsBinding: {
+          docsPath: "Docs/Research/README.md",
+          repository: {
+            name: "Backend Repository"
+          }
+        }
+      },
+      {
+        id: "page-architecture",
+        title: "Architecture",
+        path: "implementation/backend/architecture",
+        updatedAt: new Date("2026-03-03T10:00:00.000Z"),
+        currentRevision: {
+          contentMarkdown: "# Architecture"
+        },
+        draft: null,
+        docsBinding: {
+          docsPath: "Docs/Implementation/Architecture.md",
+          repository: {
+            name: "Backend Repository"
+          }
+        }
+      }
+    ]);
+
+    const tree = await service.listTree("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+
+    expect(tree[0]).toEqual(
+      expect.objectContaining({
+        type: "folder",
+        name: "research",
+        path: "research",
+        displayName: "Research",
+        docsKind: "research"
+      })
+    );
+    expect(tree[1]).toEqual(
+      expect.objectContaining({
+        type: "folder",
+        name: "implementation",
+        path: "implementation",
+        displayName: "Implementation",
+        docsKind: "implementation"
+      })
+    );
+    expect(tree[0]?.children[0]).toEqual(
+      expect.objectContaining({
+        type: "folder",
+        name: "backend",
+        path: "research/backend",
+        displayName: "Backend Repository",
+        docsKind: "research"
+      })
+    );
+    expect(tree[0]?.children[0]?.children.map((node) => node.path)).toEqual([
+      "research/backend/readme",
+      "research/backend/methods"
+    ]);
+    expect(tree[0]?.children[0]?.children[0]).toEqual(
+      expect.objectContaining({
+        title: "Research Overview",
+        isDocsOverview: true,
+        docsKind: "research",
+        repositoryName: "Backend Repository"
+      })
+    );
   });
 
   it("hides unpublished draft-only pages from reader trees", async () => {

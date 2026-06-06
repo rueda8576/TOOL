@@ -25,6 +25,19 @@ import { LinkProjectRepositoryDto } from "./dto/link-project-repository.dto";
 
 const GITLAB_ARCHIVE_FALLBACK_MAX_FILES = 2000;
 const GITLAB_ARCHIVE_FALLBACK_MAX_BYTES = 50 * 1024 * 1024;
+const MANAGED_REPOSITORY_AGENTS_MD = `# Atlasium Repository Documentation
+
+This repository belongs to an Atlasium project archive.
+
+## Repo Docs
+
+- Use the repo-local \`Docs/\` folder for Markdown documentation that should sync into the Atlasium Wiki.
+- \`Docs/Research/\` is for academic, theoretical, methodological, scientific, and technical reference knowledge.
+- \`Docs/Implementation/\` is for code architecture, implementation decisions, runtime behavior, integration notes, deployment, and engineering traceability.
+- Repo \`Docs/\` is not the Atlasium Documents module; it is the Git-backed Wiki sync source.
+- Prefer clear Markdown headings, stable filenames, relative links, citations or references when relevant, and concise operational language.
+- Use \`README.md\` or \`index.md\` inside a Docs branch only when the page is the branch overview.
+`;
 
 type GitlabOAuthTokenPayload = {
   access_token: string;
@@ -604,6 +617,38 @@ export class GitlabService {
     return this.getRepositoryStatus(projectId, user, repository.id);
   }
 
+  private async bootstrapManagedRepositoryDocs(accessToken: string, remoteProject: GitlabProject): Promise<void> {
+    const branch = remoteProject.default_branch ?? "main";
+    await this.executeGitlabRequest<GitlabCommit>(
+      accessToken,
+      `/projects/${encodeURIComponent(remoteProject.id)}/repository/commits`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          branch,
+          commit_message: "Initialize Atlasium repository documentation",
+          actions: [
+            {
+              action: "create",
+              file_path: "AGENTS.md",
+              content: MANAGED_REPOSITORY_AGENTS_MD
+            },
+            {
+              action: "create",
+              file_path: "Docs/Research/.gitkeep",
+              content: ""
+            },
+            {
+              action: "create",
+              file_path: "Docs/Implementation/.gitkeep",
+              content: ""
+            }
+          ]
+        })
+      }
+    );
+  }
+
   async provisionManagedRemoteRepository(
     projectKey: string,
     repositoryName: string,
@@ -632,6 +677,7 @@ export class GitlabService {
           }
         );
 
+        await this.bootstrapManagedRepositoryDocs(accessToken, remoteProject);
         return this.mapManagedProvision(remoteProject);
       } catch (error) {
         if (error instanceof GitlabApiError && error.status === 400) {

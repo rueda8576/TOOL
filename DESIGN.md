@@ -124,6 +124,18 @@
 - Meetings should support list and calendar modes, structured Markdown sections, modal editing for long-form minutes, and explicit AI automation state/retry.
 - Account/Admin surfaces should be quiet operational panels, not project modules.
 
+## Repo `Docs/` Canon
+
+- Repo `Docs/` means the `Docs/` folder inside a managed GitLab repository. It is not the Atlasium `Documents` module.
+- Synchronized repo documentation uses two canonical branches:
+  - `Docs/Research/` for academic, theoretical, methodological, scientific, and technical reference knowledge.
+  - `Docs/Implementation/` for code architecture, implementation decisions, runtime behavior, integration notes, deployment, and engineering traceability.
+- Wiki sync should expose those branches as first-class hierarchy: `Research` and `Implementation` are the primary categories, and repository identity is secondary inside each category.
+- `README.md` or `index.md` inside either branch is the section overview. It should appear first and read as the branch index/overview rather than an ordinary alphabetic page.
+- Legacy Markdown files directly under `Docs/` remain readable, but they are not the preferred structure. Atlasium should offer an explicit review/migration path instead of silently moving existing knowledge.
+- New managed repositories should bootstrap an empty `Docs/Research/` and `Docs/Implementation/` structure plus root `AGENTS.md` guidance so Codex sessions generate documentation into the right branch by default.
+- Codex-generated repo documentation should prefer concise Markdown pages with clear headings, stable filenames, relative links, citations/references where relevant, and no generated marketing copy.
+
 ## Components And States
 
 - Prefer shared primitives from `apps/web/components/ui.tsx` before adding new ad hoc controls: `Button`, `IconButton`, `Panel`, `ArchiveEntryPanel`, `WorkspaceHeader`, `Alert`, `LoadingState`, `SkeletonBlock`, `EmptyState`, `Badge`, `Tabs`, `Modal`, and `ConfirmDialog`.

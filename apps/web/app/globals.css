@@ -3427,8 +3427,31 @@ body.wiki-layout-dragging * {
   display: block;
 }
 
+.wiki-docs-structure-notice {
+  display: grid;
+  gap: 0.62rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-index);
+  padding: 0.72rem;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}
+
+.wiki-docs-structure-notice strong {
+  color: var(--text-strong);
+}
+
+.wiki-docs-structure-notice .button {
+  width: 100%;
+}
+
 .wiki-docs-assign-modal {
   width: min(980px, 100%);
+}
+
+.wiki-docs-structure-modal {
+  width: min(1040px, 100%);
 }
 
 .wiki-docs-assign-panel {
@@ -3482,6 +3505,16 @@ body.wiki-layout-dragging * {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(140px, 0.8fr);
   gap: 0.62rem;
+}
+
+.wiki-docs-structure-paths {
+  display: grid;
+  gap: 0.24rem;
+  min-width: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
 }
 
 .wiki-docs-assign-preview {

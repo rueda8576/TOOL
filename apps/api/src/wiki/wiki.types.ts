@@ -4,12 +4,19 @@ export type WikiUserSummary = {
   email: string;
 };
 
+export type WikiDocsKind = "research" | "implementation";
+export type WikiDocsStructureKind = WikiDocsKind | "legacy";
+
 export type WikiTreeNode = {
   type: "folder" | "page";
   name: string;
+  displayName?: string;
   path: string;
   pageId?: string;
   title?: string;
+  isDocsOverview?: boolean;
+  docsKind?: WikiDocsStructureKind;
+  repositoryName?: string | null;
   isUnpublished?: boolean;
   hasDraftChanges?: boolean;
   draftUpdatedAt?: string | null;
@@ -90,6 +97,15 @@ export type WikiDocsSourceView = {
   docsPath: string;
   docsRoot: "Docs";
   wikiPrefix: string;
+  docsKind: WikiDocsStructureKind;
+  isOverview: boolean;
+};
+
+export type WikiDocsStructureCounts = {
+  research: number;
+  implementation: number;
+  legacy: number;
+  migrationAvailable: boolean;
 };
 
 export type WikiDocsSyncRepositoryStatus = {
@@ -105,6 +121,7 @@ export type WikiDocsSyncRepositoryStatus = {
     active: number;
     deleted: number;
   };
+  structure: WikiDocsStructureCounts;
 };
 
 export type WikiDocsSyncStatus = {
@@ -135,6 +152,7 @@ export type WikiDocsAssignPageResult = {
   repositoryId: string;
   repositoryName: string;
   docsPath: string;
+  docsKind: WikiDocsKind;
   status: "exportedToGit" | "linked" | "conflict" | "error";
   reason: string | null;
 };
@@ -154,6 +172,7 @@ export type WikiDocsSyncRepositoryResult = {
   repositoryId: string;
   name: string;
   wikiDocsPrefix: string;
+  structure: WikiDocsStructureCounts;
   created: number;
   updatedFromGit: number;
   updatedToGit: number;
@@ -182,4 +201,42 @@ export type WikiDocsSyncResult = {
     errors: number;
   };
   unassigned: WikiDocsSyncUnassignedPage[];
+};
+
+export type WikiDocsStructureMigrationPreviewRow = {
+  bindingId: string;
+  pageId: string;
+  title: string;
+  repositoryId: string;
+  repositoryName: string;
+  currentWikiPath: string;
+  currentDocsPath: string;
+  targetKind: WikiDocsKind;
+  targetWikiPath: string;
+  targetDocsPath: string;
+  hasDraftChanges: boolean;
+  conflicts: string[];
+};
+
+export type WikiDocsStructureMigrationPreview = {
+  rows: WikiDocsStructureMigrationPreviewRow[];
+  totals: {
+    legacy: number;
+    ready: number;
+    conflicts: number;
+  };
+};
+
+export type WikiDocsStructureMigrationResultRow = WikiDocsStructureMigrationPreviewRow & {
+  status: "migrated" | "conflict" | "error";
+  reason: string | null;
+};
+
+export type WikiDocsStructureMigrationResult = {
+  rows: WikiDocsStructureMigrationResultRow[];
+  totals: {
+    migrated: number;
+    conflicts: number;
+    errors: number;
+  };
 };

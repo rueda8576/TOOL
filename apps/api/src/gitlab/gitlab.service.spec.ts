@@ -470,6 +470,79 @@ describe("GitlabService", () => {
     );
   });
 
+  it("bootstraps managed repositories with Atlasium Docs taxonomy files", async () => {
+    const service = makeService();
+    jest.spyOn(service as any, "ensureManagedGroup").mockResolvedValue({ id: 3 });
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse(201, {
+          id: 456,
+          name: "Navigation",
+          description: "Navigation repository",
+          path_with_namespace: "atlasium/nav",
+          web_url: "https://git.atlasium.info/atlasium/nav",
+          default_branch: "main",
+          visibility: "private",
+          last_activity_at: "2026-04-06T10:00:00.000Z"
+        }) as Response
+      )
+      .mockResolvedValueOnce(jsonResponse(201, { id: "commit-bootstrap" }) as Response);
+
+    await expect(
+      service.provisionManagedRemoteRepository("NAV", "Navigation", {
+        description: "Navigation repository"
+      })
+    ).resolves.toEqual(
+      expect.objectContaining({
+        gitlabProjectId: "456",
+        pathWithNamespace: "atlasium/nav"
+      })
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://git.atlasium.info/api/v4/projects");
+    const createBody = JSON.parse(fetchSpy.mock.calls[0]?.[1]?.body as string);
+    expect(createBody).toEqual(
+      expect.objectContaining({
+        namespace_id: 3,
+        name: "Navigation",
+        path: "nav",
+        visibility: "private",
+        initialize_with_readme: true,
+        default_branch: "main"
+      })
+    );
+
+    expect(fetchSpy.mock.calls[1]?.[0]).toBe("https://git.atlasium.info/api/v4/projects/456/repository/commits");
+    const bootstrapBody = JSON.parse(fetchSpy.mock.calls[1]?.[1]?.body as string);
+    expect(bootstrapBody).toEqual(
+      expect.objectContaining({
+        branch: "main",
+        commit_message: "Initialize Atlasium repository documentation"
+      })
+    );
+    expect(bootstrapBody.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "create",
+          file_path: "AGENTS.md",
+          content: expect.stringContaining("Docs/Research/")
+        }),
+        {
+          action: "create",
+          file_path: "Docs/Research/.gitkeep",
+          content: ""
+        },
+        {
+          action: "create",
+          file_path: "Docs/Implementation/.gitkeep",
+          content: ""
+        }
+      ])
+    );
+    expect(bootstrapBody.actions[0].content).toContain("Repo `Docs/` is not the Atlasium Documents module");
+  });
+
   it("allows project writers to create an additional managed repository", async () => {
     const { service, prisma, accessService } = makeServiceWithDeps();
     prisma.project.findFirst.mockResolvedValue({

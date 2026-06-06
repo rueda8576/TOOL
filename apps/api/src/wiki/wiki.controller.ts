@@ -18,10 +18,13 @@ import { PublishWikiPageDto } from "./dto/publish-wiki-page.dto";
 import { SaveWikiDraftDto } from "./dto/save-wiki-draft.dto";
 import { SearchWikiPagesQueryDto } from "./dto/search-wiki-pages-query.dto";
 import { UpdateWikiPageDto } from "./dto/update-wiki-page.dto";
+import { WikiDocsStructureMigrationDto } from "./dto/wiki-docs-structure-migration.dto";
 import { WikiService } from "./wiki.service";
 import {
   WikiBacklinkView,
   WikiDocsAssignResult,
+  WikiDocsStructureMigrationPreview,
+  WikiDocsStructureMigrationResult,
   WikiDocsSyncResult,
   WikiDocsSyncStatus,
   WikiPageDetail,
@@ -77,6 +80,23 @@ export class WikiController {
     @CurrentUser() user: AuthenticatedUser
   ): Promise<WikiDocsSyncResult> {
     return this.wikiService.syncDocs(projectId, user);
+  }
+
+  @Get("projects/:projectId/wiki-pages/docs-sync/structure-preview")
+  getDocsStructureMigrationPreview(
+    @Param("projectId") projectId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WikiDocsStructureMigrationPreview> {
+    return this.wikiService.getDocsStructureMigrationPreview(projectId, user);
+  }
+
+  @Post("projects/:projectId/wiki-pages/docs-sync/structure-migration")
+  applyDocsStructureMigration(
+    @Param("projectId") projectId: string,
+    @Body() dto: WikiDocsStructureMigrationDto,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<WikiDocsStructureMigrationResult> {
+    return this.wikiService.applyDocsStructureMigration(projectId, dto, user);
   }
 
   @Post("projects/:projectId/wiki-pages/docs-sync/assign")

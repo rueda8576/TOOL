@@ -1,5 +1,24 @@
 # Implementation TODO (v1 bootstrap)
 
+## Repo Docs Taxonomy, Wiki Sync Hierarchy, And Codex Bootstrap (2026-06-06)
+- [x] Register the approved implementation plan before edits.
+- [x] Update `DESIGN.md` with repo `Docs/` taxonomy, section overview, and Codex-generation rules.
+- [x] Update managed repository bootstrap with root `AGENTS.md` and tracked `Docs/Research` / `Docs/Implementation` folders.
+- [x] Extend Wiki Docs sync mapping, status metadata, tree hierarchy, and assisted structure migration endpoints.
+- [x] Update Wiki frontend types/helpers and sidebar UI for canonical structure review and migration.
+- [x] Add/adjust API unit, HTTP, and frontend checks for taxonomy, migration, and bootstrap behavior.
+- [x] Run build/type/static/coverage verification, document local limitations, and add implementation review.
+
+### Review
+- Added the repo `Docs/` canon to `DESIGN.md`: repo-local `Docs/` is separate from the Atlasium `Documents` module, canonical branches are `Docs/Research/` and `Docs/Implementation/`, README/index pages are section overviews, and Codex-generated repo documentation should follow stable Markdown conventions.
+- Updated managed GitLab repository provisioning so new repos get a root `AGENTS.md` plus tracked `Docs/Research/.gitkeep` and `Docs/Implementation/.gitkeep` in an initialization commit.
+- Extended Wiki Docs sync with canonical path mapping, structure counts, legacy detection, `docsKind` creation/assignment fields, Research/Implementation-first tree metadata, repository display labels, and overview page markers.
+- Added assisted legacy structure migration endpoints and UI: writable users can review legacy `Docs/*` bindings, choose Research or Implementation per row, preview/recheck conflicts, and apply create+delete Git moves plus Wiki path/binding/link updates.
+- Refined Wiki sidebar/UI copy and CSS for the structure notice, migration modal, Docs branch selectors, and overview badges while keeping existing sync, import, assignment, Markdown/PDF/Monaco, routes, auth, and database schema stable.
+- Verification passed: `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand --forceExit src/wiki/wiki.service.spec.ts`; `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand --forceExit src/gitlab/gitlab.service.spec.ts`; `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand --forceExit test/http/wiki.controller.http.spec.ts`; `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand --forceExit test/http/gitlab.controller.http.spec.ts`; full API unit suite with 22 suites and 316 tests; `pnpm --filter @doctoral/api build`; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; static `rg` audits for obsolete branding, old amber accent patterns, decorative terms, and new Docs taxonomy strings; `git diff --check`.
+- Coverage gate attempted with `pnpm --filter @doctoral/api test:coverage:gate`: unit coverage passed with 22 suites and 316 tests, HTTP coverage passed with 9 suites and 82 tests, then integration coverage failed because no PostgreSQL server was reachable at `localhost:5432`.
+- Web runtime smoke passed on `http://localhost:3012/login` with HTTP 200 and Edge headless screenshot output in `C:\Users\Luis\AppData\Local\Temp\atlasium-docs-taxonomy-login.png`; authenticated Wiki visual/interaction QA remains limited locally because no API database/session is available.
+
 ## Project Metadata Editing From Overview (2026-06-06)
 - [x] Register the approved implementation plan before edits.
 - [x] Add writable project metadata update API with validation, normalization, audit logging, and tests.

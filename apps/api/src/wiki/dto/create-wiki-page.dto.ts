@@ -1,4 +1,4 @@
-import { IsOptional, IsString, Matches, MaxLength, MinLength } from "class-validator";
+import { IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from "class-validator";
 
 export class CreateWikiPageDto {
   @IsString()
@@ -25,6 +25,11 @@ export class CreateWikiPageDto {
   @IsString()
   @MaxLength(100)
   docsRepositoryId?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(["research", "implementation"])
+  docsKind?: "research" | "implementation";
 
   @IsString()
   contentMarkdown!: string;

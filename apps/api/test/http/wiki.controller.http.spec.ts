@@ -18,6 +18,8 @@ describe("WikiController HTTP", () => {
       importPages: jest.fn(),
       getDocsSyncStatus: jest.fn(),
       syncDocs: jest.fn(),
+      getDocsStructureMigrationPreview: jest.fn(),
+      applyDocsStructureMigration: jest.fn(),
       assignDocsPages: jest.fn(),
       listTree: jest.fn(),
       getByPath: jest.fn(),
@@ -202,6 +204,12 @@ describe("WikiController HTTP", () => {
           bindings: {
             active: 1,
             deleted: 0
+          },
+          structure: {
+            research: 1,
+            implementation: 0,
+            legacy: 1,
+            migrationAvailable: true
           }
         }
       ],
@@ -268,6 +276,121 @@ describe("WikiController HTTP", () => {
     expect(syncResponse.body.unassigned[0].wikiPath).toBe("roadmap");
   });
 
+  it("binds Docs structure migration preview and apply endpoints", async () => {
+    wikiService.getDocsStructureMigrationPreview.mockResolvedValue({
+      rows: [
+        {
+          bindingId: "binding-1",
+          pageId: "page-1",
+          title: "Guide",
+          repositoryId: "repo-1",
+          repositoryName: "Backend",
+          currentWikiPath: "backend/guide",
+          currentDocsPath: "Docs/Guide.md",
+          targetKind: "research",
+          targetWikiPath: "research/backend/guide",
+          targetDocsPath: "Docs/Research/Guide.md",
+          hasDraftChanges: false,
+          conflicts: []
+        }
+      ],
+      totals: {
+        legacy: 1,
+        ready: 1,
+        conflicts: 0
+      }
+    });
+    wikiService.applyDocsStructureMigration.mockResolvedValue({
+      rows: [
+        {
+          bindingId: "binding-1",
+          pageId: "page-1",
+          title: "Guide",
+          repositoryId: "repo-1",
+          repositoryName: "Backend",
+          currentWikiPath: "backend/guide",
+          currentDocsPath: "Docs/Guide.md",
+          targetKind: "implementation",
+          targetWikiPath: "implementation/backend/guide",
+          targetDocsPath: "Docs/Implementation/Guide.md",
+          hasDraftChanges: false,
+          conflicts: [],
+          status: "migrated",
+          reason: null
+        }
+      ],
+      totals: {
+        migrated: 1,
+        conflicts: 0,
+        errors: 0
+      }
+    });
+
+    const previewResponse = await request(app.getHttpServer())
+      .get("/projects/project-1/wiki-pages/docs-sync/structure-preview")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .expect(200);
+    const applyResponse = await request(app.getHttpServer())
+      .post("/projects/project-1/wiki-pages/docs-sync/structure-migration")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .send({
+        operations: [
+          {
+            bindingId: "binding-1",
+            targetKind: "implementation"
+          }
+        ]
+      })
+      .expect(201);
+
+    expect(wikiService.getDocsStructureMigrationPreview).toHaveBeenCalledWith("project-1", {
+      userId: "editor-1",
+      email: "editor@example.com",
+      globalRole: "editor"
+    });
+    expect(wikiService.applyDocsStructureMigration).toHaveBeenCalledWith(
+      "project-1",
+      {
+        operations: [
+          {
+            bindingId: "binding-1",
+            targetKind: "implementation"
+          }
+        ]
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+    expect(previewResponse.body.rows[0].targetDocsPath).toBe("Docs/Research/Guide.md");
+    expect(applyResponse.body.totals.migrated).toBe(1);
+  });
+
+  it("validates Docs structure migration operations", async () => {
+    await request(app.getHttpServer())
+      .post("/projects/project-1/wiki-pages/docs-sync/structure-migration")
+      .set(authHeaders("editor"))
+      .send({
+        operations: []
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post("/projects/project-1/wiki-pages/docs-sync/structure-migration")
+      .set(authHeaders("editor"))
+      .send({
+        operations: [
+          {
+            bindingId: "binding-1",
+            targetKind: "code"
+          }
+        ]
+      })
+      .expect(400);
+  });
+
   it("binds Docs assignment endpoint with validated body", async () => {
     wikiService.assignDocsPages.mockResolvedValue({
       pages: [
@@ -279,6 +402,7 @@ describe("WikiController HTTP", () => {
           repositoryId: "repo-1",
           repositoryName: "Backend",
           docsPath: "Docs/roadmap.md",
+          docsKind: "research",
           status: "exportedToGit",
           reason: null
         }
@@ -301,7 +425,8 @@ describe("WikiController HTTP", () => {
             pageId: "page-1",
             repositoryId: "repo-1",
             folderPath: "",
-            slug: "roadmap"
+            slug: "roadmap",
+            docsKind: "implementation"
           }
         ]
       })
@@ -315,7 +440,8 @@ describe("WikiController HTTP", () => {
             pageId: "page-1",
             repositoryId: "repo-1",
             folderPath: "",
-            slug: "roadmap"
+            slug: "roadmap",
+            docsKind: "implementation"
           }
         ]
       },

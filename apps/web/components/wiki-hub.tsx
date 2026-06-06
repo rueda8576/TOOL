@@ -21,11 +21,13 @@ import {
 } from "../lib/documents-collaboration";
 import { useUnsavedChangesGuard } from "../lib/use-unsaved-changes-guard";
 import {
+  applyWikiDocsStructureMigration,
   assignWikiDocsPages,
   createWikiPage,
   deleteWikiPage,
   DraftConflictPayload,
   flushWikiRealtimeDraft,
+  getWikiDocsStructureMigrationPreview,
   getWikiDocsSyncStatus,
   ImportWikiPagesResult,
   importWikiPages,
@@ -39,6 +41,9 @@ import {
   syncWikiDocs,
   uploadWikiAsset,
   WikiDocsAssignResult,
+  WikiDocsKind,
+  WikiDocsStructureMigrationPreview,
+  WikiDocsStructureMigrationResult,
   WikiDocsSyncResult,
   WikiDocsSyncStatus,
   WikiDraftConflictError,
@@ -67,6 +72,7 @@ type WikiDocsAssignRow = {
   repositoryId: string;
   folderPath: string;
   slug: string;
+  docsKind: WikiDocsKind;
   selected: boolean;
   hasDraftChanges: boolean;
 };
@@ -87,6 +93,20 @@ const WIKI_SIDEBAR_MAX_PX = 520;
 const WIKI_MAIN_MIN_PX = 520;
 const WIKI_SIDEBAR_AUTO_FALLBACK_PX = 320;
 const WIKI_IMPORT_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".avif"]);
+const DOCS_KIND_LABELS: Record<WikiDocsKind, string> = {
+  research: "Research",
+  implementation: "Implementation"
+};
+const DOCS_KIND_GIT_SEGMENTS: Record<WikiDocsKind, string> = {
+  research: "Research",
+  implementation: "Implementation"
+};
+const STRUCTURE_MIGRATION_BLOCKING_CONFLICTS = new Set([
+  "Repository Docs prefix is missing",
+  "Wiki page has no published revision",
+  "Wiki page has unpublished draft changes",
+  "Current Docs file is missing"
+]);
 
 type TextTransformResult = {
   nextValue: string;
@@ -459,13 +479,40 @@ function buildDocsAssignmentPreview(
   const normalizedFolder = normalizePath(row.folderPath) ?? "";
   const normalizedSlug = slugify(row.slug);
   const relativePath = composeWikiPath(normalizedFolder, normalizedSlug);
-  const wikiPath = composeWikiPath(repository.wikiDocsPrefix, relativePath || normalizedSlug || "page");
-  const docsPath = `Docs/${relativePath || normalizedSlug || "page"}.md`;
+  const wikiPath = composeWikiPath(`${row.docsKind}/${repository.wikiDocsPrefix}`, relativePath || normalizedSlug || "page");
+  const docsPath = `Docs/${DOCS_KIND_GIT_SEGMENTS[row.docsKind]}/${relativePath || normalizedSlug || "page"}.md`;
   return {
     wikiPath,
     docsPath,
     gitPath: `${repository.pathWithNamespace}/${docsPath}`
   };
+}
+
+function buildDocsStructureTarget(
+  row: WikiDocsStructureMigrationPreview["rows"][number],
+  targetKind: WikiDocsKind
+): { targetDocsPath: string; targetWikiPath: string } {
+  const relativeDocsPath = row.currentDocsPath.replace(/^Docs\//, "");
+  const targetDocsPath = `Docs/${DOCS_KIND_GIT_SEGMENTS[targetKind]}/${relativeDocsPath}`;
+  const targetSegments = row.targetWikiPath.split("/").filter(Boolean);
+  const targetWikiPath =
+    targetSegments[0] === "research" || targetSegments[0] === "implementation"
+      ? [targetKind, ...targetSegments.slice(1)].join("/")
+      : `${targetKind}/${row.currentWikiPath}`;
+  return { targetDocsPath, targetWikiPath };
+}
+
+function isStructureMigrationRowSelectable(
+  row: WikiDocsStructureMigrationPreview["rows"][number],
+  targetKind: WikiDocsKind
+): boolean {
+  if (row.conflicts.length === 0) {
+    return true;
+  }
+  if (targetKind === row.targetKind) {
+    return false;
+  }
+  return !row.conflicts.some((conflict) => STRUCTURE_MIGRATION_BLOCKING_CONFLICTS.has(conflict));
 }
 
 function pluralizeCount(count: number, singular: string, plural = `${singular}s`): string {
@@ -849,11 +896,19 @@ export function WikiHub({
   const [assignDocsRows, setAssignDocsRows] = useState<WikiDocsAssignRow[]>([]);
   const [assignDocsResult, setAssignDocsResult] = useState<WikiDocsAssignResult | null>(null);
   const [assigningDocs, setAssigningDocs] = useState(false);
+  const [showStructureMigrationPanel, setShowStructureMigrationPanel] = useState(false);
+  const [docsStructurePreview, setDocsStructurePreview] = useState<WikiDocsStructureMigrationPreview | null>(null);
+  const [docsStructureResult, setDocsStructureResult] = useState<WikiDocsStructureMigrationResult | null>(null);
+  const [loadingStructurePreview, setLoadingStructurePreview] = useState(false);
+  const [applyingStructureMigration, setApplyingStructureMigration] = useState(false);
+  const [structureMigrationTargets, setStructureMigrationTargets] = useState<Record<string, WikiDocsKind>>({});
+  const [structureMigrationSelected, setStructureMigrationSelected] = useState<Set<string>>(new Set());
   const [createTitle, setCreateTitle] = useState("");
   const [createSlug, setCreateSlug] = useState("");
   const [createFolderPath, setCreateFolderPath] = useState("");
   const [createTemplateType, setCreateTemplateType] = useState("");
   const [createDocsRepositoryId, setCreateDocsRepositoryId] = useState("");
+  const [createDocsKind, setCreateDocsKind] = useState<WikiDocsKind>("research");
   const [createSlugEdited, setCreateSlugEdited] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
@@ -919,6 +974,10 @@ export function WikiHub({
     () => new Map((docsSyncStatus?.repositories ?? []).map((repository) => [repository.repositoryId, repository])),
     [docsSyncStatus]
   );
+  const legacyDocsCount = useMemo(
+    () => (docsSyncStatus?.repositories ?? []).reduce((total, repository) => total + repository.structure.legacy, 0),
+    [docsSyncStatus]
+  );
   const unassignedDocsPages = docsSyncStatus?.unassigned ?? docsSyncResult?.unassigned ?? [];
   const assignDocsRowsWithPreview = useMemo(() => {
     const destinationCounts = new Map<string, number>();
@@ -950,6 +1009,19 @@ export function WikiHub({
     });
   }, [assignDocsRows, docsRepositoriesById, existingWikiPaths]);
   const selectedAssignableRows = assignDocsRowsWithPreview.filter((entry) => entry.row.selected && !entry.invalid);
+  const selectedStructureMigrationOperations = useMemo(
+    () =>
+      (docsStructurePreview?.rows ?? [])
+        .filter((row) => {
+          const targetKind = structureMigrationTargets[row.bindingId] ?? row.targetKind;
+          return structureMigrationSelected.has(row.bindingId) && isStructureMigrationRowSelectable(row, targetKind);
+        })
+        .map((row) => ({
+          bindingId: row.bindingId,
+          targetKind: structureMigrationTargets[row.bindingId] ?? row.targetKind
+        })),
+    [docsStructurePreview, structureMigrationSelected, structureMigrationTargets]
+  );
   const visibleCollaborators = useMemo(() => collaborators.slice(0, 6), [collaborators]);
   const hiddenCollaboratorsCount = useMemo(
     () => Math.max(collaborators.length - visibleCollaborators.length, 0),
@@ -1834,6 +1906,7 @@ export function WikiHub({
         folderPath: normalizedFolder || undefined,
         templateType: createTemplateType.trim() || undefined,
         docsRepositoryId: createDocsRepositoryId || undefined,
+        docsKind: createDocsKind,
         contentMarkdown: `# ${trimmedTitle}\n\n`
       });
 
@@ -1842,6 +1915,7 @@ export function WikiHub({
       setCreateSlug("");
       setCreateFolderPath("");
       setCreateTemplateType("");
+      setCreateDocsKind("research");
       setCreateSlugEdited(false);
       setCreateDocsRepositoryId((current) => current || (docsSyncStatus?.repositories[0]?.repositoryId ?? ""));
 
@@ -2068,6 +2142,7 @@ export function WikiHub({
           repositoryId: defaultRepositoryId,
           folderPath: split.folderPath,
           slug: split.slug,
+          docsKind: "research",
           selected: true,
           hasDraftChanges: page.hasDraftChanges
         };
@@ -2077,8 +2152,98 @@ export function WikiHub({
     setShowAssignDocsPanel(true);
   }, [docsSyncStatus, unassignedDocsPages]);
 
+  const openDocsStructureMigrationPanel = useCallback(async (): Promise<void> => {
+    if (!token) {
+      setError("Missing session token. Please sign in again.");
+      return;
+    }
+
+    setShowStructureMigrationPanel(true);
+    setLoadingStructurePreview(true);
+    setDocsStructureResult(null);
+    setError(null);
+    try {
+      const preview = await getWikiDocsStructureMigrationPreview(projectId, token);
+      setDocsStructurePreview(preview);
+      setStructureMigrationTargets(
+        Object.fromEntries(preview.rows.map((row) => [row.bindingId, row.targetKind])) as Record<string, WikiDocsKind>
+      );
+      setStructureMigrationSelected(new Set(preview.rows.filter((row) => row.conflicts.length === 0).map((row) => row.bindingId)));
+    } catch (previewError) {
+      setError((previewError as Error).message);
+    } finally {
+      setLoadingStructurePreview(false);
+    }
+  }, [projectId, token]);
+
+  const updateStructureMigrationTarget = useCallback((bindingId: string, targetKind: WikiDocsKind): void => {
+    setStructureMigrationTargets((current) => ({ ...current, [bindingId]: targetKind }));
+  }, []);
+
+  const updateStructureMigrationSelected = useCallback((bindingId: string, selected: boolean): void => {
+    setStructureMigrationSelected((current) => {
+      const next = new Set(current);
+      if (selected) {
+        next.add(bindingId);
+      } else {
+        next.delete(bindingId);
+      }
+      return next;
+    });
+  }, []);
+
+  const onApplyDocsStructureMigration = useCallback(async (): Promise<void> => {
+    if (!token) {
+      setError("Missing session token. Please sign in again.");
+      return;
+    }
+    if (!canWrite) {
+      setError("You do not have write access to this project.");
+      return;
+    }
+    if (selectedStructureMigrationOperations.length === 0) {
+      setError("Select at least one Docs structure operation.");
+      return;
+    }
+
+    setApplyingStructureMigration(true);
+    setError(null);
+    setSuccess(null);
+    setDocsStructureResult(null);
+    try {
+      const result = await applyWikiDocsStructureMigration(projectId, token, selectedStructureMigrationOperations);
+      setDocsStructureResult(result);
+      await loadTree(token);
+      await loadDocsSyncStatus(token);
+      await refreshSearchResults(token);
+      const selectedResult = selectedPath ? result.rows.find((row) => row.currentWikiPath === selectedPath) : null;
+      if (selectedResult?.status === "migrated") {
+        setSelectedPath(selectedResult.targetWikiPath);
+        router.push(`/projects/${projectId}/wiki/${encodeWikiPath(selectedResult.targetWikiPath)}`);
+        await loadPage(token, selectedResult.targetWikiPath);
+      } else if (selectedPath) {
+        await loadPage(token, selectedPath);
+      }
+    } catch (migrationError) {
+      setError((migrationError as Error).message);
+    } finally {
+      setApplyingStructureMigration(false);
+    }
+  }, [
+    canWrite,
+    loadDocsSyncStatus,
+    loadPage,
+    loadTree,
+    projectId,
+    refreshSearchResults,
+    router,
+    selectedPath,
+    selectedStructureMigrationOperations,
+    token
+  ]);
+
   const updateAssignDocsRow = useCallback(
-    (pageId: string, patch: Partial<Pick<WikiDocsAssignRow, "repositoryId" | "folderPath" | "slug" | "selected">>): void => {
+    (pageId: string, patch: Partial<Pick<WikiDocsAssignRow, "repositoryId" | "folderPath" | "slug" | "docsKind" | "selected">>): void => {
       setAssignDocsRows((current) => current.map((row) => (row.pageId === pageId ? { ...row, ...patch } : row)));
     },
     []
@@ -2111,7 +2276,8 @@ export function WikiHub({
           pageId: entry.row.pageId,
           repositoryId: entry.row.repositoryId,
           folderPath: normalizePath(entry.row.folderPath) ?? undefined,
-          slug: entry.normalizedSlug
+          slug: entry.normalizedSlug,
+          docsKind: entry.row.docsKind
         }))
       );
       setAssignDocsResult(result);
@@ -2647,7 +2813,7 @@ export function WikiHub({
               <span className="wiki-tree-chevron" aria-hidden>
                 {isExpanded ? "▾" : "▸"}
               </span>
-              <span className="wiki-tree-folder-name">{node.name || "root"}</span>
+              <span className="wiki-tree-folder-name">{node.displayName ?? (node.name || "root")}</span>
             </span>
           </button>
           {isExpanded ? <ul className="wiki-tree-list">{node.children.map((child) => renderTreeNode(child, depth + 1))}</ul> : null}
@@ -2669,6 +2835,7 @@ export function WikiHub({
           <span className="wiki-tree-row-content" data-wiki-sidebar-measure>
             <span className="wiki-tree-page-title">{node.title ?? node.name}</span>
           </span>
+          {node.isDocsOverview ? <span className="badge">Overview</span> : null}
           {node.isUnpublished ? <span className="badge">Unpublished</span> : null}
           {!node.isUnpublished && node.hasDraftChanges ? <span className="badge">Draft</span> : null}
         </button>
@@ -2798,6 +2965,18 @@ export function WikiHub({
             </div>
           ) : null}
 
+          {canWrite && legacyDocsCount > 0 ? (
+            <div className="wiki-docs-structure-notice">
+              <div className="stack-xxs">
+                <strong>{legacyDocsCount} legacy Docs page{legacyDocsCount === 1 ? "" : "s"}</strong>
+                <span>Review repo Docs structure for Research / Implementation.</span>
+              </div>
+              <button type="button" className="button button-secondary" onClick={() => void openDocsStructureMigrationPanel()}>
+                Review structure
+              </button>
+            </div>
+          ) : null}
+
           <label className="wiki-search-label">
             Search
             <input
@@ -2867,18 +3046,30 @@ export function WikiHub({
                 <p className="alert alert-info">No Code repositories are available for Docs-backed wiki pages.</p>
               )}
               <label>
-                Folder path in Docs (optional)
+                Docs branch
+                <select
+                  className="input"
+                  value={createDocsKind}
+                  onChange={(event) => setCreateDocsKind(event.target.value as WikiDocsKind)}
+                  disabled={creatingPage}
+                >
+                  <option value="research">Research</option>
+                  <option value="implementation">Implementation</option>
+                </select>
+              </label>
+              <label>
+                Folder path inside branch (optional)
                 <input
                   className="input"
                   value={createFolderPath}
                   maxLength={300}
                   onChange={(event) => setCreateFolderPath(event.target.value)}
-                  placeholder="research/methods"
+                  placeholder={createDocsKind === "research" ? "methods" : "architecture"}
                   disabled={creatingPage}
                 />
                 {selectedCreateDocsRepository ? (
                   <span className="wiki-page-path">
-                    Wiki prefix: /{selectedCreateDocsRepository.wikiDocsPrefix}
+                    Wiki prefix: /{createDocsKind}/{selectedCreateDocsRepository.wikiDocsPrefix}
                   </span>
                 ) : null}
               </label>
@@ -3211,13 +3402,129 @@ export function WikiHub({
           ) : null}
         </section>
       </div>
+      {showStructureMigrationPanel ? (
+        <Modal title="Review repo Docs structure" onClose={() => setShowStructureMigrationPanel(false)} className="wiki-docs-structure-modal">
+          <div className="wiki-docs-assign-panel">
+            <div className="wiki-import-header">
+              <div>
+                <h3 className="section-heading">Review repo Docs structure</h3>
+                <p className="wiki-import-copy">Move legacy repo Docs pages into Research or Implementation before the next sync.</p>
+              </div>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => setShowStructureMigrationPanel(false)}
+                disabled={applyingStructureMigration}
+              >
+                Close
+              </button>
+            </div>
+
+            {loadingStructurePreview ? <LoadingState title="Loading Docs structure" detail="Checking legacy bindings and target paths." /> : null}
+
+            {docsStructureResult ? (
+              <div className={docsStructureResult.totals.conflicts > 0 || docsStructureResult.totals.errors > 0 ? "alert alert-info" : "alert alert-success"}>
+                Migrated {docsStructureResult.totals.migrated} page(s): {docsStructureResult.totals.conflicts} conflict(s), {docsStructureResult.totals.errors} error(s).
+              </div>
+            ) : null}
+
+            {!loadingStructurePreview && docsStructurePreview && docsStructurePreview.rows.length === 0 ? (
+              <p className="alert alert-success">Repo Docs structure is already canonical.</p>
+            ) : null}
+
+            {!loadingStructurePreview && docsStructurePreview && docsStructurePreview.rows.length > 0 ? (
+              <div className="wiki-docs-assign-list">
+                {docsStructurePreview.rows.map((row) => {
+                  const targetKind = structureMigrationTargets[row.bindingId] ?? row.targetKind;
+                  const target = buildDocsStructureTarget(row, targetKind);
+                  const rowResult = docsStructureResult?.rows.find((resultRow) => resultRow.bindingId === row.bindingId) ?? null;
+                  const selectable = isStructureMigrationRowSelectable(row, targetKind) && !applyingStructureMigration;
+                  const needsTargetRecheck = !rowResult && row.conflicts.length > 0 && targetKind !== row.targetKind && selectable;
+                  return (
+                    <div key={row.bindingId} className="wiki-docs-assign-row">
+                      <div className="wiki-docs-assign-row-main">
+                        <label className="wiki-docs-assign-check">
+                          <input
+                            type="checkbox"
+                            checked={structureMigrationSelected.has(row.bindingId)}
+                            disabled={!selectable}
+                            onChange={(event) => updateStructureMigrationSelected(row.bindingId, event.target.checked)}
+                          />
+                          <span>
+                            <strong>{row.title}</strong>
+                            <span className="wiki-page-path">/{row.currentWikiPath}</span>
+                          </span>
+                        </label>
+                        <span className="badge">
+                          {rowResult ? rowResult.status : needsTargetRecheck ? "Recheck" : row.conflicts.length > 0 ? "Conflict" : "Ready"}
+                        </span>
+                      </div>
+
+                      <div className="wiki-docs-assign-grid">
+                        <label>
+                          Target branch
+                          <select
+                            className="input"
+                            value={targetKind}
+                            disabled={applyingStructureMigration}
+                            onChange={(event) => updateStructureMigrationTarget(row.bindingId, event.target.value as WikiDocsKind)}
+                          >
+                            <option value="research">Research</option>
+                            <option value="implementation">Implementation</option>
+                          </select>
+                        </label>
+                        <div className="wiki-docs-structure-paths">
+                          <span>Current: {row.currentDocsPath}</span>
+                          <span>Target: {target.targetDocsPath}</span>
+                        </div>
+                      </div>
+
+                      <div className="wiki-docs-assign-preview">
+                        <span>Wiki: /{target.targetWikiPath}</span>
+                        <span>Branch: {DOCS_KIND_LABELS[targetKind]}</span>
+                      </div>
+
+                      {row.hasDraftChanges ? <p className="wiki-docs-assign-warning">Unpublished draft changes must be resolved before moving.</p> : null}
+                      {needsTargetRecheck ? <p className="wiki-docs-assign-warning">Target will be rechecked before migration.</p> : null}
+                      {row.conflicts.map((conflict) => (
+                        <p key={`${row.bindingId}-${conflict}`} className="wiki-docs-assign-warning">{conflict}</p>
+                      ))}
+                      {rowResult?.reason ? <p className="wiki-docs-assign-warning">{rowResult.reason}</p> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            <div className="wiki-docs-assign-actions">
+              <button
+                type="button"
+                className="button"
+                onClick={() => void onApplyDocsStructureMigration()}
+                disabled={applyingStructureMigration || selectedStructureMigrationOperations.length === 0}
+              >
+                {applyingStructureMigration ? "Migrating..." : "Migrate selected"}
+              </button>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => setShowStructureMigrationPanel(false)}
+                disabled={applyingStructureMigration}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
       {showAssignDocsPanel ? (
         <Modal title="Assign wiki pages to Docs repositories" onClose={() => setShowAssignDocsPanel(false)} className="wiki-docs-assign-modal">
           <div className="wiki-docs-assign-panel">
             <div className="wiki-docs-assign-header">
               <div>
                 <h2 className="section-heading">Assign pages</h2>
-                <p className="wiki-import-copy">Move unassigned wiki pages under a repository prefix and create or link their `Docs` Markdown file.</p>
+                <p className="wiki-import-copy">Assign unbound wiki pages into Research or Implementation and create or link their repo Docs Markdown file.</p>
               </div>
               <button type="button" className="button button-secondary" onClick={() => setShowAssignDocsPanel(false)} disabled={assigningDocs}>
                 Close
@@ -3285,13 +3592,25 @@ export function WikiHub({
                           </select>
                         </label>
                         <label>
-                          Folder path in Docs
+                          Docs branch
+                          <select
+                            className="input"
+                            value={entry.row.docsKind}
+                            disabled={assigningDocs}
+                            onChange={(event) => updateAssignDocsRow(entry.row.pageId, { docsKind: event.target.value as WikiDocsKind })}
+                          >
+                            <option value="research">Research</option>
+                            <option value="implementation">Implementation</option>
+                          </select>
+                        </label>
+                        <label>
+                          Folder path inside branch
                           <input
                             className="input"
                             value={entry.row.folderPath}
                             maxLength={300}
                             disabled={assigningDocs}
-                            placeholder="research/methods"
+                            placeholder={entry.row.docsKind === "research" ? "methods" : "architecture"}
                             onChange={(event) => updateAssignDocsRow(entry.row.pageId, { folderPath: event.target.value })}
                           />
                         </label>
