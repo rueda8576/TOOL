@@ -177,6 +177,63 @@ describe("API integration", () => {
     expect(gitlabService.provisionManagedRemoteRepository).toHaveBeenCalledWith("VISNAV", "Vision Navigation");
     expect(gitlabService.syncProjectRepositoryAccess).toHaveBeenCalledWith(projectId);
 
+    const updateProjectResponse = await request(app.getHttpServer())
+      .patch(`/projects/${projectId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        name: "Vision Navigation Archive",
+        description: ""
+      })
+      .expect(200);
+
+    expect(updateProjectResponse.body).toEqual(
+      expect.objectContaining({
+        id: projectId,
+        key: "VISNAV",
+        name: "Vision Navigation Archive",
+        description: null,
+        updatedAt: expect.any(String)
+      })
+    );
+
+    const overviewResponse = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/overview`)
+      .set("Authorization", `Bearer ${token}`)
+      .expect(200);
+
+    expect(overviewResponse.body.project).toEqual(
+      expect.objectContaining({
+        id: projectId,
+        key: "VISNAV",
+        name: "Vision Navigation Archive",
+        description: null
+      })
+    );
+    expect(overviewResponse.body.activity).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          module: "project",
+          title: "Project details updated"
+        })
+      ])
+    );
+
+    const projectsResponse = await request(app.getHttpServer())
+      .get("/projects")
+      .set("Authorization", `Bearer ${token}`)
+      .expect(200);
+
+    expect(projectsResponse.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: projectId,
+          key: "VISNAV",
+          name: "Vision Navigation Archive",
+          description: null
+        })
+      ])
+    );
+
     const createTaskResponse = await request(app.getHttpServer())
       .post(`/projects/${projectId}/tasks`)
       .set("Authorization", `Bearer ${token}`)

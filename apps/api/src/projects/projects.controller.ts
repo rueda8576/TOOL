@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
 
 import { CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
@@ -7,6 +7,7 @@ import { RolesGuard } from "../common/roles.guard";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { AddProjectMemberDto } from "./dto/add-project-member.dto";
 import { CreateProjectDto } from "./dto/create-project.dto";
+import { UpdateProjectDto } from "./dto/update-project.dto";
 import { ProjectOverview, ProjectsService } from "./projects.service";
 
 @Controller("projects")
@@ -53,6 +54,15 @@ export class ProjectsController {
     @CurrentUser() user: AuthenticatedUser
   ): Promise<ProjectOverview> {
     return this.projectsService.getProjectOverview(projectId, user);
+  }
+
+  @Patch(":projectId")
+  updateProject(
+    @Param("projectId") projectId: string,
+    @Body() dto: UpdateProjectDto,
+    @CurrentUser() user: AuthenticatedUser
+  ): Promise<{ id: string; key: string; name: string; description: string | null; updatedAt: string }> {
+    return this.projectsService.updateProject(projectId, dto, user);
   }
 
   @Post(":projectId/pin")

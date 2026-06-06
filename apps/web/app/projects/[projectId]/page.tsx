@@ -11,21 +11,24 @@ import {
   FileText,
   GitBranch,
   ListChecks,
+  Pencil,
   ShieldCheck
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "../../../components/app-shell";
-import { Alert, ArchiveEntryPanel, ArchiveIndex, ArchiveRow, Badge, EmptyState, LoadingState, MetadataStrip, WorkspaceHeader } from "../../../components/ui";
+import { Alert, ArchiveEntryPanel, ArchiveIndex, ArchiveRow, Badge, Button, EmptyState, LoadingState, MetadataStrip, Modal, WorkspaceHeader } from "../../../components/ui";
 import {
   getProjectOverview,
   ProjectOverview,
   ProjectOverviewAttentionItem,
   ProjectOverviewModule,
-  ProjectOverviewSeverity
+  ProjectOverviewSeverity,
+  updateProjectMetadata
 } from "../../../lib/project-overview";
 
 type ModuleLedgerRow = {
@@ -198,6 +201,11 @@ export default function ProjectDetailPage({
   const [overview, setOverview] = useState<ProjectOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [projectDetailsOpen, setProjectDetailsOpen] = useState(false);
+  const [projectNameInput, setProjectNameInput] = useState("");
+  const [projectDescriptionInput, setProjectDescriptionInput] = useState("");
+  const [projectDetailsError, setProjectDetailsError] = useState<string | null>(null);
+  const [savingProjectDetails, setSavingProjectDetails] = useState(false);
 
   const loadOverview = useCallback(
     async (authToken: string): Promise<void> => {
@@ -209,6 +217,18 @@ export default function ProjectDetailPage({
         setError((overviewError as Error).message);
       } finally {
         setLoading(false);
+      }
+    },
+    [params.projectId]
+  );
+
+  const refreshOverviewSilently = useCallback(
+    async (authToken: string): Promise<void> => {
+      try {
+        setOverview(await getProjectOverview(params.projectId, authToken));
+        setError(null);
+      } catch (overviewError) {
+        setError((overviewError as Error).message);
       }
     },
     [params.projectId]
@@ -227,6 +247,96 @@ export default function ProjectDetailPage({
   const moduleLedger = useMemo(() => (overview ? buildModuleLedger(params.projectId, overview) : []), [overview, params.projectId]);
   const nextTasks = overview?.modules.tasks.next ?? [];
   const nextMeetings = overview?.modules.meetings.next ?? [];
+  const trimmedProjectName = projectNameInput.trim();
+  const trimmedProjectDescription = projectDescriptionInput.trim();
+  const projectDetailsChanged = overview
+    ? trimmedProjectName !== overview.project.name || trimmedProjectDescription !== (overview.project.description ?? "")
+    : false;
+  const canSaveProjectDetails = projectDetailsChanged && trimmedProjectName.length >= 2 && !savingProjectDetails;
+
+  const openProjectDetailsEditor = useCallback(() => {
+    if (!overview?.access.canWrite) {
+      return;
+    }
+
+    setProjectNameInput(overview.project.name);
+    setProjectDescriptionInput(overview.project.description ?? "");
+    setProjectDetailsError(null);
+    setProjectDetailsOpen(true);
+  }, [overview]);
+
+  const closeProjectDetailsEditor = useCallback(() => {
+    if (savingProjectDetails) {
+      return;
+    }
+
+    setProjectDetailsOpen(false);
+    setProjectDetailsError(null);
+  }, [savingProjectDetails]);
+
+  const saveProjectDetails = useCallback(
+    async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+      event.preventDefault();
+
+      if (!overview || !projectDetailsChanged) {
+        return;
+      }
+
+      if (trimmedProjectName.length < 2) {
+        setProjectDetailsError("Project name must be at least 2 characters.");
+        return;
+      }
+
+      const token = localStorage.getItem("doctoral_token");
+      if (!token) {
+        router.replace("/login");
+        return;
+      }
+
+      const payload: {
+        name?: string;
+        description?: string;
+      } = {};
+      if (trimmedProjectName !== overview.project.name) {
+        payload.name = trimmedProjectName;
+      }
+      if (trimmedProjectDescription !== (overview.project.description ?? "")) {
+        payload.description = trimmedProjectDescription;
+      }
+
+      setSavingProjectDetails(true);
+      setProjectDetailsError(null);
+      try {
+        const updatedProject = await updateProjectMetadata(params.projectId, token, payload);
+        setOverview((current) => current
+          ? {
+              ...current,
+              project: {
+                ...current.project,
+                name: updatedProject.name,
+                description: updatedProject.description,
+                updatedAt: updatedProject.updatedAt
+              }
+            }
+          : current);
+        setProjectDetailsOpen(false);
+        await refreshOverviewSilently(token);
+      } catch (saveError) {
+        setProjectDetailsError((saveError as Error).message);
+      } finally {
+        setSavingProjectDetails(false);
+      }
+    },
+    [
+      overview,
+      params.projectId,
+      projectDetailsChanged,
+      refreshOverviewSilently,
+      router,
+      trimmedProjectDescription,
+      trimmedProjectName
+    ]
+  );
 
   return (
     <AppShell projectId={params.projectId}>
@@ -239,9 +349,25 @@ export default function ProjectDetailPage({
             <ArchiveEntryPanel className="overview-command-band">
               <WorkspaceHeader
                 variant="archive"
-                title={`${overview.project.key} - ${overview.project.name}`}
+                title={
+                  <span
+                    className={overview.access.canWrite ? "overview-editable-title" : undefined}
+                    onDoubleClick={openProjectDetailsEditor}
+                    title={overview.access.canWrite ? "Double-click to edit project details" : undefined}
+                  >
+                    {overview.project.key} - {overview.project.name}
+                  </span>
+                }
                 className="overview-workspace-header"
-                summary={overview.project.description ?? "Live workspace for documents, wiki knowledge, code, meetings, tasks, and traceability."}
+                summary={
+                  <span
+                    className={overview.access.canWrite ? "overview-editable-summary" : undefined}
+                    onDoubleClick={openProjectDetailsEditor}
+                    title={overview.access.canWrite ? "Double-click to edit project details" : undefined}
+                  >
+                    {overview.project.description ?? "No project description."}
+                  </span>
+                }
                 metadata={
                   <MetadataStrip
                     items={[
@@ -251,6 +377,14 @@ export default function ProjectDetailPage({
                       `${overview.modules.tasks.open} open tasks`
                     ]}
                   />
+                }
+                actions={
+                  overview.access.canWrite ? (
+                    <Button variant="secondary" type="button" onClick={openProjectDetailsEditor}>
+                      <Pencil size={16} aria-hidden="true" />
+                      Edit details
+                    </Button>
+                  ) : null
                 }
               />
             </ArchiveEntryPanel>
@@ -385,6 +519,63 @@ export default function ProjectDetailPage({
               <span><CheckCircle2 size={15} aria-hidden="true" /> Meetings {overview.modules.meetings.thisMonth}</span>
             </section>
           </>
+        ) : null}
+
+        {projectDetailsOpen && overview ? (
+          <Modal
+            title="Edit project details"
+            onClose={closeProjectDetailsEditor}
+            className="overview-project-details-modal"
+          >
+            <form className="overview-project-details-form" onSubmit={saveProjectDetails}>
+              <div className="stack-xs">
+                <h2 className="section-heading">Edit project details</h2>
+                <p className="text-muted">Update the project title and archive description. The project key stays fixed.</p>
+              </div>
+
+              <div className="overview-project-key-lock">
+                <span>Project key</span>
+                <code>{overview.project.key}</code>
+                <small>Read only</small>
+              </div>
+
+              <label>
+                Project name
+                <input
+                  className="input"
+                  value={projectNameInput}
+                  onChange={(event) => setProjectNameInput(event.target.value)}
+                  maxLength={150}
+                  required
+                  disabled={savingProjectDetails}
+                />
+              </label>
+
+              <label>
+                Description
+                <textarea
+                  className="input"
+                  value={projectDescriptionInput}
+                  onChange={(event) => setProjectDescriptionInput(event.target.value)}
+                  maxLength={5000}
+                  rows={5}
+                  disabled={savingProjectDetails}
+                  placeholder="Describe the project archive"
+                />
+              </label>
+
+              {projectDetailsError ? <Alert tone="error">{projectDetailsError}</Alert> : null}
+
+              <div className="button-row">
+                <Button variant="secondary" type="button" onClick={closeProjectDetailsEditor} disabled={savingProjectDetails}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={!canSaveProjectDetails}>
+                  {savingProjectDetails ? "Saving..." : "Save details"}
+                </Button>
+              </div>
+            </form>
+          </Modal>
         ) : null}
       </section>
     </AppShell>

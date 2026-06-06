@@ -84,3 +84,30 @@ export type ProjectOverview = {
 export async function getProjectOverview(projectId: string, token: string): Promise<ProjectOverview> {
   return authFetch<ProjectOverview>(`/projects/${projectId}/overview`, { token });
 }
+
+export type UpdateProjectMetadataInput = {
+  name?: string;
+  description?: string;
+};
+
+export type UpdateProjectMetadataResult = {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  updatedAt: string;
+};
+
+export async function updateProjectMetadata(
+  projectId: string,
+  token: string,
+  payload: UpdateProjectMetadataInput
+): Promise<UpdateProjectMetadataResult> {
+  return authFetch<UpdateProjectMetadataResult>(`/projects/${projectId}`, {
+    token,
+    init: {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }
+  });
+}

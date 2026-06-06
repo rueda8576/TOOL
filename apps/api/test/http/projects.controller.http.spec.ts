@@ -14,6 +14,7 @@ describe("ProjectsController HTTP", () => {
       createProject: jest.fn(),
       listProjects: jest.fn(),
       getProjectAccess: jest.fn(),
+      updateProject: jest.fn(),
       pinProject: jest.fn(),
       unpinProject: jest.fn(),
       listMembers: jest.fn(),
@@ -106,5 +107,38 @@ describe("ProjectsController HTTP", () => {
       }
     );
     expect(response.body).toEqual({ projectId: "project-1", userId: "user-2" });
+  });
+
+  it("binds project update params, DTO, and current user", async () => {
+    projectsService.updateProject.mockResolvedValue({
+      id: "project-1",
+      key: "NAV",
+      name: "Navigation Archive",
+      description: "Updated project context.",
+      updatedAt: "2026-06-06T12:00:00.000Z"
+    });
+
+    const response = await request(app.getHttpServer())
+      .patch("/projects/project-1")
+      .set(authHeaders("editor", { userId: "editor-1" }))
+      .send({ name: "Navigation Archive", description: "Updated project context." })
+      .expect(200);
+
+    expect(projectsService.updateProject).toHaveBeenCalledWith(
+      "project-1",
+      { name: "Navigation Archive", description: "Updated project context." },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+    expect(response.body).toEqual({
+      id: "project-1",
+      key: "NAV",
+      name: "Navigation Archive",
+      description: "Updated project context.",
+      updatedAt: "2026-06-06T12:00:00.000Z"
+    });
   });
 });

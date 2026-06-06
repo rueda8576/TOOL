@@ -8,6 +8,7 @@ import { GitlabService } from "../gitlab/gitlab.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AddProjectMemberDto } from "./dto/add-project-member.dto";
 import { CreateProjectDto } from "./dto/create-project.dto";
+import { UpdateProjectDto } from "./dto/update-project.dto";
 
 export type ProjectOverviewSeverity = "danger" | "warning" | "info";
 export type ProjectOverviewModule = "wiki" | "documents" | "code" | "tasks" | "meetings" | "project";
@@ -208,6 +209,7 @@ function activityTitle(action: string): string {
     "meeting.delete": "Meeting deleted",
     "meeting.action.create": "Meeting action created",
     "meeting.action.link_task": "Meeting action linked to task",
+    "project.update": "Project details updated",
     "project.member.add": "Project member added",
     "project.pin": "Project pinned",
     "project.unpin": "Project unpinned"
@@ -331,6 +333,106 @@ export class ProjectsService {
     });
 
     return project;
+  }
+
+  async updateProject(projectId: string, dto: UpdateProjectDto, user: AuthenticatedUser): Promise<{
+    id: string;
+    key: string;
+    name: string;
+    description: string | null;
+    updatedAt: string;
+  }> {
+    await this.accessService.ensureProjectWritable(user.userId, user.globalRole, projectId);
+
+    if (dto.name === undefined && dto.description === undefined) {
+      throw new BadRequestException("Provide name or description to update project");
+    }
+
+    const currentProject = await this.prisma.project.findFirst({
+      where: {
+        id: projectId,
+        deletedAt: null
+      },
+      select: {
+        id: true,
+        key: true,
+        name: true,
+        description: true,
+        updatedAt: true
+      }
+    });
+
+    if (!currentProject) {
+      throw new NotFoundException("Project not found");
+    }
+
+    const data: {
+      name?: string;
+      description?: string | null;
+    } = {};
+    const changedFields: Array<"name" | "description"> = [];
+
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+      if (name.length < 2) {
+        throw new BadRequestException("Project name must be at least 2 characters");
+      }
+      if (name !== currentProject.name) {
+        data.name = name;
+        changedFields.push("name");
+      }
+    }
+
+    if (dto.description !== undefined) {
+      const description = dto.description.trim() || null;
+      if (description !== currentProject.description) {
+        data.description = description;
+        changedFields.push("description");
+      }
+    }
+
+    if (changedFields.length === 0) {
+      return {
+        id: currentProject.id,
+        key: currentProject.key,
+        name: currentProject.name,
+        description: currentProject.description,
+        updatedAt: currentProject.updatedAt.toISOString()
+      };
+    }
+
+    const updatedProject = await this.prisma.project.update({
+      where: {
+        id: projectId
+      },
+      data,
+      select: {
+        id: true,
+        key: true,
+        name: true,
+        description: true,
+        updatedAt: true
+      }
+    });
+
+    await this.auditService.log({
+      userId: user.userId,
+      projectId: updatedProject.id,
+      entityType: "project",
+      entityId: updatedProject.id,
+      action: "project.update",
+      metadata: {
+        changedFields
+      }
+    });
+
+    return {
+      id: updatedProject.id,
+      key: updatedProject.key,
+      name: updatedProject.name,
+      description: updatedProject.description,
+      updatedAt: updatedProject.updatedAt.toISOString()
+    };
   }
 
   async deleteProject(projectId: string, user: AuthenticatedUser): Promise<{ id: string; deletedAt: string }> {

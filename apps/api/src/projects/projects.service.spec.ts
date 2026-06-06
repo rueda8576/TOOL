@@ -258,6 +258,196 @@ describe("ProjectsService", () => {
     expect(gitlabService.provisionManagedRemoteRepository).not.toHaveBeenCalled();
   });
 
+  it.each(["admin", "editor"] as const)("updates project metadata for writable %s users", async (role) => {
+    const { service, prisma, accessService, auditService } = makeService();
+    const currentUpdatedAt = new Date("2026-03-03T10:00:00.000Z");
+    const updatedAt = new Date("2026-03-03T11:00:00.000Z");
+
+    prisma.project.findFirst.mockResolvedValue({
+      id: "p1",
+      key: "PHD1",
+      name: "Main project",
+      description: "Old description",
+      updatedAt: currentUpdatedAt
+    });
+    prisma.project.update.mockResolvedValue({
+      id: "p1",
+      key: "PHD1",
+      name: "Updated project",
+      description: "New description",
+      updatedAt
+    });
+
+    const result = await service.updateProject(
+      "p1",
+      {
+        name: "  Updated project  ",
+        description: "  New description  "
+      },
+      {
+        userId: "user-1",
+        email: "user@example.com",
+        globalRole: role
+      }
+    );
+
+    expect(accessService.ensureProjectWritable).toHaveBeenCalledWith("user-1", role, "p1");
+    expect(prisma.project.update).toHaveBeenCalledWith({
+      where: {
+        id: "p1"
+      },
+      data: {
+        name: "Updated project",
+        description: "New description"
+      },
+      select: {
+        id: true,
+        key: true,
+        name: true,
+        description: true,
+        updatedAt: true
+      }
+    });
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "user-1",
+      projectId: "p1",
+      entityType: "project",
+      entityId: "p1",
+      action: "project.update",
+      metadata: {
+        changedFields: ["name", "description"]
+      }
+    });
+    expect(result).toEqual({
+      id: "p1",
+      key: "PHD1",
+      name: "Updated project",
+      description: "New description",
+      updatedAt: "2026-03-03T11:00:00.000Z"
+    });
+  });
+
+  it("rejects project metadata updates when the user cannot write", async () => {
+    const { service, prisma, accessService } = makeService();
+    accessService.ensureProjectWritable.mockRejectedValue(new ForbiddenException("Reader role cannot modify project resources"));
+
+    await expect(
+      service.updateProject(
+        "p1",
+        {
+          name: "Updated project"
+        },
+        {
+          userId: "reader-1",
+          email: "reader@example.com",
+          globalRole: "reader"
+        }
+      )
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.project.findFirst).not.toHaveBeenCalled();
+    expect(prisma.project.update).not.toHaveBeenCalled();
+  });
+
+  it("clears project description when update payload sends an empty description", async () => {
+    const { service, prisma, auditService } = makeService();
+
+    prisma.project.findFirst.mockResolvedValue({
+      id: "p1",
+      key: "PHD1",
+      name: "Main project",
+      description: "Old description",
+      updatedAt: new Date("2026-03-03T10:00:00.000Z")
+    });
+    prisma.project.update.mockResolvedValue({
+      id: "p1",
+      key: "PHD1",
+      name: "Main project",
+      description: null,
+      updatedAt: new Date("2026-03-03T11:00:00.000Z")
+    });
+
+    const result = await service.updateProject(
+      "p1",
+      {
+        description: "   "
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(prisma.project.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        description: null
+      }
+    }));
+    expect(auditService.log).toHaveBeenCalledWith(expect.objectContaining({
+      action: "project.update",
+      metadata: {
+        changedFields: ["description"]
+      }
+    }));
+    expect(result.description).toBeNull();
+  });
+
+  it("returns current project metadata without audit when update payload is unchanged", async () => {
+    const { service, prisma, auditService } = makeService();
+    const updatedAt = new Date("2026-03-03T10:00:00.000Z");
+
+    prisma.project.findFirst.mockResolvedValue({
+      id: "p1",
+      key: "PHD1",
+      name: "Main project",
+      description: "Same description",
+      updatedAt
+    });
+
+    const result = await service.updateProject(
+      "p1",
+      {
+        name: " Main project ",
+        description: " Same description "
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    expect(prisma.project.update).not.toHaveBeenCalled();
+    expect(auditService.log).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      id: "p1",
+      key: "PHD1",
+      name: "Main project",
+      description: "Same description",
+      updatedAt: "2026-03-03T10:00:00.000Z"
+    });
+  });
+
+  it("rejects empty project metadata update payloads", async () => {
+    const { service, prisma } = makeService();
+
+    await expect(
+      service.updateProject(
+        "p1",
+        {},
+        {
+          userId: "editor-1",
+          email: "editor@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.project.findFirst).not.toHaveBeenCalled();
+    expect(prisma.project.update).not.toHaveBeenCalled();
+  });
+
   it("rolls back the provisioned repository when project creation transaction fails", async () => {
     const { service, prisma, gitlabService } = makeService();
 

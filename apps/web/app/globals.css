@@ -1557,6 +1557,53 @@ textarea {
   font-size: clamp(1.42rem, 2.6vw, 2.1rem);
 }
 
+.overview-editable-title,
+.overview-editable-summary {
+  border-radius: 3px;
+  cursor: text;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.overview-editable-title:hover,
+.overview-editable-summary:hover {
+  background: color-mix(in srgb, var(--brand-soft) 34%, transparent);
+  color: var(--brand-strong);
+}
+
+.overview-project-details-modal {
+  width: min(560px, 100%);
+}
+
+.overview-project-details-form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.overview-project-key-lock {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.64rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-index);
+  padding: 0.62rem 0.7rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.overview-project-key-lock code {
+  color: var(--text-strong);
+  font-size: 0.84rem;
+}
+
+.overview-project-key-lock small {
+  color: var(--text-subtle);
+  font-weight: 760;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .overview-command-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.75fr);

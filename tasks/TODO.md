@@ -1,5 +1,21 @@
 # Implementation TODO (v1 bootstrap)
 
+## Project Metadata Editing From Overview (2026-06-06)
+- [x] Register the approved implementation plan before edits.
+- [x] Add writable project metadata update API with validation, normalization, audit logging, and tests.
+- [x] Add Overview edit helper/UI for project name and description while keeping project key read-only.
+- [x] Run API unit/integration checks, API/web builds, static audits, and diff hygiene.
+- [x] Run visual/interaction QA where local auth/session availability allows.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Added `PATCH /projects/:projectId` for writable project metadata updates. The endpoint keeps `key` read-only, normalizes trimmed name/description input, clears empty descriptions to `null`, rejects empty updates, and logs `project.update` only when `name` or `description` actually changes.
+- Added Overview provenance mapping for `project.update` as `Project details updated`, plus unit coverage for writable admins/editors, rejected readers, description clearing, unchanged updates, audit metadata, and empty payload rejection.
+- Added Overview editing UI behind `overview.access.canWrite`: an explicit `Edit details` button, double-click shortcuts on title/description, compact modal form, unchanged/saving disabled save state, modal validation/errors, immediate local header update, and silent Overview refresh.
+- Verification passed: `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand --forceExit`; `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand --forceExit projects.controller.http.spec.ts`; `pnpm --filter @doctoral/api build`; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; static audits for stale branding/accent classes and new project-edit strings; `git diff --check`.
+- Coverage gate attempted with `pnpm --filter @doctoral/api test:coverage:gate`: unit coverage passed with 22 suites and 311 tests, HTTP coverage passed with 9 suites and 79 tests, then integration coverage failed because no PostgreSQL server was reachable at `localhost:5432`; Docker is not installed in this WSL distro, so the local test DB could not be started.
+- API smoke was updated to patch project details and verify Overview/list metadata plus provenance, but it has the same local PostgreSQL limitation. The web server was restarted on `http://localhost:3010`; `/login` and a dynamic project route returned HTTP 200. Authenticated modal/browser interaction QA could not be completed locally because there is no local API database/session and no Playwright/headless browser installed.
+
 ## Atlasium Paper Rule Accent Without Duplicate Labels (2026-06-05)
 - [x] Register the approved paper-rule refinement plan before design/UI edits.
 - [x] Update `DESIGN.md` so archive entry accents use a non-textual paper rule and do not duplicate active module navigation.
