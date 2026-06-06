@@ -5059,6 +5059,128 @@ body.wiki-layout-dragging * {
   font-size: 0.78rem;
 }
 
+.code-manage-repository-modal {
+  width: min(720px, calc(100vw - 2rem));
+  padding: 1rem;
+}
+
+.code-manage-repository {
+  color: var(--text);
+}
+
+.code-repository-management-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.code-repository-management-grid > div {
+  display: grid;
+  gap: 0.22rem;
+  min-width: 0;
+  padding: 0.72rem 0.78rem;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.code-repository-management-grid > div:nth-child(odd) {
+  border-right: 1px solid var(--border-hairline);
+}
+
+.code-repository-management-grid > div:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.code-repository-management-grid span,
+.code-removal-bindings span,
+.code-removal-confirmation {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 760;
+}
+
+.code-repository-management-grid strong,
+.code-repository-management-grid code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-danger-zone {
+  display: grid;
+  gap: var(--space-3);
+  border: 1px solid var(--danger-border);
+  background: color-mix(in srgb, var(--danger-soft) 38%, var(--panel));
+  padding: var(--space-3);
+}
+
+.code-danger-zone-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.68rem;
+}
+
+.code-danger-zone-header svg {
+  flex: 0 0 auto;
+  color: var(--danger);
+  margin-top: 0.14rem;
+}
+
+.code-danger-zone-header h4 {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 0.98rem;
+}
+
+.code-danger-zone-header p,
+.code-removal-notes p,
+.code-removal-bindings p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.code-removal-notes {
+  display: grid;
+  gap: 0.32rem;
+  padding-top: var(--space-2);
+  border-top: 1px solid color-mix(in srgb, var(--danger-border) 60%, var(--line));
+}
+
+.code-removal-bindings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 0.22rem 0.8rem;
+  align-items: baseline;
+  padding: 0.68rem 0;
+  border-top: 1px solid var(--border-hairline);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.code-removal-bindings p {
+  grid-column: 1 / -1;
+}
+
+.code-removal-bindings strong {
+  color: var(--danger);
+  font-size: 1rem;
+}
+
+.code-removal-blockers {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.code-removal-confirmation {
+  display: grid;
+  gap: 0.36rem;
+}
+
+.code-removal-actions {
+  justify-content: flex-end;
+}
+
 .code-empty-folder {
   padding: 0.5rem 0;
 }
@@ -5750,5 +5872,31 @@ body.wiki-layout-dragging * {
     width: 100vw;
     max-height: 90vh;
     border-radius: var(--radius-md) var(--radius-md) 0 0;
+  }
+
+  .code-manage-repository-modal {
+    width: 100vw;
+    max-height: 92vh;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+  }
+
+  .code-repository-management-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .code-repository-management-grid > div:nth-child(odd) {
+    border-right: 0;
+  }
+
+  .code-repository-management-grid > div:nth-last-child(2) {
+    border-bottom: 1px solid var(--border-hairline);
+  }
+
+  .code-removal-actions {
+    justify-content: stretch;
+  }
+
+  .code-removal-actions .button {
+    flex: 1 1 0;
   }
 }

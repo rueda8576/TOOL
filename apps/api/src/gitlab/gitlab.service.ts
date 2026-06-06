@@ -215,6 +215,46 @@ type RepositorySummary = {
 
 type RepositoryStatus = { connected: false } | ({ connected: true } & RepositorySummary);
 
+type RepositoryRemovalBindingCounts = {
+  total: number;
+  active: number;
+  deleted: number;
+  conflict: number;
+  error: number;
+  unassigned: number;
+};
+
+export type RepositoryRemovalPreview = {
+  repository: {
+    id: string;
+    name: string;
+    gitlabProjectId: string;
+    pathWithNamespace: string;
+    webUrl: string;
+    defaultBranch: string;
+    visibility: string;
+    lastActivityAt: string;
+  };
+  remoteAction: "archive";
+  confirmationText: string;
+  lastRepository: boolean;
+  wikiDocsBindings: RepositoryRemovalBindingCounts;
+  warnings: string[];
+  blockers: Array<{ code: string; message: string }>;
+};
+
+export type RepositoryRemovalResult = {
+  repositoryId: string;
+  name: string;
+  pathWithNamespace: string;
+  gitlabProjectId: string;
+  remoteArchived: boolean;
+  remoteMissing: boolean;
+  removedAt: string;
+  remainingRepositories: number;
+  wikiDocsBindingsRemoved: number;
+};
+
 type RepositoryRecord = Prisma.ProjectRepositoryGetPayload<{
   include: {
     project: {
@@ -805,6 +845,111 @@ export class GitlabService {
 
   async disconnectRepository(_projectId: string, _user: AuthenticatedUser): Promise<never> {
     throw new ForbiddenException("Managed GitLab repositories cannot be disconnected manually");
+  }
+
+  async previewRepositoryRemoval(
+    projectId: string,
+    repositoryId: string,
+    user: AuthenticatedUser
+  ): Promise<RepositoryRemovalPreview> {
+    await this.ensureProjectAdmin(projectId, user);
+    const repository = await this.findRepositoryRecordById(projectId, repositoryId);
+    if (!repository) {
+      throw new NotFoundException("Repository not found");
+    }
+
+    const [repositoryCount, wikiDocsBindings] = await Promise.all([
+      this.prisma.projectRepository.count({
+        where: { projectId }
+      }),
+      this.countRepositoryWikiDocsBindings(repository.id)
+    ]);
+
+    return this.buildRepositoryRemovalPreview(repository, {
+      lastRepository: repositoryCount <= 1,
+      wikiDocsBindings
+    });
+  }
+
+  async removeRepository(
+    projectId: string,
+    repositoryId: string,
+    confirmation: string,
+    user: AuthenticatedUser
+  ): Promise<RepositoryRemovalResult> {
+    await this.ensureProjectAdmin(projectId, user);
+    const repository = await this.findRepositoryRecordById(projectId, repositoryId);
+    if (!repository) {
+      throw new NotFoundException("Repository not found");
+    }
+
+    if (confirmation !== repository.name) {
+      throw new BadRequestException(`Type "${repository.name}" to archive this repository`);
+    }
+
+    const [repositoryCount, wikiDocsBindings] = await Promise.all([
+      this.prisma.projectRepository.count({
+        where: { projectId }
+      }),
+      this.countRepositoryWikiDocsBindings(repository.id)
+    ]);
+    const remoteResult = await this.archiveManagedRemoteRepository(repository.gitlabProjectId);
+    const removedAt = new Date();
+    let remainingRepositories = 0;
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.projectRepository.delete({
+          where: {
+            id: repository.id
+          }
+        });
+        remainingRepositories = await tx.projectRepository.count({
+          where: { projectId }
+        });
+      });
+    } catch (error) {
+      if (remoteResult.remoteArchived && !remoteResult.remoteMissing) {
+        await this.unarchiveManagedRemoteRepository(repository.gitlabProjectId).catch((rollbackError) => {
+          this.logger.warn(
+            JSON.stringify({
+              code: "gitlab_repository_archive_rollback_failed",
+              projectId,
+              repositoryId: repository.id,
+              gitlabProjectId: repository.gitlabProjectId,
+              message: rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+            })
+          );
+        });
+      }
+      throw error;
+    }
+
+    await this.auditService.log({
+      userId: user.userId,
+      projectId,
+      entityType: "project_repository",
+      entityId: repository.id,
+      action: "project.repository.archive",
+      metadata: {
+        gitlabProjectId: repository.gitlabProjectId,
+        pathWithNamespace: repository.pathWithNamespace,
+        lastRepository: repositoryCount <= 1,
+        wikiDocsBindings
+      }
+    });
+
+    return {
+      repositoryId: repository.id,
+      name: repository.name,
+      pathWithNamespace: repository.pathWithNamespace,
+      gitlabProjectId: repository.gitlabProjectId,
+      remoteArchived: remoteResult.remoteArchived,
+      remoteMissing: remoteResult.remoteMissing,
+      removedAt: removedAt.toISOString(),
+      remainingRepositories,
+      wikiDocsBindingsRemoved: wikiDocsBindings.total
+    };
   }
 
   async archiveManagedRepository(projectId: string): Promise<void> {
@@ -1797,6 +1942,127 @@ export class GitlabService {
       throw new NotFoundException("This project repository is not provisioned yet");
     }
     return repository;
+  }
+
+  private async ensureProjectAdmin(projectId: string, user: AuthenticatedUser): Promise<void> {
+    const access = await this.accessService.getProjectAccess(user.userId, user.globalRole, projectId);
+    if (!access.isAdmin) {
+      throw new ForbiddenException("Admin role is required to manage repositories");
+    }
+  }
+
+  private async countRepositoryWikiDocsBindings(repositoryId: string): Promise<RepositoryRemovalBindingCounts> {
+    const grouped = await this.prisma.wikiDocsBinding.groupBy({
+      by: ["status"],
+      where: { repositoryId },
+      _count: {
+        _all: true
+      }
+    });
+    const counts: RepositoryRemovalBindingCounts = {
+      total: 0,
+      active: 0,
+      deleted: 0,
+      conflict: 0,
+      error: 0,
+      unassigned: 0
+    };
+
+    for (const row of grouped) {
+      const count = row._count._all;
+      counts.total += count;
+      if (row.status === "active") {
+        counts.active += count;
+      } else if (row.status === "deleted") {
+        counts.deleted += count;
+      } else if (row.status === "conflict") {
+        counts.conflict += count;
+      } else if (row.status === "error") {
+        counts.error += count;
+      } else if (row.status === "unassigned") {
+        counts.unassigned += count;
+      }
+    }
+
+    return counts;
+  }
+
+  private buildRepositoryRemovalPreview(
+    repository: RepositoryRecord,
+    params: {
+      lastRepository: boolean;
+      wikiDocsBindings: RepositoryRemovalBindingCounts;
+    }
+  ): RepositoryRemovalPreview {
+    const warnings = [
+      "The managed GitLab project will be archived, not permanently deleted.",
+      "Atlasium will remove this repository from Code."
+    ];
+
+    if (params.wikiDocsBindings.total > 0) {
+      warnings.push("Repo Docs sync bindings will be removed. Existing Wiki pages remain available but stop syncing with this repository.");
+    }
+    if (params.lastRepository) {
+      warnings.push("This is the last Code repository for the project.");
+    }
+
+    return {
+      repository: {
+        id: repository.id,
+        name: repository.name,
+        gitlabProjectId: repository.gitlabProjectId,
+        pathWithNamespace: repository.pathWithNamespace,
+        webUrl: repository.webUrl,
+        defaultBranch: repository.defaultBranch,
+        visibility: repository.visibility,
+        lastActivityAt: repository.lastActivityAt.toISOString()
+      },
+      remoteAction: "archive",
+      confirmationText: repository.name,
+      lastRepository: params.lastRepository,
+      wikiDocsBindings: params.wikiDocsBindings,
+      warnings,
+      blockers: []
+    };
+  }
+
+  private async archiveManagedRemoteRepository(gitlabProjectId: string): Promise<{ remoteArchived: boolean; remoteMissing: boolean }> {
+    return this.withSystemAccessToken(async (accessToken) => {
+      try {
+        await this.executeGitlabRequest<void>(
+          accessToken,
+          `/projects/${encodeURIComponent(gitlabProjectId)}/archive`,
+          {
+            method: "POST"
+          }
+        );
+        return { remoteArchived: true, remoteMissing: false };
+      } catch (error) {
+        if (error instanceof GitlabApiError && error.status === 404) {
+          return { remoteArchived: false, remoteMissing: true };
+        }
+        throw this.mapInfrastructureError(error);
+      }
+    });
+  }
+
+  private async unarchiveManagedRemoteRepository(gitlabProjectId: string): Promise<void> {
+    await this.withSystemAccessToken(async (accessToken) => {
+      try {
+        await this.executeGitlabRequest<void>(
+          accessToken,
+          `/projects/${encodeURIComponent(gitlabProjectId)}/unarchive`,
+          {
+            method: "POST"
+          }
+        );
+      } catch (error) {
+        if (error instanceof GitlabApiError && error.status === 404) {
+          return;
+        }
+        throw this.mapInfrastructureError(error);
+      }
+    });
   }
 
   private async findRepositoryRecordById(projectId: string, repositoryId: string): Promise<RepositoryRecord | null> {

@@ -100,7 +100,12 @@ describe("GitlabService", () => {
         findFirst: jest.fn(),
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        count: jest.fn(),
+        delete: jest.fn(),
         deleteMany: jest.fn()
+      },
+      wikiDocsBinding: {
+        groupBy: jest.fn()
       }
     };
     const accessService: any = {
@@ -739,6 +744,220 @@ describe("GitlabService", () => {
 
     await expect(service.archiveManagedRepository("project-1")).resolves.toBeUndefined();
     await expect(service.unarchiveManagedRepository("project-1")).resolves.toBeUndefined();
+  });
+
+  it("previews repository removal for admins with binding counts and warnings", async () => {
+    const { service, prisma, accessService } = makeServiceWithDeps();
+    accessService.getProjectAccess.mockResolvedValue({ isAdmin: true, projectRole: "admin", canWrite: true });
+    jest.spyOn(service as any, "findRepositoryRecordById").mockResolvedValue(repositoryRecord);
+    prisma.projectRepository.count.mockResolvedValue(2);
+    prisma.wikiDocsBinding.groupBy.mockResolvedValue([
+      { status: "active", _count: { _all: 3 } },
+      { status: "conflict", _count: { _all: 1 } },
+      { status: "error", _count: { _all: 2 } }
+    ]);
+
+    await expect(
+      service.previewRepositoryRemoval("project-1", "repo-1", {
+        userId: "admin-1",
+        globalRole: "admin"
+      } as any)
+    ).resolves.toEqual({
+      repository: {
+        id: "repo-1",
+        name: "Navigation",
+        gitlabProjectId: "123",
+        pathWithNamespace: "atlasium/nav",
+        webUrl: "https://git.atlasium.info/atlasium/nav",
+        defaultBranch: "main",
+        visibility: "private",
+        lastActivityAt: "2026-03-31T18:00:00.000Z"
+      },
+      remoteAction: "archive",
+      confirmationText: "Navigation",
+      lastRepository: false,
+      wikiDocsBindings: {
+        total: 6,
+        active: 3,
+        deleted: 0,
+        conflict: 1,
+        error: 2,
+        unassigned: 0
+      },
+      warnings: expect.arrayContaining([
+        "The managed GitLab project will be archived, not permanently deleted.",
+        "Repo Docs sync bindings will be removed. Existing Wiki pages remain available but stop syncing with this repository."
+      ]),
+      blockers: []
+    });
+    expect(accessService.getProjectAccess).toHaveBeenCalledWith("admin-1", "admin", "project-1");
+  });
+
+  it("rejects repository removal preview and execution for non-admin project users", async () => {
+    const { service, accessService } = makeServiceWithDeps();
+    accessService.getProjectAccess.mockResolvedValue({ isAdmin: false, projectRole: "editor", canWrite: true });
+    const findRepositoryRecordByIdSpy = jest.spyOn(service as any, "findRepositoryRecordById");
+
+    await expect(
+      service.previewRepositoryRemoval("project-1", "repo-1", {
+        userId: "editor-1",
+        globalRole: "editor"
+      } as any)
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.removeRepository("project-1", "repo-1", "Navigation", {
+        userId: "editor-1",
+        globalRole: "editor"
+      } as any)
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(findRepositoryRecordByIdSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects repository removal when the typed confirmation does not match", async () => {
+    const { service, prisma, accessService } = makeServiceWithDeps();
+    accessService.getProjectAccess.mockResolvedValue({ isAdmin: true, projectRole: "admin", canWrite: true });
+    jest.spyOn(service as any, "findRepositoryRecordById").mockResolvedValue(repositoryRecord);
+
+    await expect(
+      service.removeRepository("project-1", "repo-1", "Wrong name", {
+        userId: "admin-1",
+        globalRole: "admin"
+      } as any)
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("archives the GitLab project, removes the repository record, and audits repository removal", async () => {
+    const { service, prisma, accessService, auditService } = makeServiceWithDeps();
+    accessService.getProjectAccess.mockResolvedValue({ isAdmin: true, projectRole: "admin", canWrite: true });
+    jest.spyOn(service as any, "findRepositoryRecordById").mockResolvedValue(repositoryRecord);
+    prisma.projectRepository.count.mockResolvedValue(1);
+    prisma.wikiDocsBinding.groupBy.mockResolvedValue([
+      { status: "active", _count: { _all: 2 } },
+      { status: "deleted", _count: { _all: 1 } }
+    ]);
+    const txProjectRepository = {
+      delete: jest.fn().mockResolvedValue(repositoryRecord),
+      count: jest.fn().mockResolvedValue(0)
+    };
+    prisma.$transaction.mockImplementation(async (callback: any) =>
+      callback({ projectRepository: txProjectRepository })
+    );
+    fetchSpy.mockResolvedValueOnce(jsonResponse(201, { id: 123 }) as Response);
+
+    await expect(
+      service.removeRepository("project-1", "repo-1", "Navigation", {
+        userId: "admin-1",
+        globalRole: "admin"
+      } as any)
+    ).resolves.toEqual({
+      repositoryId: "repo-1",
+      name: "Navigation",
+      pathWithNamespace: "atlasium/nav",
+      gitlabProjectId: "123",
+      remoteArchived: true,
+      remoteMissing: false,
+      removedAt: expect.any(String),
+      remainingRepositories: 0,
+      wikiDocsBindingsRemoved: 3
+    });
+
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://git.atlasium.info/api/v4/projects/123/archive");
+    expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
+    expect(txProjectRepository.delete).toHaveBeenCalledWith({ where: { id: "repo-1" } });
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "admin-1",
+      projectId: "project-1",
+      entityType: "project_repository",
+      entityId: "repo-1",
+      action: "project.repository.archive",
+      metadata: {
+        gitlabProjectId: "123",
+        pathWithNamespace: "atlasium/nav",
+        lastRepository: true,
+        wikiDocsBindings: {
+          total: 3,
+          active: 2,
+          deleted: 1,
+          conflict: 0,
+          error: 0,
+          unassigned: 0
+        }
+      }
+    });
+  });
+
+  it("removes the local repository record when the remote GitLab project is already missing", async () => {
+    const { service, prisma, accessService } = makeServiceWithDeps();
+    accessService.getProjectAccess.mockResolvedValue({ isAdmin: true, projectRole: "admin", canWrite: true });
+    jest.spyOn(service as any, "findRepositoryRecordById").mockResolvedValue(repositoryRecord);
+    prisma.projectRepository.count.mockResolvedValue(1);
+    prisma.wikiDocsBinding.groupBy.mockResolvedValue([]);
+    prisma.$transaction.mockImplementation(async (callback: any) =>
+      callback({
+        projectRepository: {
+          delete: jest.fn().mockResolvedValue(repositoryRecord),
+          count: jest.fn().mockResolvedValue(0)
+        }
+      })
+    );
+    fetchSpy.mockResolvedValueOnce(jsonResponse(404, { message: "404 Project Not Found" }) as Response);
+
+    await expect(
+      service.removeRepository("project-1", "repo-1", "Navigation", {
+        userId: "admin-1",
+        globalRole: "admin"
+      } as any)
+    ).resolves.toEqual(
+      expect.objectContaining({
+        remoteArchived: false,
+        remoteMissing: true,
+        wikiDocsBindingsRemoved: 0
+      })
+    );
+  });
+
+  it("leaves the repository record untouched when GitLab archiving fails", async () => {
+    const { service, prisma, accessService } = makeServiceWithDeps();
+    accessService.getProjectAccess.mockResolvedValue({ isAdmin: true, projectRole: "admin", canWrite: true });
+    jest.spyOn(service as any, "findRepositoryRecordById").mockResolvedValue(repositoryRecord);
+    prisma.projectRepository.count.mockResolvedValue(1);
+    prisma.wikiDocsBinding.groupBy.mockResolvedValue([]);
+    fetchSpy.mockResolvedValueOnce(jsonResponse(500, { message: "GitLab unavailable" }) as Response);
+
+    await expect(
+      service.removeRepository("project-1", "repo-1", "Navigation", {
+        userId: "admin-1",
+        globalRole: "admin"
+      } as any)
+    ).rejects.toBeInstanceOf(BadGatewayException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("attempts to unarchive the remote repository when local removal fails after archive", async () => {
+    const { service, prisma, accessService } = makeServiceWithDeps();
+    accessService.getProjectAccess.mockResolvedValue({ isAdmin: true, projectRole: "admin", canWrite: true });
+    jest.spyOn(service as any, "findRepositoryRecordById").mockResolvedValue(repositoryRecord);
+    prisma.projectRepository.count.mockResolvedValue(1);
+    prisma.wikiDocsBinding.groupBy.mockResolvedValue([]);
+    prisma.$transaction.mockRejectedValue(new Error("db failed"));
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(201, { id: 123 }) as Response)
+      .mockResolvedValueOnce(jsonResponse(201, { id: 123 }) as Response);
+
+    await expect(
+      service.removeRepository("project-1", "repo-1", "Navigation", {
+        userId: "admin-1",
+        globalRole: "admin"
+      } as any)
+    ).rejects.toThrow("db failed");
+
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://git.atlasium.info/api/v4/projects/123/archive");
+    expect(fetchSpy.mock.calls[1]?.[0]).toBe("https://git.atlasium.info/api/v4/projects/123/unarchive");
   });
 
   it("refreshes the user connection once after a 401 and retries the GitLab request", async () => {

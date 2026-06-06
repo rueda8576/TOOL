@@ -197,6 +197,7 @@ function activityTitle(action: string): string {
     "wiki.page.delete": "Wiki page deleted",
     "wiki.asset.upload": "Wiki asset uploaded",
     "project.repository.provision": "Repository provisioned",
+    "project.repository.archive": "Repository archived",
     "project.repository.branch.create": "Repository branch created",
     "project.repository.merge_request.create": "Merge request created",
     "task.create": "Task created",

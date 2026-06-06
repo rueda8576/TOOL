@@ -120,6 +120,7 @@
 - Wiki is a knowledge hub: tree/search, draft/publish state, revisions, backlinks, Docs assignment/sync, Markdown rendering, and conflict actions should remain visible and traceable.
 - Documents is an editor/archive workspace: keep LaTeX tree, Monaco, PDF.js preview, compile status, logs, and collaboration controls dense but locally scrollable.
 - Code is a repository cockpit: keep repository/access metadata compact, split files/commits/branches/merge requests into tabs, and keep clone/setup details in drawers or modals.
+- Code repository removal is an admin danger-zone workflow, not a primary cockpit action. It should live behind a calm `Manage repository` surface with factual preflight, explicit remote/archive effects, typed confirmation, and restrained danger styling.
 - Tasks should prioritize board readability. Create/edit forms are collapsed by default, and task actions must support both visible and pointer-based workflows.
 - Meetings should support list and calendar modes, structured Markdown sections, modal editing for long-form minutes, and explicit AI automation state/retry.
 - Account/Admin surfaces should be quiet operational panels, not project modules.

@@ -15,6 +15,7 @@ import { LinkProjectRepositoryDto } from "./dto/link-project-repository.dto";
 import { ListRepositoryCommitsQueryDto } from "./dto/list-repository-commits-query.dto";
 import { ListRepositoryMergeRequestsQueryDto } from "./dto/list-repository-merge-requests-query.dto";
 import { ListRepositoryTreeQueryDto } from "./dto/list-repository-tree-query.dto";
+import { RemoveProjectRepositoryDto } from "./dto/remove-project-repository.dto";
 import { SearchGitlabProjectsQueryDto } from "./dto/search-gitlab-projects-query.dto";
 import { GitlabService } from "./gitlab.service";
 
@@ -82,6 +83,27 @@ export class GitlabController {
     @CurrentUser() user: AuthenticatedUser
   ) {
     return this.gitlabService.createRepository(projectId, dto, user);
+  }
+
+  @Get("projects/:projectId/repositories/:repositoryId/removal-preview")
+  @Roles("admin")
+  previewRepositoryRemoval(
+    @Param("projectId") projectId: string,
+    @Param("repositoryId") repositoryId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    return this.gitlabService.previewRepositoryRemoval(projectId, repositoryId, user);
+  }
+
+  @Delete("projects/:projectId/repositories/:repositoryId")
+  @Roles("admin")
+  removeRepository(
+    @Param("projectId") projectId: string,
+    @Param("repositoryId") repositoryId: string,
+    @Body() dto: RemoveProjectRepositoryDto,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    return this.gitlabService.removeRepository(projectId, repositoryId, dto.confirmation, user);
   }
 
   @Delete("projects/:projectId/repository")

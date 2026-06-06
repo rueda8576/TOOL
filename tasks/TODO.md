@@ -1,5 +1,15 @@
 # Implementation TODO (v1 bootstrap)
 
+## Code Repository Removal (2026-06-06)
+- [x] Register the approved implementation plan before edits.
+- [x] Update `DESIGN.md` with the Code repository destructive-action UI rule.
+- [x] Add scoped repository removal preview/delete API with admin-only access, GitLab archive semantics, rollback handling, and audit logging.
+- [x] Add API unit and HTTP coverage for preview/delete permissions, confirmation, GitLab archive outcomes, DB removal, and audit metadata.
+- [x] Add frontend helpers and a Code `Manage repository` modal with preflight, typed confirmation, and quiet danger-zone UI.
+- [x] Update Code post-removal state so multi-repo and last-repo cases transition without a full reload.
+- [ ] Run API/web builds, focused tests, static audits, diff hygiene, and visual/UX verification.
+- [ ] Document implementation review and final verification results.
+
 ## Repo Docs Taxonomy, Wiki Sync Hierarchy, And Codex Bootstrap (2026-06-06)
 - [x] Register the approved implementation plan before edits.
 - [x] Update `DESIGN.md` with repo `Docs/` taxonomy, section overview, and Codex-generation rules.

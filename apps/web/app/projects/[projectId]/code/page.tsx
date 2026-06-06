@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Archive,
   Copy,
   Download,
   ExternalLink,
@@ -11,6 +12,7 @@ import {
   GitCommitHorizontal,
   GitPullRequest,
   Plus,
+  Settings,
   WrapText,
   X
 } from "lucide-react";
@@ -18,7 +20,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell, openAccountSettings } from "../../../../components/app-shell";
-import { ArchiveEntryPanel, EmptyState, IconButton, LoadingState, MetadataStrip, StatusLine, WorkspaceHeader } from "../../../../components/ui";
+import { ArchiveEntryPanel, EmptyState, IconButton, LoadingState, MetadataStrip, Modal, StatusLine, WorkspaceHeader } from "../../../../components/ui";
 import { LoginResponse } from "../../../../lib/client-api";
 import {
   createProjectRepository,
@@ -30,12 +32,14 @@ import {
   getRepositoryImageMimeType,
   getRepositoryFile,
   getRepositoryRawFile,
+  getRepositoryRemovalPreview,
   getRepositoryTree,
   listProjectRepositories,
   GitlabConnectionStatus,
   listRepositoryBranches,
   listRepositoryCommits,
   listRepositoryMergeRequests,
+  removeProjectRepository,
   ProjectRepositoryStatus,
   ProjectRepositorySummary,
   RepositoryBranch,
@@ -43,6 +47,8 @@ import {
   RepositoryFile,
   RepositoryMergeRequest,
   RepositoryMergeRequestState,
+  RepositoryRemovalBindingCounts,
+  RepositoryRemovalPreview,
   RepositoryTree
 } from "../../../../lib/gitlab";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
@@ -120,6 +126,16 @@ function repositoryPathPreview(name: string, path: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+function repositoryRemovalBindingItems(counts: RepositoryRemovalBindingCounts): string[] {
+  const items: string[] = [];
+  if (counts.active > 0) items.push(`${counts.active} active`);
+  if (counts.deleted > 0) items.push(`${counts.deleted} deleted`);
+  if (counts.conflict > 0) items.push(`${counts.conflict} conflict`);
+  if (counts.error > 0) items.push(`${counts.error} error`);
+  if (counts.unassigned > 0) items.push(`${counts.unassigned} unassigned`);
+  return items;
+}
+
 const TAB_LABELS: Record<CodeTab, string> = {
   files: "Files",
   commits: "Commits",
@@ -178,8 +194,15 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [newRepositoryName, setNewRepositoryName] = useState("");
   const [newRepositoryPath, setNewRepositoryPath] = useState("");
   const [newRepositoryDescription, setNewRepositoryDescription] = useState("");
+  const [manageRepositoryOpen, setManageRepositoryOpen] = useState(false);
+  const [removalPreview, setRemovalPreview] = useState<RepositoryRemovalPreview | null>(null);
+  const [removalPreviewLoading, setRemovalPreviewLoading] = useState(false);
+  const [removalError, setRemovalError] = useState<string | null>(null);
+  const [removalConfirmation, setRemovalConfirmation] = useState("");
+  const [removingRepository, setRemovingRepository] = useState(false);
 
   const canWrite = access?.canWrite ?? false;
+  const canAdmin = access?.isAdmin ?? false;
   const gitlabConnected = connection?.connected === true && !connection.reconnectRequired;
   const activeRepositoryStorageKey = `${CODE_ACTIVE_REPOSITORY_STORAGE_PREFIX}:${params.projectId}`;
   const connectedRepository = useMemo(
@@ -198,6 +221,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const selectedFileImageMimeType =
     selectedFile && selectedFile.binary ? getRepositoryImageMimeType(selectedFile.fileName || selectedFile.filePath) : null;
   const selectedFileKindLabel = selectedFile ? (selectedFile.binary ? (selectedFileImageMimeType ? "Image" : "Binary") : "Text") : "";
+  const removalBindingItems = removalPreview ? repositoryRemovalBindingItems(removalPreview.wikiDocsBindings) : [];
   const trimmedBranchSourceRef = currentBranchSourceRef.trim();
   const trimmedMergeRequestSourceBranch = currentMergeRequestSourceBranch.trim();
   const trimmedMergeRequestTargetBranch = currentMergeRequestTargetBranch.trim();
@@ -234,6 +258,12 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     trimmedMergeRequestSourceBranch.length > 0 &&
     trimmedMergeRequestTargetBranch.length > 0 &&
     trimmedMergeRequestSourceBranch !== trimmedMergeRequestTargetBranch;
+  const canSubmitRepositoryRemoval =
+    Boolean(removalPreview) &&
+    removalPreview?.blockers.length === 0 &&
+    removalConfirmation === removalPreview?.confirmationText &&
+    !removingRepository &&
+    !removalPreviewLoading;
 
   const resetRepositoryWorkspace = useCallback((): void => {
     setBranches([]);
@@ -324,6 +354,36 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     },
     [params.projectId]
   );
+
+  const loadRemovalPreview = useCallback(
+    async (authToken: string, repositoryId: string): Promise<void> => {
+      setRemovalPreviewLoading(true);
+      setRemovalError(null);
+      try {
+        const nextPreview = await getRepositoryRemovalPreview(params.projectId, repositoryId, authToken);
+        setRemovalPreview(nextPreview);
+        setRemovalConfirmation("");
+      } catch (previewError) {
+        setRemovalPreview(null);
+        setRemovalError((previewError as Error).message || "Unable to load repository removal details.");
+      } finally {
+        setRemovalPreviewLoading(false);
+      }
+    },
+    [params.projectId]
+  );
+
+  const openManageRepository = useCallback((): void => {
+    if (!token || !connectedRepository) {
+      setError("Select a repository before opening management details.");
+      return;
+    }
+    setManageRepositoryOpen(true);
+    setRemovalPreview(null);
+    setRemovalConfirmation("");
+    setRemovalError(null);
+    void loadRemovalPreview(token, connectedRepository.id);
+  }, [connectedRepository, loadRemovalPreview, token]);
 
   useEffect(() => {
     const storedToken = localStorage.getItem("doctoral_token");
@@ -505,6 +565,45 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       setError((createError as Error).message || "Unable to create the repository.");
     } finally {
       setCreatingRepository(false);
+    }
+  };
+
+  const onRemoveRepository = async (): Promise<void> => {
+    if (!token) { setRemovalError("Missing session token. Please sign in again."); return; }
+    if (!removalPreview) {
+      setRemovalError("Select a repository before archiving it.");
+      return;
+    }
+    if (removalConfirmation !== removalPreview.confirmationText) {
+      setRemovalError(`Type "${removalPreview.confirmationText}" to archive this repository.`);
+      return;
+    }
+
+    setRemovingRepository(true);
+    setRemovalError(null);
+    setError(null);
+    setSuccess(null);
+    try {
+      await removeProjectRepository(params.projectId, removalPreview.repository.id, token, {
+        confirmation: removalConfirmation
+      });
+      const currentIndex = repositories.findIndex((repository) => repository.id === removalPreview.repository.id);
+      const nextRepositories = repositories.filter((repository) => repository.id !== removalPreview.repository.id);
+      const nextRepository =
+        nextRepositories[currentIndex] ?? nextRepositories[currentIndex - 1] ?? nextRepositories[0] ?? null;
+      setRepositories(nextRepositories);
+      setActiveRepositoryId(nextRepository?.id ?? null);
+      setBrowserPath("");
+      setBrowserRef(nextRepository?.defaultBranch ?? "");
+      resetRepositoryWorkspace();
+      setRemovalPreview(null);
+      setRemovalConfirmation("");
+      setManageRepositoryOpen(false);
+      setSuccess("Repository archived and removed from Code.");
+    } catch (removeError) {
+      setRemovalError((removeError as Error).message || "Unable to archive the repository.");
+    } finally {
+      setRemovingRepository(false);
     }
   };
 
@@ -839,6 +938,12 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     <Download size={16} aria-hidden="true" />
                     {downloadingArchive ? "Downloading..." : "ZIP"}
                   </button>
+                  {canAdmin ? (
+                    <button className="button button-secondary" type="button" onClick={openManageRepository}>
+                      <Settings size={16} aria-hidden="true" />
+                      Manage
+                    </button>
+                  ) : null}
                 </div>
               </div>
 
@@ -1162,6 +1267,145 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                   </div>
                 </aside>
               </div>
+            ) : null}
+
+            {manageRepositoryOpen ? (
+              <Modal
+                title="Manage repository"
+                onClose={() => {
+                  if (!removingRepository) {
+                    setManageRepositoryOpen(false);
+                  }
+                }}
+                className="code-manage-repository-modal"
+              >
+                <div className="stack-md code-manage-repository">
+                  <div className="code-mr-modal-header">
+                    <div>
+                      <p className="eyebrow">Repository management</p>
+                      <h3 className="section-heading">Manage repository</h3>
+                    </div>
+                    <IconButton
+                      label="Close repository management"
+                      onClick={() => setManageRepositoryOpen(false)}
+                      disabled={removingRepository}
+                    >
+                      <X size={16} aria-hidden="true" />
+                    </IconButton>
+                  </div>
+
+                  {removalPreviewLoading ? (
+                    <LoadingState title="Loading repository details" detail="Checking Atlasium bindings before archive." />
+                  ) : null}
+
+                  {!removalPreviewLoading && removalError && !removalPreview ? (
+                    <div className="stack-sm">
+                      <StatusLine tone="error">{removalError}</StatusLine>
+                      {token && connectedRepository ? (
+                        <button
+                          className="button button-secondary"
+                          type="button"
+                          onClick={() => void loadRemovalPreview(token, connectedRepository.id)}
+                        >
+                          Retry
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {removalPreview ? (
+                    <>
+                      <div className="code-repository-management-grid" aria-label="Repository metadata">
+                        <div>
+                          <span>Repository</span>
+                          <strong>{removalPreview.repository.name}</strong>
+                        </div>
+                        <div>
+                          <span>Namespace</span>
+                          <code>{removalPreview.repository.pathWithNamespace}</code>
+                        </div>
+                        <div>
+                          <span>Default branch</span>
+                          <code>{removalPreview.repository.defaultBranch}</code>
+                        </div>
+                        <div>
+                          <span>Last activity</span>
+                          <strong>{relativeDate(removalPreview.repository.lastActivityAt)}</strong>
+                        </div>
+                      </div>
+
+                      <section className="code-danger-zone" aria-labelledby="code-archive-repository-title">
+                        <div className="code-danger-zone-header">
+                          <Archive size={18} aria-hidden="true" />
+                          <div className="stack-xxs">
+                            <h4 id="code-archive-repository-title">Archive repository</h4>
+                            <p>
+                              This removes the repository from Atlasium Code and archives the managed GitLab project.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="code-removal-notes">
+                          {removalPreview.warnings.map((warning) => (
+                            <p key={warning}>{warning}</p>
+                          ))}
+                        </div>
+
+                        <div className="code-removal-bindings">
+                          <span>Docs sync bindings</span>
+                          <strong>{removalPreview.wikiDocsBindings.total}</strong>
+                          <p>
+                            {removalBindingItems.length > 0
+                              ? removalBindingItems.join(" / ")
+                              : "No repo Docs bindings will be removed."}
+                          </p>
+                        </div>
+
+                        {removalPreview.blockers.length > 0 ? (
+                          <div className="code-removal-blockers">
+                            {removalPreview.blockers.map((blocker) => (
+                              <StatusLine key={blocker.code} tone="error">{blocker.message}</StatusLine>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        <label className="code-removal-confirmation">
+                          Type repository name to confirm
+                          <input
+                            className="input"
+                            value={removalConfirmation}
+                            onChange={(event) => setRemovalConfirmation(event.target.value)}
+                            placeholder={removalPreview.confirmationText}
+                            disabled={removingRepository}
+                            autoComplete="off"
+                          />
+                        </label>
+
+                        {removalError ? <StatusLine tone="error">{removalError}</StatusLine> : null}
+
+                        <div className="button-row code-removal-actions">
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => setManageRepositoryOpen(false)}
+                            disabled={removingRepository}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-danger"
+                            onClick={() => void onRemoveRepository()}
+                            disabled={!canSubmitRepositoryRemoval}
+                          >
+                            {removingRepository ? "Archiving..." : "Archive repository"}
+                          </button>
+                        </div>
+                      </section>
+                    </>
+                  ) : null}
+                </div>
+              </Modal>
             ) : null}
 
             {showBranchModal ? (

@@ -44,6 +44,46 @@ export type ProjectRepositoryStatus =
   | { connected: false }
   | ({ connected: true } & ProjectRepositorySummary);
 
+export type RepositoryRemovalBindingCounts = {
+  total: number;
+  active: number;
+  deleted: number;
+  conflict: number;
+  error: number;
+  unassigned: number;
+};
+
+export type RepositoryRemovalPreview = {
+  repository: {
+    id: string;
+    name: string;
+    gitlabProjectId: string;
+    pathWithNamespace: string;
+    webUrl: string;
+    defaultBranch: string;
+    visibility: string;
+    lastActivityAt: string;
+  };
+  remoteAction: "archive";
+  confirmationText: string;
+  lastRepository: boolean;
+  wikiDocsBindings: RepositoryRemovalBindingCounts;
+  warnings: string[];
+  blockers: Array<{ code: string; message: string }>;
+};
+
+export type RepositoryRemovalResult = {
+  repositoryId: string;
+  name: string;
+  pathWithNamespace: string;
+  gitlabProjectId: string;
+  remoteArchived: boolean;
+  remoteMissing: boolean;
+  removedAt: string;
+  remainingRepositories: number;
+  wikiDocsBindingsRemoved: number;
+};
+
 export type RepositoryBranch = {
   name: string;
   default: boolean;
@@ -216,6 +256,29 @@ export async function createProjectRepository(
     token,
     init: {
       method: "POST",
+      body: JSON.stringify(payload)
+    }
+  });
+}
+
+export async function getRepositoryRemovalPreview(
+  projectId: string,
+  repositoryId: string,
+  token: string
+): Promise<RepositoryRemovalPreview> {
+  return authFetch<RepositoryRemovalPreview>(`/projects/${projectId}/repositories/${repositoryId}/removal-preview`, { token });
+}
+
+export async function removeProjectRepository(
+  projectId: string,
+  repositoryId: string,
+  token: string,
+  payload: { confirmation: string }
+): Promise<RepositoryRemovalResult> {
+  return authFetch<RepositoryRemovalResult>(`/projects/${projectId}/repositories/${repositoryId}`, {
+    token,
+    init: {
+      method: "DELETE",
       body: JSON.stringify(payload)
     }
   });

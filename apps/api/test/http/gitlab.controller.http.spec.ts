@@ -17,6 +17,8 @@ describe("GitlabController HTTP", () => {
       ensureCurrentUserRepositoryAccess: jest.fn(),
       linkRepository: jest.fn(),
       createRepository: jest.fn(),
+      previewRepositoryRemoval: jest.fn(),
+      removeRepository: jest.fn(),
       disconnectRepository: jest.fn(),
       listBranches: jest.fn(),
       listCommits: jest.fn(),
@@ -104,6 +106,20 @@ describe("GitlabController HTTP", () => {
       .post("/projects/project-1/repository/merge-requests")
       .set(authHeaders("editor"))
       .send({ title: "   ", sourceBranch: "feature/nav", targetBranch: "main" })
+      .expect(400);
+  });
+
+  it("returns 400 for malformed scoped repository removal confirmation", async () => {
+    await request(app.getHttpServer())
+      .delete("/projects/project-1/repositories/repo-1")
+      .set(authHeaders("admin"))
+      .send({})
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .delete("/projects/project-1/repositories/repo-1")
+      .set(authHeaders("admin"))
+      .send({ confirmation: 123 })
       .expect(400);
   });
 
@@ -287,6 +303,42 @@ describe("GitlabController HTTP", () => {
 
   it("binds repository-scoped Code routes", async () => {
     gitlabService.ensureCurrentUserRepositoryAccess.mockResolvedValue({ connected: true, id: "repo-1" });
+    gitlabService.previewRepositoryRemoval.mockResolvedValue({
+      repository: {
+        id: "repo-1",
+        name: "Navigation",
+        gitlabProjectId: "123",
+        pathWithNamespace: "atlasium/nav",
+        webUrl: "https://git.atlasium.info/atlasium/nav",
+        defaultBranch: "main",
+        visibility: "private",
+        lastActivityAt: "2026-04-06T12:00:00.000Z"
+      },
+      remoteAction: "archive",
+      confirmationText: "Navigation",
+      lastRepository: false,
+      wikiDocsBindings: {
+        total: 0,
+        active: 0,
+        deleted: 0,
+        conflict: 0,
+        error: 0,
+        unassigned: 0
+      },
+      warnings: ["The managed GitLab project will be archived, not permanently deleted."],
+      blockers: []
+    });
+    gitlabService.removeRepository.mockResolvedValue({
+      repositoryId: "repo-1",
+      name: "Navigation",
+      pathWithNamespace: "atlasium/nav",
+      gitlabProjectId: "123",
+      remoteArchived: true,
+      remoteMissing: false,
+      removedAt: "2026-04-06T12:30:00.000Z",
+      remainingRepositories: 0,
+      wikiDocsBindingsRemoved: 0
+    });
     gitlabService.listBranches.mockResolvedValue([{ name: "main", default: true }]);
     gitlabService.listCommits.mockResolvedValue([{ id: "abc123" }]);
     gitlabService.getRepositoryTree.mockResolvedValue({
@@ -320,6 +372,28 @@ describe("GitlabController HTTP", () => {
       .post("/projects/project-1/repositories/repo-1/access/ensure")
       .set(authHeaders("reader", { userId: "reader-1" }))
       .expect(201);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/repositories/repo-1/removal-preview")
+      .set(authHeaders("admin", { userId: "admin-1" }))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .delete("/projects/project-1/repositories/repo-1")
+      .set(authHeaders("admin", { userId: "admin-1" }))
+      .send({ confirmation: "Navigation" })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get("/projects/project-1/repositories/repo-1/removal-preview")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .delete("/projects/project-1/repositories/repo-1")
+      .set(authHeaders("reader", { userId: "reader-1" }))
+      .send({ confirmation: "Navigation" })
+      .expect(403);
 
     await request(app.getHttpServer())
       .get("/projects/project-1/repositories/repo-1/branches")
@@ -382,6 +456,25 @@ describe("GitlabController HTTP", () => {
         globalRole: "reader"
       },
       "repo-1"
+    );
+    expect(gitlabService.previewRepositoryRemoval).toHaveBeenCalledWith(
+      "project-1",
+      "repo-1",
+      {
+        userId: "admin-1",
+        email: "admin@example.com",
+        globalRole: "admin"
+      }
+    );
+    expect(gitlabService.removeRepository).toHaveBeenCalledWith(
+      "project-1",
+      "repo-1",
+      "Navigation",
+      {
+        userId: "admin-1",
+        email: "admin@example.com",
+        globalRole: "admin"
+      }
     );
     expect(gitlabService.listBranches).toHaveBeenCalledWith(
       "project-1",
