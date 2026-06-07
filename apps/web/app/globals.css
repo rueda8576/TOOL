@@ -3635,7 +3635,7 @@ body.wiki-layout-dragging * {
 .wiki-markdown {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: var(--bg-surface-soft);
+  background: var(--surface-raised);
   padding: 0.9rem;
   overflow: auto;
 }
@@ -3652,13 +3652,23 @@ body.wiki-layout-dragging * {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   padding: 0.72rem;
-  background: #0f1b31;
-  color: #d4ddf5;
+  background: color-mix(in srgb, var(--surface-soft) 58%, var(--surface-raised));
+  color: var(--text);
   overflow: auto;
+  line-height: 1.5;
 }
 
 .wiki-markdown code {
   font-family: var(--font-mono);
+}
+
+.wiki-markdown :not(pre) > code {
+  border: 1px solid var(--border-hairline);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface-soft) 70%, var(--surface-raised));
+  color: var(--text-strong);
+  padding: 0.08rem 0.24rem;
+  font-size: 0.92em;
 }
 
 .wiki-markdown .katex-display {
@@ -3668,7 +3678,11 @@ body.wiki-layout-dragging * {
 }
 
 .wiki-markdown pre code {
+  border: 0;
+  background: transparent;
   color: inherit;
+  padding: 0;
+  font-size: inherit;
 }
 
 .wiki-links-grid {

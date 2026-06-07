@@ -1,5 +1,18 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Reading Surface Light Refinement (2026-06-07)
+- [x] Register the approved implementation plan before edits.
+- [x] Update `DESIGN.md` with Wiki reading/code-block surface guidance.
+- [x] Refine Wiki Markdown reading and live-preview CSS to use white/paper surfaces and neutral light preformatted blocks.
+- [x] Run web type-check, diff hygiene, and static review.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Updated `DESIGN.md` so Wiki reading and live-preview Markdown surfaces are treated as paper document pages, with light neutral preformatted blocks reserved for documentation reading.
+- Changed `.wiki-markdown` from the soft gray surface to the raised white/paper surface so published pages and live previews read as documents rather than panels.
+- Replaced the dark navy Wiki `pre` block treatment with a light neutral block, subtle border, document text color, and explicit inline-code styling. Dedicated dark `.code-block` surfaces for logs/code tools remain unchanged.
+- Verification passed: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `git diff --check`; static audit for old Wiki dark block colors and active Markdown selectors.
+
 ## Code Repository Removal (2026-06-06)
 - [x] Register the approved implementation plan before edits.
 - [x] Update `DESIGN.md` with the Code repository destructive-action UI rule.

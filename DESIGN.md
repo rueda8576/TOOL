@@ -118,6 +118,7 @@
 - `/projects` prioritizes the project directory. Project creation, invites, and admin management stay secondary and intentionally opened.
 - Project Overview is a command center: attention, near-term work, equal module state, and recent provenance from live local data. Avoid static module-description cards and decorative dashboards.
 - Wiki is a knowledge hub: tree/search, draft/publish state, revisions, backlinks, Docs assignment/sync, Markdown rendering, and conflict actions should remain visible and traceable.
+- Wiki reading and live-preview Markdown surfaces should read as white/paper document pages. Preformatted Markdown blocks should use light neutral surfaces with subtle borders; reserve dark code panels for dedicated code/log/editor tools, not document reading.
 - Documents is an editor/archive workspace: keep LaTeX tree, Monaco, PDF.js preview, compile status, logs, and collaboration controls dense but locally scrollable.
 - Code is a repository cockpit: keep repository/access metadata compact, split files/commits/branches/merge requests into tabs, and keep clone/setup details in drawers or modals.
 - Code repository removal is an admin danger-zone workflow, not a primary cockpit action. It should live behind a calm `Manage repository` surface with factual preflight, explicit remote/archive effects, typed confirmation, and restrained danger styling.
