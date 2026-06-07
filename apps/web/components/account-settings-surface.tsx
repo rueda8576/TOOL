@@ -34,6 +34,27 @@ const ACCOUNT_TABS: Array<{ id: AccountSettingsTab; label: string }> = [
   { id: "git", label: "Git access" }
 ];
 
+const HTTPS_CREDENTIAL_HELPERS = [
+  {
+    id: "windows",
+    platform: "Windows / WSL",
+    command: "git config --global credential.helper manager",
+    detail: "Use Git Credential Manager with Windows Credential Manager."
+  },
+  {
+    id: "macos",
+    platform: "macOS",
+    command: "git config --global credential.helper osxkeychain",
+    detail: "Store Git credentials in the macOS Keychain."
+  },
+  {
+    id: "linux",
+    platform: "Linux",
+    command: "git config --global credential.helper manager",
+    detail: "Requires Git Credential Manager or another secure helper installed."
+  }
+] as const;
+
 function isSessionFailureMessage(message: string): boolean {
   return ["Session expired", "Invalid token", "Missing bearer token"].some((part) => message.includes(part));
 }
@@ -150,6 +171,7 @@ export function AccountSettingsSurface({
   const [httpsCloneUsername, setHttpsCloneUsername] = useState<string | null>(null);
   const [httpsCloneError, setHttpsCloneError] = useState<string | null>(null);
   const [httpsCloneSuccess, setHttpsCloneSuccess] = useState<string | null>(null);
+  const [copiedCredentialHelper, setCopiedCredentialHelper] = useState<string | null>(null);
 
   const handleAuthFailure = useCallback(
     (message: string): boolean => {
@@ -547,6 +569,14 @@ export function AccountSettingsSurface({
     } finally {
       setHttpsCloneSubmitting(false);
     }
+  };
+
+  const onCopyCredentialHelper = async (helperId: string, command: string): Promise<void> => {
+    await navigator.clipboard.writeText(command);
+    setCopiedCredentialHelper(helperId);
+    window.setTimeout(() => {
+      setCopiedCredentialHelper((current) => (current === helperId ? null : current));
+    }, 2000);
   };
 
   const onDeleteSshKey = async (keyId: number): Promise<void> => {
@@ -992,7 +1022,7 @@ export function AccountSettingsSurface({
                     <h3 className="account-ledger-title">HTTPS clone</h3>
                   </div>
                   <span className={connection?.httpsClone?.enabled ? "account-status-badge account-status-badge-success" : "account-status-badge"}>
-                    {connection?.httpsClone?.enabled ? "Ready" : "Setup required"}
+                    {connection?.httpsClone?.enabled ? "Password synced" : "Sync required"}
                   </span>
                 </div>
 
@@ -1032,20 +1062,53 @@ export function AccountSettingsSurface({
                   </button>
                 </form>
 
+                <div className="account-credential-setup">
+                  <div className="stack-xxs">
+                    <h4 className="account-setup-title">Store credentials on this computer</h4>
+                    <p className="account-setup-summary">Atlasium syncs the password to GitLab. Your computer saves the Git credential after the next prompt.</p>
+                  </div>
+                  <ol className="account-setup-steps">
+                    <li>Sync the HTTPS password above.</li>
+                    <li>Run the credential helper command for your platform.</li>
+                    <li>On the next clone, pull, or push, enter <strong>{resolvedHttpsCloneUsername}</strong> and your Atlasium password once.</li>
+                  </ol>
+                  <div className="account-platform-list">
+                    {HTTPS_CREDENTIAL_HELPERS.map((helper) => (
+                      <div className="account-platform-row" key={helper.id}>
+                        <div className="stack-xxs account-platform-copy">
+                          <p className="account-platform-name">{helper.platform}</p>
+                          <p className="account-platform-detail">{helper.detail}</p>
+                        </div>
+                        <code className="account-platform-command">{helper.command}</code>
+                        <button
+                          className="button button-secondary account-command-copy"
+                          type="button"
+                          aria-label={`Copy ${helper.platform} credential helper command`}
+                          onClick={() => void onCopyCredentialHelper(helper.id, helper.command)}
+                        >
+                          {copiedCredentialHelper === helper.id ? "Copied" : "Copy"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <button
                   className="inline-link-button account-details-toggle"
                   type="button"
                   onClick={() => setGitConnectionDetailsOpen((current) => !current)}
                   aria-expanded={gitConnectionDetailsOpen}
                 >
-                  {gitConnectionDetailsOpen ? "Hide connection details" : "Connection details"}
+                  {gitConnectionDetailsOpen ? "Hide reset or examples" : "Reset or examples"}
                 </button>
 
                 {gitConnectionDetailsOpen ? (
                   <div className="account-command-panel stack-xs">
-                    <p className="account-ssh-meta-label">Windows HTTPS credential reset</p>
+                    <p className="account-ssh-meta-label">Reset saved HTTPS credentials</p>
                     <code className="account-ssh-hint">{`@"\nprotocol=https\nhost=git.atlasium.info\n\n"@ | git credential-manager erase`}</code>
-                    <code className="account-ssh-hint">git clone https://{resolvedHttpsCloneUsername}@git.atlasium.info/atlasium/nav.git</code>
+                    <p className="account-command-note">Use this if Git keeps using an old password or account for <code>git.atlasium.info</code>.</p>
+                    <p className="account-ssh-meta-label">Clone URL pattern</p>
+                    <code className="account-ssh-hint">git clone https://{resolvedHttpsCloneUsername}@git.atlasium.info/&lt;group&gt;/&lt;repo&gt;.git</code>
                   </div>
                 ) : null}
               </section>

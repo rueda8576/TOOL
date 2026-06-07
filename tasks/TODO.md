@@ -1,5 +1,21 @@
 # Implementation TODO (v1 bootstrap)
 
+## Git Access Persistent HTTPS Credentials (2026-06-07)
+- [x] Register the approved implementation plan before edits.
+- [x] Update `DESIGN.md` and `tasks/LESSONS.md` with concise persistent credential guidance.
+- [x] Add always-visible HTTPS credential helper instructions in Account Git access.
+- [x] Align Code clone drawer so Account remains the canonical setup surface.
+- [x] Run web verification, static audits, diff hygiene, and visual QA notes.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Added compact permanent HTTPS credential guidance to `Git access`: password sync remains explicit, local credential storage is explained separately, and Windows/WSL, macOS, and Linux helper commands have copy actions.
+- Renamed the HTTPS status badge to `Password synced` / `Sync required` so Atlasium does not imply it can detect whether a workstation has saved credentials locally.
+- Replaced the old connection detail block with `Reset or examples`, removed the fake `atlasium/nav.git` repo path, and kept reset/example commands collapsed.
+- Simplified `Code > Clone` so it points users to Account Git access as the canonical place to sync the password and store local credentials once.
+- Verification passed: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; `git diff --check`; static audits for stale Windows-only/PAT/SSH guidance and unsafe `credential.helper store` copy.
+- Visual/interaction QA is limited locally because there is no authenticated API session/test account available. The Account and Code surfaces were reviewed by source/CSS inspection for desktop/mobile wrapping, copy behavior, copy buttons, and collapsed details.
+
 ## Personal Settings Git Access Ledger (2026-06-07)
 - [x] Register the approved implementation plan before edits.
 - [x] Update `DESIGN.md` with Account Git access and drawer scroll guidance.

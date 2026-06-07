@@ -21,7 +21,6 @@ import { useRouter } from "next/navigation";
 
 import { AppShell, openAccountSettings } from "../../../../components/app-shell";
 import { ArchiveEntryPanel, EmptyState, IconButton, LoadingState, MetadataStrip, Modal, StatusLine, WorkspaceHeader } from "../../../../components/ui";
-import { LoginResponse } from "../../../../lib/client-api";
 import {
   createProjectRepository,
   createRepositoryBranch,
@@ -54,18 +53,6 @@ import {
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 
 type CodeTab = "files" | "commits" | "branches" | "merge-requests";
-
-function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
-  if (!rawUser) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(rawUser) as LoginResponse["user"];
-  } catch {
-    return null;
-  }
-}
 
 function relativeDate(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -187,7 +174,6 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
   const [showMRModal, setShowMRModal] = useState(false);
   const [showBranchModal, setShowBranchModal] = useState(false);
   const [cloneDrawerOpen, setCloneDrawerOpen] = useState(false);
-  const [gitUsername, setGitUsername] = useState<string | null>(null);
   const [fileWordWrap, setFileWordWrap] = useState(false);
   const [fileWordWrapReady, setFileWordWrapReady] = useState(false);
   const [showRepositoryModal, setShowRepositoryModal] = useState(false);
@@ -392,7 +378,6 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
       return;
     }
     setToken(storedToken);
-    setGitUsername(parseStoredUser(localStorage.getItem("doctoral_user"))?.username ?? null);
     setLoading(true);
     Promise.all([loadAccess(storedToken), loadConnection(storedToken), loadRepositories(storedToken)])
       .then(() => { setError(null); })
@@ -1254,13 +1239,8 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                       </button>
                     </div>
                     <StatusLine tone="info">
-                      HTTPS is the default Atlasium clone method. Use your GitLab username and synced Atlasium password.
+                      HTTPS is the default Atlasium clone method. Use Account Git access to sync your password and store local credentials once.
                     </StatusLine>
-                    <div className="code-https-help">
-                      <p className="eyebrow">Windows HTTPS login</p>
-                      <code>{`git clone ${connectedRepository.httpCloneUrl.replace("https://", `https://${gitUsername || "<gitlab-username>"}@`)}`}</code>
-                      <code>Enter your Atlasium password in Git Credential Manager</code>
-                    </div>
                     <button type="button" className="button button-secondary" onClick={() => openAccountSettings("git")}>
                       Manage Git access
                     </button>

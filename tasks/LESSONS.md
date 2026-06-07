@@ -25,6 +25,7 @@
 - Wiki/documentation reading surfaces should look like paper documents. Avoid dark terminal-style Markdown blocks in Wiki content unless the surface is explicitly a code/log/editor tool.
 - Long account/settings drawers should separate fixed header chrome from a local scroll body. Avoid making the entire drawer scroll under a sticky header because content can bleed above the header.
 - Git access surfaces should lead with the actual default clone method and keep secondary credential details collapsed; avoid long explanatory copy that makes settings feel like documentation.
+- For HTTPS Git access, separate server-side password sync from local credential persistence. Show short credential-helper instructions and never ask users to paste passwords into commands.
 
 ## Design canon
 - Durable Atlasium brand, digital design, UI/UX, copy, metadata, navigation, visual assets, and visual verification rules live in `DESIGN.md`.

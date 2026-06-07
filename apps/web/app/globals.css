@@ -4928,6 +4928,99 @@ body.wiki-layout-dragging * {
   min-width: 0;
 }
 
+.account-credential-setup {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.95rem;
+  padding-top: 0.95rem;
+  border-top: 1px solid var(--line);
+}
+
+.account-setup-title {
+  margin: 0;
+  color: var(--text-strong);
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.account-setup-summary {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.account-setup-steps {
+  display: grid;
+  gap: 0.34rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--text);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.account-setup-steps strong {
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.account-platform-list {
+  display: grid;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+}
+
+.account-platform-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.82fr) minmax(0, 1.2fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.66rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.account-platform-copy {
+  min-width: 0;
+}
+
+.account-platform-name {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 0.86rem;
+  font-weight: 760;
+}
+
+.account-platform-detail {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.38;
+}
+
+.account-platform-command {
+  display: block;
+  min-width: 0;
+  padding: 0.42rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.account-command-copy {
+  min-height: 2rem;
+  padding: 0.38rem 0.62rem;
+}
+
 .account-details-toggle {
   margin-top: 0.7rem;
 }
@@ -4938,6 +5031,18 @@ body.wiki-layout-dragging * {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
+}
+
+.account-command-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.account-command-note code {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
 }
 
 .account-linked-identity-row {
@@ -5354,25 +5459,6 @@ body.wiki-layout-dragging * {
 
 .code-empty-folder {
   padding: 0.5rem 0;
-}
-
-.code-https-help {
-  display: grid;
-  gap: 0.28rem;
-  padding-top: 0.1rem;
-}
-
-.code-https-help .eyebrow {
-  margin: 0;
-}
-
-.code-https-help code {
-  display: block;
-  max-width: 100%;
-  font-family: var(--font-mono);
-  font-size: 0.76rem;
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
 }
 
 .code-tabs {
@@ -5974,8 +6060,13 @@ body.wiki-layout-dragging * {
   }
 
   .account-inline-form,
-  .account-credential-grid {
+  .account-credential-grid,
+  .account-platform-row {
     grid-template-columns: 1fr;
+  }
+
+  .account-command-copy {
+    justify-self: flex-start;
   }
 
   .account-ssh-row {
