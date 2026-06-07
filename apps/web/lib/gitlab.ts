@@ -21,6 +21,11 @@ export type GitlabConnectionStatus = {
   email?: string | null;
   avatarUrl?: string | null;
   webUrl?: string | null;
+  httpsClone: {
+    enabled: boolean;
+    syncedAt: string | null;
+    username: string;
+  };
 };
 
 export type ProjectRepositorySummary = {

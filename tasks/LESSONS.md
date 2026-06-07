@@ -23,6 +23,8 @@
 - Do not use local decorative labels to repeat the active module already shown in shell navigation; prefer non-textual structure such as a short paper rule when a surface needs subtle archive identity.
 - In dense cockpits, do not render empty/default technical values as standalone symbols such as `/`; hide root/default state unless the value adds orientation.
 - Wiki/documentation reading surfaces should look like paper documents. Avoid dark terminal-style Markdown blocks in Wiki content unless the surface is explicitly a code/log/editor tool.
+- Long account/settings drawers should separate fixed header chrome from a local scroll body. Avoid making the entire drawer scroll under a sticky header because content can bleed above the header.
+- Git access surfaces should lead with the actual default clone method and keep secondary credential details collapsed; avoid long explanatory copy that makes settings feel like documentation.
 
 ## Design canon
 - Durable Atlasium brand, digital design, UI/UX, copy, metadata, navigation, visual assets, and visual verification rules live in `DESIGN.md`.

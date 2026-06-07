@@ -144,6 +144,11 @@ export class AuthController {
     email?: string | null;
     avatarUrl?: string | null;
     webUrl?: string | null;
+    httpsClone: {
+      enabled: boolean;
+      syncedAt: string | null;
+      username: string;
+    };
   }> {
     return this.authService.getGitlabConnectionStatus(user);
   }

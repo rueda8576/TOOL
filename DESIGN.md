@@ -124,7 +124,7 @@
 - Code repository removal is an admin danger-zone workflow, not a primary cockpit action. It should live behind a calm `Manage repository` surface with factual preflight, explicit remote/archive effects, typed confirmation, and restrained danger styling.
 - Tasks should prioritize board readability. Create/edit forms are collapsed by default, and task actions must support both visible and pointer-based workflows.
 - Meetings should support list and calendar modes, structured Markdown sections, modal editing for long-form minutes, and explicit AI automation state/retry.
-- Account/Admin surfaces should be quiet operational panels, not project modules.
+- Account/Admin surfaces should be quiet operational panels, not project modules. Account drawers need fixed headers with local body scroll; content must never scroll under or over the drawer header. Git access should lead with the default clone method, show factual connection state, and keep secondary credential details collapsed unless the user asks for them.
 
 ## Repo `Docs/` Canon
 

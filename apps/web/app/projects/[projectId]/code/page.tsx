@@ -1240,21 +1240,21 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                   </div>
                   <div className="code-clone-drawer-body">
                     <div className="code-clone-row">
-                      <span className="code-clone-label">SSH</span>
-                      <input className="input code-clone-input" value={connectedRepository.sshCloneUrl} readOnly aria-label="SSH clone URL" />
-                      <button className="button button-secondary code-clone-copy" type="button" onClick={() => void onCopyCloneUrl(connectedRepository.sshCloneUrl, "ssh")}>
-                        {copiedCloneType === "ssh" ? "Copied" : "Copy"}
-                      </button>
-                    </div>
-                    <div className="code-clone-row">
-                      <span className="code-clone-label code-clone-label-secondary">HTTPS</span>
+                      <span className="code-clone-label">HTTPS</span>
                       <input className="input code-clone-input" value={connectedRepository.httpCloneUrl} readOnly aria-label="HTTPS clone URL" />
                       <button className="button button-secondary code-clone-copy" type="button" onClick={() => void onCopyCloneUrl(connectedRepository.httpCloneUrl, "https")}>
                         {copiedCloneType === "https" ? "Copied" : "Copy"}
                       </button>
                     </div>
+                    <div className="code-clone-row">
+                      <span className="code-clone-label code-clone-label-secondary">SSH</span>
+                      <input className="input code-clone-input" value={connectedRepository.sshCloneUrl} readOnly aria-label="SSH clone URL" />
+                      <button className="button button-secondary code-clone-copy" type="button" onClick={() => void onCopyCloneUrl(connectedRepository.sshCloneUrl, "ssh")}>
+                        {copiedCloneType === "ssh" ? "Copied" : "Copy"}
+                      </button>
+                    </div>
                     <StatusLine tone="info">
-                      SSH is recommended. HTTPS can use your GitLab username and Atlasium password after enablement; PAT remains the fallback.
+                      HTTPS is the default Atlasium clone method. Use your GitLab username and synced Atlasium password.
                     </StatusLine>
                     <div className="code-https-help">
                       <p className="eyebrow">Windows HTTPS login</p>

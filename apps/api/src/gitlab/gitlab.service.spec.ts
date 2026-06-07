@@ -93,6 +93,7 @@ describe("GitlabService", () => {
       },
       user: {
         findFirst: jest.fn(),
+        findUnique: jest.fn(),
         findMany: jest.fn()
       },
       projectRepository: {
@@ -224,7 +225,12 @@ describe("GitlabService", () => {
       name: "Luis",
       email: "luis@example.com",
       avatarUrl: "https://git.atlasium.info/avatar.png",
-      webUrl: "https://git.atlasium.info/luis"
+      webUrl: "https://git.atlasium.info/luis",
+      httpsClone: {
+        enabled: false,
+        syncedAt: null,
+        username: "luis"
+      }
     });
 
     expect(prisma.gitLabConnection.upsert).toHaveBeenCalledWith(
@@ -297,10 +303,50 @@ describe("GitlabService", () => {
   it("returns a disconnected connection status when no GitLab OAuth record exists", async () => {
     const { service, prisma } = makeServiceWithDeps();
     prisma.gitLabConnection.findUnique.mockResolvedValue(null);
+    prisma.user.findUnique.mockResolvedValue({
+      username: "atlasium-user",
+      gitlabHttpsPasswordSyncedAt: null
+    });
 
     await expect(service.getConnectionStatus("user-1")).resolves.toEqual({
       connected: false,
+      reconnectRequired: false,
+      httpsClone: {
+        enabled: false,
+        syncedAt: null,
+        username: "atlasium-user"
+      }
+    });
+  });
+
+  it("returns connected GitLab status with persistent HTTPS clone state", async () => {
+    const { service, prisma } = makeServiceWithDeps();
+    prisma.gitLabConnection.findUnique.mockResolvedValue({
+      username: "gitlab-user",
+      name: "GitLab User",
+      email: "gitlab@example.com",
+      avatarUrl: null,
+      webUrl: "https://git.atlasium.info/gitlab-user",
       reconnectRequired: false
+    });
+    prisma.user.findUnique.mockResolvedValue({
+      username: "atlasium-user",
+      gitlabHttpsPasswordSyncedAt: new Date("2026-06-07T10:00:00.000Z")
+    });
+
+    await expect(service.getConnectionStatus("user-1")).resolves.toEqual({
+      connected: true,
+      reconnectRequired: false,
+      username: "gitlab-user",
+      name: "GitLab User",
+      email: "gitlab@example.com",
+      avatarUrl: null,
+      webUrl: "https://git.atlasium.info/gitlab-user",
+      httpsClone: {
+        enabled: true,
+        syncedAt: "2026-06-07T10:00:00.000Z",
+        username: "gitlab-user"
+      }
     });
   });
 

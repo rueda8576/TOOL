@@ -23,7 +23,7 @@ import {
   GitlabSshKey,
   listGitlabSshKeys
 } from "../lib/gitlab";
-import { LoadingState, MetadataStrip, WorkspaceHeader } from "./ui";
+import { ConfirmDialog, LoadingState, MetadataStrip, Modal, WorkspaceHeader } from "./ui";
 
 export type AccountSettingsTab = "profile" | "security" | "notifications" | "git";
 
@@ -88,10 +88,12 @@ function areNotificationPreferencesEqual(
 
 export function AccountSettingsSurface({
   initialTab = "profile",
-  compact = false
+  compact = false,
+  onTabChange
 }: {
   initialTab?: AccountSettingsTab;
   compact?: boolean;
+  onTabChange?: (tab: AccountSettingsTab) => void;
 }): JSX.Element {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<AccountSettingsTab>(initialTab);
@@ -140,6 +142,9 @@ export function AccountSettingsSurface({
   const [sshSuccess, setSshSuccess] = useState<string | null>(null);
   const [expandedSshKeyIds, setExpandedSshKeyIds] = useState<number[]>([]);
   const [isSshFormOpen, setIsSshFormOpen] = useState(false);
+  const [gitConnectionDetailsOpen, setGitConnectionDetailsOpen] = useState(false);
+  const [sshSectionOpen, setSshSectionOpen] = useState(false);
+  const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
   const [httpsClonePassword, setHttpsClonePassword] = useState("");
   const [httpsCloneSubmitting, setHttpsCloneSubmitting] = useState(false);
   const [httpsCloneUsername, setHttpsCloneUsername] = useState<string | null>(null);
@@ -473,6 +478,9 @@ export function AccountSettingsSurface({
       await loadConnection(token);
       setGitlabSuccess("GitLab account disconnected.");
       setSshSuccess(null);
+      setDisconnectConfirmOpen(false);
+      setSshSectionOpen(false);
+      setGitConnectionDetailsOpen(false);
     } catch (disconnectError) {
       const message = (disconnectError as Error).message || "Unable to disconnect GitLab.";
       if (!handleAuthFailure(message)) {
@@ -529,7 +537,8 @@ export function AccountSettingsSurface({
       });
       setHttpsClonePassword("");
       setHttpsCloneUsername(result.username);
-      setHttpsCloneSuccess(`HTTPS clone password enabled. Use username ${result.username} and your Atlasium password.`);
+      await loadConnection(token);
+      setHttpsCloneSuccess("HTTPS clone password synced.");
     } catch (syncError) {
       const message = (syncError as Error).message || "Unable to enable HTTPS clone password.";
       if (!handleAuthFailure(message)) {
@@ -568,6 +577,19 @@ export function AccountSettingsSurface({
     setActiveTab(initialTab);
   }, [initialTab]);
 
+  const gitlabApiStatusLabel = gitlabLoading
+    ? "Checking GitLab API"
+    : connection?.connected
+      ? connection.reconnectRequired
+        ? "GitLab reconnect required"
+        : "GitLab API connected"
+      : "GitLab API disconnected";
+  const resolvedHttpsCloneUsername =
+    connection?.httpsClone?.username || httpsCloneUsername || connection?.username || profile?.username || "your GitLab username";
+  const httpsCloneSyncedAt = connection?.httpsClone?.syncedAt ?? null;
+  const httpsCloneStatusLabel = connection?.httpsClone?.enabled ? "HTTPS synced" : "HTTPS setup needed";
+  const sshKeyCountLabel = `${sshKeys.length} SSH key${sshKeys.length === 1 ? "" : "s"}`;
+
   return (
       <section className={compact ? "account-settings-surface account-settings-surface-compact" : "account-settings-surface"}>
         <nav className="account-settings-tabs" aria-label="Account settings sections">
@@ -576,7 +598,10 @@ export function AccountSettingsSurface({
               key={tab.id}
               type="button"
               className={activeTab === tab.id ? "account-settings-tab account-settings-tab-active" : "account-settings-tab"}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setActiveTab(tab.id);
+                onTabChange?.(tab.id);
+              }}
               aria-current={activeTab === tab.id ? "page" : undefined}
             >
               {tab.label}
@@ -939,260 +964,294 @@ export function AccountSettingsSurface({
 
         <div className="account-column">
           {activeTab === "git" ? (
-          <section className="panel stack-md account-section-card">
+          <section className="panel stack-md account-section-card account-git-access-panel">
             <WorkspaceHeader
-              eyebrow="GitLab & SSH access"
-              title="Repository access"
-              summary="GitLab web sign-in uses Atlasium SSO. Connect GitLab API access here, then manage SSH keys and HTTPS clone access for Atlasium Code."
+              title="Git access"
               titleLevel="h2"
               metadata={
                 <MetadataStrip
                   items={[
-                    connection?.connected ? "GitLab connected" : "GitLab disconnected",
-                    `${sshKeys.length} SSH key${sshKeys.length === 1 ? "" : "s"}`
+                    gitlabApiStatusLabel,
+                    httpsCloneStatusLabel,
+                    sshKeyCountLabel
                   ]}
                 />
               }
             />
 
-            <div className="account-tech-block stack-md">
-              <div className="stack-xs">
-                <p className="eyebrow">GitLab web access</p>
-                <h3 className="section-heading">Atlasium-linked GitLab identity</h3>
-                <p>Connect API access for managed repository browsing, archive download, branch creation, merge requests, and SSH-key management.</p>
-              </div>
+            {gitlabLoading ? <LoadingState title="Loading Git access" detail="Checking connection state." /> : null}
+            {gitlabError ? <p className="alert alert-error">{gitlabError}</p> : null}
+            {gitlabSuccess ? <p className="alert alert-success">{gitlabSuccess}</p> : null}
+            {reconnectMessage ? <p className="alert alert-warning">{reconnectMessage}</p> : null}
 
-              {gitlabLoading ? <LoadingState title="Loading Git access" detail="Checking GitLab connection and repository credentials." /> : null}
-              {gitlabError ? <p className="alert alert-error">{gitlabError}</p> : null}
-              {gitlabSuccess ? <p className="alert alert-success">{gitlabSuccess}</p> : null}
-              {reconnectMessage ? <p className="alert alert-warning">{reconnectMessage}</p> : null}
-
-              {!gitlabLoading && connection?.connected ? (
-                <div className="account-connection-card">
-                  <div className="stack-xs">
-                    <p className="eyebrow">Connected account</p>
-                    <h3 className="section-heading">{connection.name || connection.username}</h3>
-                    <p>{connection.email || "Email not exposed by GitLab OAuth"}</p>
-                    <p className="text-muted">@{connection.username}</p>
+            <div className="account-git-ledger">
+              <section className="account-ledger-section account-ledger-section-primary">
+                <div className="account-ledger-header">
+                  <div className="stack-xxs">
+                    <p className="account-ledger-kicker">Default clone</p>
+                    <h3 className="account-ledger-title">HTTPS clone</h3>
                   </div>
-                  <div className="button-row">
-                    {connection.webUrl ? (
-                      <a className="button button-secondary" href={connection.webUrl} target="_blank" rel="noreferrer">
-                        Open in GitLab
-                      </a>
-                    ) : null}
-                    <button className="button button-secondary" type="button" onClick={() => void onConnect()} disabled={gitlabConnecting}>
-                      {gitlabConnecting ? "Redirecting..." : connection.reconnectRequired ? "Reconnect GitLab" : "Reconnect"}
-                    </button>
-                    <button className="button button-danger" type="button" onClick={() => void onDisconnect()} disabled={gitlabDisconnecting}>
-                      {gitlabDisconnecting ? "Disconnecting..." : "Disconnect"}
-                    </button>
-                  </div>
+                  <span className={connection?.httpsClone?.enabled ? "account-status-badge account-status-badge-success" : "account-status-badge"}>
+                    {connection?.httpsClone?.enabled ? "Ready" : "Setup required"}
+                  </span>
                 </div>
-              ) : null}
 
-              {!gitlabLoading && !connection?.connected ? (
-                <div className="account-connection-card">
-                  <div className="stack-xs">
-                    <p className="eyebrow">No GitLab API access connected</p>
-                    <h3 className="section-heading">Connect GitLab</h3>
-                    <p>Atlasium will use your GitLab identity for managed repository browsing, archive download, branch creation, merge requests, and SSH-key management.</p>
+                <dl className="account-credential-grid">
+                  <div>
+                    <dt>Username</dt>
+                    <dd>{resolvedHttpsCloneUsername}</dd>
                   </div>
-                  <div className="button-row">
+                  <div>
+                    <dt>Last sync</dt>
+                    <dd>{httpsCloneSyncedAt ? formatDateTimeLabel(httpsCloneSyncedAt) : "Not synced"}</dd>
+                  </div>
+                </dl>
+
+                {httpsCloneError ? <p className="alert alert-error">{httpsCloneError}</p> : null}
+                {httpsCloneSuccess ? <p className="alert alert-success">{httpsCloneSuccess}</p> : null}
+
+                <form
+                  className="account-inline-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void onSyncGitlabHttpsPassword();
+                  }}
+                >
+                  <label>
+                    Current Atlasium password
+                    <input
+                      className="input"
+                      type="password"
+                      value={httpsClonePassword}
+                      onChange={(event) => setHttpsClonePassword(event.target.value)}
+                      autoComplete="current-password"
+                    />
+                  </label>
+                  <button className="button" type="submit" disabled={httpsCloneSubmitting || httpsClonePassword.length < 8}>
+                    {httpsCloneSubmitting ? "Syncing..." : "Sync HTTPS password"}
+                  </button>
+                </form>
+
+                <button
+                  className="inline-link-button account-details-toggle"
+                  type="button"
+                  onClick={() => setGitConnectionDetailsOpen((current) => !current)}
+                  aria-expanded={gitConnectionDetailsOpen}
+                >
+                  {gitConnectionDetailsOpen ? "Hide connection details" : "Connection details"}
+                </button>
+
+                {gitConnectionDetailsOpen ? (
+                  <div className="account-command-panel stack-xs">
+                    <p className="account-ssh-meta-label">Windows HTTPS credential reset</p>
+                    <code className="account-ssh-hint">{`@"\nprotocol=https\nhost=git.atlasium.info\n\n"@ | git credential-manager erase`}</code>
+                    <code className="account-ssh-hint">git clone https://{resolvedHttpsCloneUsername}@git.atlasium.info/atlasium/nav.git</code>
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="account-ledger-section">
+                <div className="account-ledger-header">
+                  <div className="stack-xxs">
+                    <p className="account-ledger-kicker">API identity</p>
+                    <h3 className="account-ledger-title">GitLab API access</h3>
+                  </div>
+                  <span className={connection?.connected && !connection.reconnectRequired ? "account-status-badge account-status-badge-success" : "account-status-badge"}>
+                    {connection?.connected ? (connection.reconnectRequired ? "Reconnect" : "Connected") : "Disconnected"}
+                  </span>
+                </div>
+
+                {!gitlabLoading && connection?.connected ? (
+                  <div className="account-linked-identity-row">
+                    <div className="stack-xxs">
+                      <strong>{connection.name || connection.username}</strong>
+                      <span>{connection.email || "Email not exposed by GitLab OAuth"}</span>
+                      <span className="text-muted">@{connection.username}</span>
+                    </div>
+                    <div className="button-row">
+                      {connection.webUrl ? (
+                        <a className="button button-secondary" href={connection.webUrl} target="_blank" rel="noreferrer">
+                          Open GitLab
+                        </a>
+                      ) : null}
+                      <button className="button button-secondary" type="button" onClick={() => void onConnect()} disabled={gitlabConnecting}>
+                        {gitlabConnecting ? "Redirecting..." : connection.reconnectRequired ? "Reconnect" : "Refresh"}
+                      </button>
+                      <button className="button button-danger" type="button" onClick={() => setDisconnectConfirmOpen(true)} disabled={gitlabDisconnecting}>
+                        Disconnect
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {!gitlabLoading && !connection?.connected ? (
+                  <div className="account-linked-identity-row">
+                    <p className="text-muted">Connect GitLab API access for repository browsing, archive downloads, branches, merge requests, and SSH keys.</p>
                     <button className="button" type="button" onClick={() => void onConnect()} disabled={gitlabConnecting}>
                       {gitlabConnecting ? "Redirecting..." : "Connect GitLab"}
                     </button>
                   </div>
-                </div>
-              ) : null}
-            </div>
+                ) : null}
+              </section>
 
-            <div className="account-tech-block stack-md">
-              <div className="account-tech-header">
-                <div className="stack-xs">
-                  <p className="eyebrow">SSH keys</p>
-                  <h3 className="section-heading">CLI Git access</h3>
-                  <p>Atlasium manages GitLab SSH keys here so Code can use SSH as the primary clone method. HTTPS can use your GitLab username and Atlasium password after enablement below; PAT remains the fallback.</p>
-                  <p className="text-muted">
-                    Recommended command:{" "}
-                    <code className="account-ssh-hint">ssh-keygen -t ed25519 -C "{connection?.email || profile?.email || "your-email"}"</code>
-                  </p>
-                </div>
-
-                {canManageSshKeys ? (
+              <section className="account-ledger-section">
+                <div className="account-ledger-header">
+                  <div className="stack-xxs">
+                    <p className="account-ledger-kicker">Advanced</p>
+                    <h3 className="account-ledger-title">SSH keys</h3>
+                  </div>
                   <button
                     className="button button-secondary"
                     type="button"
-                    onClick={() => {
-                      setSshError(null);
-                      setSshSuccess(null);
-                      setIsSshFormOpen((current) => !current);
-                    }}
+                    onClick={() => setSshSectionOpen((current) => !current)}
+                    aria-expanded={sshSectionOpen}
                   >
-                    {isSshFormOpen ? "Close" : "Add SSH key"}
-                  </button>
-                ) : null}
-              </div>
-
-              {sshError ? <p className="alert alert-error">{sshError}</p> : null}
-              {sshSuccess ? <p className="alert alert-success">{sshSuccess}</p> : null}
-
-              {!connection?.connected ? <p className="alert alert-info">Connect your GitLab API access above before managing SSH keys.</p> : null}
-
-              {connection?.connected && connection.reconnectRequired ? (
-                <p className="alert alert-warning">Reconnect GitLab above before listing, adding, or deleting SSH keys.</p>
-              ) : null}
-
-              {canManageSshKeys ? (
-                <>
-                  {sshKeysLoading ? <LoadingState title="Loading SSH keys" detail="Retrieving linked GitLab keys." /> : null}
-
-                  <div className="account-ssh-list-shell">
-                    <div className="account-ssh-section-heading">
-                      <h4 className="section-heading">Current keys</h4>
-                    </div>
-
-                    {!sshKeysLoading && sshKeys.length === 0 ? (
-                      <p className="text-muted">No SSH keys added yet. Add at least one key to use SSH clone from Atlasium Code.</p>
-                    ) : null}
-
-                    {sshKeys.map((sshKey) => {
-                      const detailsExpanded = expandedSshKeyIds.includes(sshKey.id);
-
-                      return (
-                        <article key={sshKey.id} className={`account-ssh-row${detailsExpanded ? " is-expanded" : ""}`}>
-                          <div className="account-ssh-row-main">
-                            <div className="account-ssh-row-heading">
-                              <strong className="account-ssh-row-title" title={sshKey.title}>
-                                {sshKey.title}
-                              </strong>
-                              {sshKey.usageType ? <span className="badge">{sshKey.usageType}</span> : null}
-                            </div>
-                          </div>
-
-                          <div className="account-ssh-row-actions">
-                            <button
-                              className="button button-secondary"
-                              type="button"
-                              onClick={() => toggleSshKeyDetails(sshKey.id)}
-                              disabled={deletingKeyId === sshKey.id}
-                              aria-expanded={detailsExpanded}
-                            >
-                              {detailsExpanded ? "Hide details" : "Show details"}
-                            </button>
-                            <button
-                              className="button button-danger"
-                              type="button"
-                              onClick={() => void onDeleteSshKey(sshKey.id)}
-                              disabled={deletingKeyId === sshKey.id}
-                            >
-                              {deletingKeyId === sshKey.id ? "Removing..." : "Remove"}
-                            </button>
-                          </div>
-
-                          {detailsExpanded ? (
-                            <div className="account-ssh-row-details stack-sm">
-                              <div className="account-ssh-meta-grid">
-                                <div className="stack-xxs">
-                                  <p className="account-ssh-meta-label">Added</p>
-                                  <p className="account-ssh-meta-value">{formatDateTimeLabel(sshKey.createdAt)}</p>
-                                </div>
-                                <div className="stack-xxs">
-                                  <p className="account-ssh-meta-label">Expires</p>
-                                  <p className="account-ssh-meta-value">{sshKey.expiresAt || "No expiration"}</p>
-                                </div>
-                              </div>
-                              <div className="stack-xxs">
-                                <p className="account-ssh-meta-label">Public key</p>
-                                <code className="account-ssh-key-preview">{sshKey.key}</code>
-                              </div>
-                            </div>
-                          ) : null}
-                        </article>
-                      );
-                    })}
-                  </div>
-
-                  {isSshFormOpen ? (
-                    <div className="account-ssh-form-panel">
-                      <h4 className="section-heading">Add SSH key</h4>
-                      <label>
-                        Title
-                        <input className="input" value={sshKeyTitle} onChange={(event) => setSshKeyTitle(event.target.value)} placeholder="Laptop" />
-                      </label>
-                      <label>
-                        Public key
-                        <textarea
-                          className="input account-ssh-key-textarea"
-                          value={sshPublicKey}
-                          onChange={(event) => setSshPublicKey(event.target.value)}
-                          rows={6}
-                          placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."
-                        />
-                      </label>
-                      <label>
-                        Expiration date
-                        <input className="input" type="date" value={sshKeyExpiresAt} onChange={(event) => setSshKeyExpiresAt(event.target.value)} />
-                      </label>
-                      <div className="button-row">
-                        <button
-                          className="button"
-                          type="button"
-                          onClick={() => void onCreateSshKey()}
-                          disabled={creatingSshKey || !sshKeyTitle.trim() || !sshPublicKey.trim()}
-                        >
-                          {creatingSshKey ? "Adding..." : "Add SSH key"}
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
-
-            <div className="account-tech-block stack-md">
-              <div className="stack-xs">
-                <p className="eyebrow">HTTPS clone</p>
-                <h3 className="section-heading">Enable Atlasium password for Git</h3>
-                <p>Enter your current Atlasium password once to sync it to your linked GitLab account for Git over HTTPS. Web sign-in still uses Atlasium SSO.</p>
-              </div>
-
-              {httpsCloneError ? <p className="alert alert-error">{httpsCloneError}</p> : null}
-              {httpsCloneSuccess ? <p className="alert alert-success">{httpsCloneSuccess}</p> : null}
-
-              <form
-                className="stack-sm"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void onSyncGitlabHttpsPassword();
-                }}
-              >
-                <label>
-                  Current Atlasium password
-                  <input
-                    className="input"
-                    type="password"
-                    value={httpsClonePassword}
-                    onChange={(event) => setHttpsClonePassword(event.target.value)}
-                    autoComplete="current-password"
-                  />
-                </label>
-                <div className="button-row">
-                  <button className="button" type="submit" disabled={httpsCloneSubmitting || httpsClonePassword.length < 8}>
-                    {httpsCloneSubmitting ? "Enabling..." : "Enable HTTPS password"}
+                    {sshSectionOpen ? "Hide" : "Manage"}
                   </button>
                 </div>
-              </form>
 
-              <div className="account-git-https-hint stack-xxs">
-                <p className="account-ssh-meta-label">Windows HTTPS clone</p>
-                <p className="text-muted">
-                  Username: <strong>{httpsCloneUsername || profile?.username || connection?.username || "your GitLab username"}</strong>
-                </p>
-                <code className="account-ssh-hint">{`@"\nprotocol=https\nhost=git.atlasium.info\n\n"@ | git credential-manager erase`}</code>
-                <code className="account-ssh-hint">git clone https://{httpsCloneUsername || profile?.username || connection?.username || "username"}@git.atlasium.info/atlasium/nav.git</code>
-              </div>
+                {sshSectionOpen ? (
+                  <div className="account-ssh-management stack-md">
+                    {sshError ? <p className="alert alert-error">{sshError}</p> : null}
+                    {sshSuccess ? <p className="alert alert-success">{sshSuccess}</p> : null}
+                    {!connection?.connected ? <p className="alert alert-info">Connect GitLab API access before managing SSH keys.</p> : null}
+                    {connection?.connected && connection.reconnectRequired ? <p className="alert alert-warning">Reconnect GitLab before managing SSH keys.</p> : null}
+
+                    {canManageSshKeys ? (
+                      <>
+                        <div className="account-section-toolbar">
+                          <p className="text-muted">{sshKeyCountLabel}</p>
+                          <button
+                            className="button button-secondary"
+                            type="button"
+                            onClick={() => {
+                              setSshError(null);
+                              setSshSuccess(null);
+                              setIsSshFormOpen(true);
+                            }}
+                          >
+                            Add SSH key
+                          </button>
+                        </div>
+
+                        {sshKeysLoading ? <LoadingState title="Loading SSH keys" detail="Retrieving linked keys." /> : null}
+
+                        <div className="account-ssh-list-shell">
+                          {!sshKeysLoading && sshKeys.length === 0 ? <p className="text-muted">No SSH keys added.</p> : null}
+
+                          {sshKeys.map((sshKey) => {
+                            const detailsExpanded = expandedSshKeyIds.includes(sshKey.id);
+
+                            return (
+                              <article key={sshKey.id} className={`account-ssh-row${detailsExpanded ? " is-expanded" : ""}`}>
+                                <div className="account-ssh-row-main">
+                                  <div className="account-ssh-row-heading">
+                                    <strong className="account-ssh-row-title" title={sshKey.title}>
+                                      {sshKey.title}
+                                    </strong>
+                                    {sshKey.usageType ? <span className="badge">{sshKey.usageType}</span> : null}
+                                  </div>
+                                </div>
+
+                                <div className="account-ssh-row-actions">
+                                  <button
+                                    className="button button-secondary"
+                                    type="button"
+                                    onClick={() => toggleSshKeyDetails(sshKey.id)}
+                                    disabled={deletingKeyId === sshKey.id}
+                                    aria-expanded={detailsExpanded}
+                                  >
+                                    {detailsExpanded ? "Hide details" : "Details"}
+                                  </button>
+                                  <button
+                                    className="button button-danger"
+                                    type="button"
+                                    onClick={() => void onDeleteSshKey(sshKey.id)}
+                                    disabled={deletingKeyId === sshKey.id}
+                                  >
+                                    {deletingKeyId === sshKey.id ? "Removing..." : "Remove"}
+                                  </button>
+                                </div>
+
+                                {detailsExpanded ? (
+                                  <div className="account-ssh-row-details stack-sm">
+                                    <div className="account-ssh-meta-grid">
+                                      <div className="stack-xxs">
+                                        <p className="account-ssh-meta-label">Added</p>
+                                        <p className="account-ssh-meta-value">{formatDateTimeLabel(sshKey.createdAt)}</p>
+                                      </div>
+                                      <div className="stack-xxs">
+                                        <p className="account-ssh-meta-label">Expires</p>
+                                        <p className="account-ssh-meta-value">{sshKey.expiresAt || "No expiration"}</p>
+                                      </div>
+                                    </div>
+                                    <div className="stack-xxs">
+                                      <p className="account-ssh-meta-label">Public key</p>
+                                      <code className="account-ssh-key-preview">{sshKey.key}</code>
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </article>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
             </div>
+
+            {isSshFormOpen ? (
+              <Modal title="Add SSH key" onClose={() => setIsSshFormOpen(false)} className="account-ssh-key-modal">
+                <div className="stack-md">
+                  <h2 className="section-heading">Add SSH key</h2>
+                  <label>
+                    Title
+                    <input className="input" value={sshKeyTitle} onChange={(event) => setSshKeyTitle(event.target.value)} placeholder="Laptop" />
+                  </label>
+                  <label>
+                    Public key
+                    <textarea
+                      className="input account-ssh-key-textarea"
+                      value={sshPublicKey}
+                      onChange={(event) => setSshPublicKey(event.target.value)}
+                      rows={6}
+                      placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."
+                    />
+                  </label>
+                  <label>
+                    Expiration date
+                    <input className="input" type="date" value={sshKeyExpiresAt} onChange={(event) => setSshKeyExpiresAt(event.target.value)} />
+                  </label>
+                  <div className="button-row">
+                    <button
+                      className="button"
+                      type="button"
+                      onClick={() => void onCreateSshKey()}
+                      disabled={creatingSshKey || !sshKeyTitle.trim() || !sshPublicKey.trim()}
+                    >
+                      {creatingSshKey ? "Adding..." : "Add SSH key"}
+                    </button>
+                    <button className="button button-secondary" type="button" onClick={() => setIsSshFormOpen(false)} disabled={creatingSshKey}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </Modal>
+            ) : null}
+
+            {disconnectConfirmOpen ? (
+              <ConfirmDialog
+                title="Disconnect GitLab API access?"
+                message="Atlasium Code will keep HTTPS clone settings, but repository browsing and SSH-key management need GitLab API access."
+                confirmLabel={gitlabDisconnecting ? "Disconnecting..." : "Disconnect"}
+                destructive
+                busy={gitlabDisconnecting}
+                onConfirm={() => void onDisconnect()}
+                onCancel={() => setDisconnectConfirmOpen(false)}
+              />
+            ) : null}
           </section>
           ) : null}
         </div>

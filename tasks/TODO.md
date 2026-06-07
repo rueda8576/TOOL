@@ -1,5 +1,23 @@
 # Implementation TODO (v1 bootstrap)
 
+## Personal Settings Git Access Ledger (2026-06-07)
+- [x] Register the approved implementation plan before edits.
+- [x] Update `DESIGN.md` with Account Git access and drawer scroll guidance.
+- [x] Add persistent HTTPS clone sync status to DB/API and tests.
+- [x] Redesign Account Git access and fix Account drawer scroll containment.
+- [x] Align Code clone drawer so HTTPS is the default Atlasium clone method.
+- [x] Run API/web verification, static audits, diff hygiene, and visual QA.
+- [x] Document implementation review and final verification results.
+
+### Review
+- Added persistent HTTPS clone sync state through `User.gitlabHttpsPasswordSyncedAt`, including a migration backfill from existing `auth.gitlab.https_password.sync` and `auth.password.change` audit logs.
+- Extended `GET /auth/gitlab/connection` with `httpsClone` state while preserving existing fields. Explicit HTTPS sync and successful password changes now update the timestamp without storing any new secret.
+- Reworked Account drawer containment so the header is fixed and only `account-drawer-body` scrolls. Tabs stay local to the drawer body and changing tabs resets scroll to the top.
+- Redesigned `Git access` as a compact ledger: HTTPS clone first with username/last sync/action, connection details collapsed, GitLab API access second, SSH keys advanced and collapsed with add-key modal, and GitLab disconnect protected by a confirmation dialog.
+- Updated Code clone drawer so HTTPS appears first and is described as the default Atlasium clone method; SSH remains available as an alternative.
+- Verification passed: `pnpm --filter @doctoral/db db:generate`; `pnpm --filter @doctoral/api test:http`; `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand --forceExit`; `pnpm --filter @doctoral/api build`; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; `git diff --check`; static audits for stale Git access copy, obsolete active branding, new drawer selectors, and HTTPS clone contract fields.
+- Visual/interaction QA is limited locally because there is no authenticated API session/test account available in this environment. Layout-sensitive behavior was covered by type/build checks, CSS audits, and code inspection for drawer scroll containment, responsive wrapping, collapsed details, modal/confirm paths, and Code clone ordering.
+
 ## Wiki Reading Surface Light Refinement (2026-06-07)
 - [x] Register the approved implementation plan before edits.
 - [x] Update `DESIGN.md` with Wiki reading/code-block surface guidance.

@@ -559,13 +559,15 @@ export class AuthService {
       },
       dto.newPassword
     );
+    const gitlabHttpsPasswordSyncedAt = new Date();
 
     await this.prisma.user.update({
       where: {
         id: activeUser.id
       },
       data: {
-        passwordHash: await bcrypt.hash(dto.newPassword, 10)
+        passwordHash: await bcrypt.hash(dto.newPassword, 10),
+        gitlabHttpsPasswordSyncedAt
       }
     });
 
@@ -625,6 +627,16 @@ export class AuthService {
       },
       dto.currentPassword
     );
+    const gitlabHttpsPasswordSyncedAt = new Date();
+
+    await this.prisma.user.update({
+      where: {
+        id: activeUser.id
+      },
+      data: {
+        gitlabHttpsPasswordSyncedAt
+      }
+    });
 
     await this.auditService.log({
       userId: activeUser.id,
@@ -650,6 +662,11 @@ export class AuthService {
     email?: string | null;
     avatarUrl?: string | null;
     webUrl?: string | null;
+    httpsClone: {
+      enabled: boolean;
+      syncedAt: string | null;
+      username: string;
+    };
   }> {
     return this.gitlabService.getConnectionStatus(user.userId);
   }

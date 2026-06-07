@@ -475,7 +475,8 @@ describe("AuthService", () => {
         id: "user-1"
       },
       data: {
-        passwordHash: expect.any(String)
+        passwordHash: expect.any(String),
+        gitlabHttpsPasswordSyncedAt: expect.any(Date)
       }
     });
     expect(prisma.session.deleteMany).toHaveBeenCalledWith({
@@ -639,6 +640,14 @@ describe("AuthService", () => {
       },
       currentPassword
     );
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: {
+        id: "user-1"
+      },
+      data: {
+        gitlabHttpsPasswordSyncedAt: expect.any(Date)
+      }
+    });
     expect(auditService.log).toHaveBeenCalledWith({
       userId: "user-1",
       entityType: "gitlab_https_password",
@@ -672,6 +681,7 @@ describe("AuthService", () => {
     ).rejects.toThrow("Current password is incorrect");
 
     expect(gitlabService.syncUserHttpsPassword).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
   it("rejects all-projects invite payload when project-specific assignments are provided", async () => {
@@ -959,7 +969,12 @@ describe("AuthService", () => {
     gitlabService.getConnectionStatus.mockResolvedValue({
       connected: true,
       reconnectRequired: false,
-      username: "luis"
+      username: "luis",
+      httpsClone: {
+        enabled: true,
+        syncedAt: "2026-06-07T10:00:00.000Z",
+        username: "luis"
+      }
     });
 
     const result = await service.getGitlabConnectionStatus({
@@ -972,7 +987,12 @@ describe("AuthService", () => {
     expect(result).toEqual({
       connected: true,
       reconnectRequired: false,
-      username: "luis"
+      username: "luis",
+      httpsClone: {
+        enabled: true,
+        syncedAt: "2026-06-07T10:00:00.000Z",
+        username: "luis"
+      }
     });
   });
 

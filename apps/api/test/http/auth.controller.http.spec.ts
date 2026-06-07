@@ -310,6 +310,48 @@ describe("AuthController HTTP", () => {
     });
   });
 
+  it("returns GitLab connection status with HTTPS clone state", async () => {
+    authService.getGitlabConnectionStatus.mockResolvedValue({
+      connected: true,
+      reconnectRequired: false,
+      username: "luisjrc",
+      name: "Luis",
+      email: "luis@example.com",
+      avatarUrl: null,
+      webUrl: "https://git.atlasium.info/luisjrc",
+      httpsClone: {
+        enabled: true,
+        syncedAt: "2026-06-07T10:00:00.000Z",
+        username: "luisjrc"
+      }
+    });
+
+    const response = await request(app.getHttpServer())
+      .get("/auth/gitlab/connection")
+      .set(authHeaders("editor", { userId: "user-1", email: "luis@example.com" }))
+      .expect(200);
+
+    expect(authService.getGitlabConnectionStatus).toHaveBeenCalledWith({
+      userId: "user-1",
+      email: "luis@example.com",
+      globalRole: "editor"
+    });
+    expect(response.body).toEqual({
+      connected: true,
+      reconnectRequired: false,
+      username: "luisjrc",
+      name: "Luis",
+      email: "luis@example.com",
+      avatarUrl: null,
+      webUrl: "https://git.atlasium.info/luisjrc",
+      httpsClone: {
+        enabled: true,
+        syncedAt: "2026-06-07T10:00:00.000Z",
+        username: "luisjrc"
+      }
+    });
+  });
+
   it("serves OIDC discovery metadata and redirects authorize requests", async () => {
     const oidcService = app.get(OidcService) as unknown as Record<string, jest.Mock>;
     oidcService.getDiscoveryDocument.mockReturnValue({ issuer: "https://atlasium.info/api/auth/oidc" });

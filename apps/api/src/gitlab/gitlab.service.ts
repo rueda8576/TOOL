@@ -194,6 +194,11 @@ type ConnectionStatus = {
   email?: string | null;
   avatarUrl?: string | null;
   webUrl?: string | null;
+  httpsClone: {
+    enabled: boolean;
+    syncedAt: string | null;
+    username: string;
+  };
 };
 
 type RepositorySummary = {
@@ -464,24 +469,42 @@ export class GitlabService {
   }
 
   async getConnectionStatus(userId: string): Promise<ConnectionStatus> {
-    const connection = await this.prisma.gitLabConnection.findUnique({
-      where: {
-        userId
-      },
-      select: {
-        username: true,
-        name: true,
-        email: true,
-        avatarUrl: true,
-        webUrl: true,
-        reconnectRequired: true
-      }
-    });
+    const [connection, user] = await Promise.all([
+      this.prisma.gitLabConnection.findUnique({
+        where: {
+          userId
+        },
+        select: {
+          username: true,
+          name: true,
+          email: true,
+          avatarUrl: true,
+          webUrl: true,
+          reconnectRequired: true
+        }
+      }),
+      this.prisma.user.findUnique({
+        where: {
+          id: userId
+        },
+        select: {
+          username: true,
+          gitlabHttpsPasswordSyncedAt: true
+        }
+      })
+    ]);
+
+    const httpsClone = {
+      enabled: Boolean(user?.gitlabHttpsPasswordSyncedAt),
+      syncedAt: user?.gitlabHttpsPasswordSyncedAt ? user.gitlabHttpsPasswordSyncedAt.toISOString() : null,
+      username: connection?.username ?? user?.username ?? ""
+    };
 
     if (!connection) {
       return {
         connected: false,
-        reconnectRequired: false
+        reconnectRequired: false,
+        httpsClone
       };
     }
 
@@ -492,7 +515,8 @@ export class GitlabService {
       name: connection.name,
       email: connection.email,
       avatarUrl: connection.avatarUrl,
-      webUrl: connection.webUrl
+      webUrl: connection.webUrl,
+      httpsClone
     };
   }
 

@@ -112,6 +112,7 @@ model User {
   globalRole             GlobalRole             @default(READER)
   timezone               String                 @default("Europe/Madrid")
   isActive               Boolean                @default(true)
+  gitlabHttpsPasswordSyncedAt DateTime?
   createdAt              DateTime               @default(now())
   updatedAt              DateTime               @updatedAt
   deletedAt              DateTime?
