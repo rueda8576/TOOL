@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "../../components/app-shell";
+import { ProjectDirectoryRow } from "../../components/project-directory-row";
 import { ArchiveEntryPanel, ArchiveIndex, ArchiveRow, LoadingState, MetadataStrip, WorkspaceHeader } from "../../components/ui";
 import {
   AdminManagedUser,
@@ -16,11 +17,17 @@ import {
 } from "../../lib/admin-users";
 import { authFetch, LoginResponse } from "../../lib/client-api";
 import { ProjectSummary } from "../../lib/api";
+import {
+  BackupOperationLedgerItem,
+  ProjectOperationsLedger,
+  enqueueBackupOperation,
+  listProjectOperations
+} from "../../lib/operations";
 import { useConfirmDialog } from "../../lib/use-confirm-dialog";
 
 type ProjectOrderBy = "newest" | "key" | "name";
 type InviteAccessMode = "all" | "selected";
-type WorkspaceMode = "projects" | "users";
+type WorkspaceMode = "projects" | "users" | "operations";
 type ProjectScopedRole = "editor" | "reader";
 type ProjectRoleMap = Record<string, ProjectScopedRole>;
 
@@ -60,6 +67,73 @@ function formatProjectDate(project: ProjectSummary): string {
     return "Date unavailable";
   }
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(timestamp);
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) {
+    return "Pending";
+  }
+
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return "Date unavailable";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(timestamp);
+}
+
+function formatBytes(value: number | null): string {
+  if (value === null) {
+    return "Not recorded";
+  }
+
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = value / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
+function formatDuration(value: number | null): string {
+  if (value === null) {
+    return "In progress";
+  }
+
+  if (value < 1000) {
+    return `${value} ms`;
+  }
+
+  const totalSeconds = Math.round(value / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+function formatSha(value: string | null): string {
+  return value ? value.slice(0, 12) : "Unavailable";
+}
+
+function backupStatusLabel(status: BackupOperationLedgerItem["status"]): string {
+  const labels: Record<BackupOperationLedgerItem["status"], string> = {
+    running: "Running",
+    succeeded: "Succeeded",
+    failed: "Failed"
+  };
+  return labels[status];
 }
 
 function compareProjectsWithinGroup(left: ProjectSummary, right: ProjectSummary, orderBy: ProjectOrderBy): number {
@@ -147,6 +221,11 @@ export default function ProjectsPage(): JSX.Element {
   const [hardDeleteCheckByUserId, setHardDeleteCheckByUserId] = useState<Record<string, AdminUserHardDeleteCheck>>({});
   const [hardDeleteCheckLoadingId, setHardDeleteCheckLoadingId] = useState<string | null>(null);
   const [hardDeleteCheckError, setHardDeleteCheckError] = useState<string | null>(null);
+  const [operationsLedger, setOperationsLedger] = useState<ProjectOperationsLedger | null>(null);
+  const [operationsLoading, setOperationsLoading] = useState(false);
+  const [operationsError, setOperationsError] = useState<string | null>(null);
+  const [operationsSuccess, setOperationsSuccess] = useState<string | null>(null);
+  const [backupQueueing, setBackupQueueing] = useState(false);
 
   const loadProjects = useCallback(
     async (authToken: string): Promise<void> => {
@@ -183,6 +262,20 @@ export default function ProjectsPage(): JSX.Element {
     }
   }, []);
 
+  const loadOperations = useCallback(async (authToken: string): Promise<void> => {
+    setOperationsLoading(true);
+
+    try {
+      const ledger = await listProjectOperations(authToken);
+      setOperationsLedger(ledger);
+      setOperationsError(null);
+    } catch (error) {
+      setOperationsError((error as Error).message);
+    } finally {
+      setOperationsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const storedToken = localStorage.getItem("doctoral_token");
     if (!storedToken) {
@@ -206,6 +299,14 @@ export default function ProjectsPage(): JSX.Element {
 
     void loadAdminUsers(token);
   }, [isAdmin, loadAdminUsers, token, workspaceMode]);
+
+  useEffect(() => {
+    if (workspaceMode !== "operations" || !token || !isAdmin) {
+      return;
+    }
+
+    void loadOperations(token);
+  }, [isAdmin, loadOperations, token, workspaceMode]);
 
   useEffect(() => {
     const availableProjectIds = new Set(projects.map((project) => project.id));
@@ -568,7 +669,7 @@ export default function ProjectsPage(): JSX.Element {
     }
   };
 
-  const onToggleManageUsers = (): void => {
+  const onSetWorkspaceMode = (nextMode: WorkspaceMode): void => {
     if (!token || !isAdmin) {
       return;
     }
@@ -576,15 +677,38 @@ export default function ProjectsPage(): JSX.Element {
     setAdminUsersError(null);
     setAdminUsersSuccess(null);
     setHardDeleteCheckError(null);
-    setWorkspaceMode((current) => {
-      const next = current === "users" ? "projects" : "users";
-      if (next === "users") {
-        setIsCreateOpen(false);
-        setIsInviteOpen(false);
-        void loadAdminUsers(token);
-      }
-      return next;
-    });
+    setOperationsError(null);
+    setOperationsSuccess(null);
+    setIsCreateOpen(false);
+    setIsInviteOpen(false);
+    setWorkspaceMode(nextMode);
+
+    if (nextMode === "users") {
+      void loadAdminUsers(token);
+    }
+    if (nextMode === "operations") {
+      void loadOperations(token);
+    }
+  };
+
+  const onQueueBackup = async (): Promise<void> => {
+    if (!token || backupQueueing) {
+      return;
+    }
+
+    setBackupQueueing(true);
+    setOperationsError(null);
+    setOperationsSuccess(null);
+
+    try {
+      const result = await enqueueBackupOperation(token);
+      setOperationsSuccess(`Backup job ${result.jobId || "queued"} was queued.`);
+      await loadOperations(token);
+    } catch (error) {
+      setOperationsError((error as Error).message);
+    } finally {
+      setBackupQueueing(false);
+    }
   };
 
   const onSelectManagedUser = (managedUser: AdminManagedUser): void => {
@@ -708,10 +832,16 @@ export default function ProjectsPage(): JSX.Element {
     }
   };
 
-  const workspaceTitle = workspaceMode === "users" ? "Manage users" : "Project directory";
+  const workspaceTitle = workspaceMode === "users"
+    ? "Manage users"
+    : workspaceMode === "operations"
+      ? "Operations ledger"
+      : "Project directory";
   const workspaceHelper = workspaceMode === "users"
     ? "Audit account access, project roles, and destructive-action blockers from one admin surface."
-    : "Browse active research archives, keep priority projects pinned, and open new work from the directory.";
+    : workspaceMode === "operations"
+      ? "Review backup runs, validation metadata, and restore readiness without exposing destructive restore controls."
+      : "Browse active research archives, keep priority projects pinned, and open new work from the directory.";
 
   return (
     <AppShell>
@@ -725,7 +855,13 @@ export default function ProjectsPage(): JSX.Element {
               items={
                 workspaceMode === "users"
                   ? [`${adminUsers.length} users`, `${filteredAdminUsers.length} shown`]
-                  : [`${projects.length} projects`, `${projects.filter((project) => project.isPinned).length} pinned`, `${filteredDirectoryProjects.length} shown`]
+                  : workspaceMode === "operations"
+                    ? [
+                        `${operationsLedger?.backups.summary.total ?? 0} backup runs`,
+                        `${operationsLedger?.backups.summary.running ?? 0} running`,
+                        operationsLedger ? `Updated ${formatDateTime(operationsLedger.generatedAt)}` : "Not loaded"
+                      ]
+                    : [`${projects.length} projects`, `${projects.filter((project) => project.isPinned).length} pinned`, `${filteredDirectoryProjects.length} shown`]
               }
             />
           }
@@ -745,9 +881,48 @@ export default function ProjectsPage(): JSX.Element {
                 </button>
               ) : null}
               {isAdmin ? (
-                <button className="button button-secondary projects-invite-toggle-button" type="button" onClick={onToggleManageUsers}>
+                <button
+                  className="button button-secondary projects-invite-toggle-button"
+                  type="button"
+                  onClick={() => onSetWorkspaceMode(workspaceMode === "users" ? "projects" : "users")}
+                >
                   {workspaceMode === "users" ? "Back to projects" : "Manage users"}
                 </button>
+              ) : null}
+              {isAdmin ? (
+                <button
+                  className="button button-secondary projects-invite-toggle-button"
+                  type="button"
+                  onClick={() => onSetWorkspaceMode(workspaceMode === "operations" ? "projects" : "operations")}
+                >
+                  {workspaceMode === "operations" ? "Back to projects" : "Operations"}
+                </button>
+              ) : null}
+              {isAdmin && workspaceMode === "operations" ? (
+                <>
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    onClick={() => {
+                      if (token) {
+                        void loadOperations(token);
+                      }
+                    }}
+                    disabled={operationsLoading}
+                  >
+                    {operationsLoading ? "Refreshing..." : "Refresh"}
+                  </button>
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => {
+                      void onQueueBackup();
+                    }}
+                    disabled={backupQueueing}
+                  >
+                    {backupQueueing ? "Queueing..." : "Run backup"}
+                  </button>
+                </>
               ) : null}
               {isAdmin && workspaceMode === "projects" ? (
                 <button
@@ -800,6 +975,8 @@ export default function ProjectsPage(): JSX.Element {
         {adminUsersSuccess ? <p className="alert alert-success">{adminUsersSuccess}</p> : null}
         {adminUsersError ? <p className="alert alert-error">{adminUsersError}</p> : null}
         {hardDeleteCheckError ? <p className="alert alert-error">{hardDeleteCheckError}</p> : null}
+        {operationsSuccess ? <p className="alert alert-success">{operationsSuccess}</p> : null}
+        {operationsError ? <p className="alert alert-error">{operationsError}</p> : null}
         {listError ? (
           <p className="alert alert-error">
             {listError}. Please <Link href="/login">sign in again</Link>.
@@ -1038,52 +1215,16 @@ export default function ProjectsPage(): JSX.Element {
                     <span className="projects-index-count">{filteredDirectoryProjects.length} shown</span>
                   </div>
                   {filteredDirectoryProjects.map((project) => (
-                    <ArchiveRow className="projects-directory-row" key={project.id}>
-                      <div className="archive-row-main">
-                        <div className="stack-xxs">
-                          <div className="projects-list-header">
-                            <h4 className="archive-row-title">
-                              <span className="projects-key">{project.key}</span> {project.name}
-                            </h4>
-                            {project.isPinned ? <span className="badge projects-pinned-badge">Pinned</span> : null}
-                          </div>
-                          <p className="archive-row-detail">{project.description ?? "No description"}</p>
-                          <MetadataStrip
-                            items={[
-                              `Created ${formatProjectDate(project)}`,
-                              project.isPinned ? "Pinned in directory" : "Unpinned"
-                            ]}
-                          />
-                        </div>
-                        <div className="archive-row-actions">
-                          <Link className="button button-secondary" href={`/projects/${project.id}`}>
-                            Open
-                          </Link>
-                          <button
-                            className="button button-ghost"
-                            type="button"
-                            disabled={pinBusyProjectId === project.id}
-                            onClick={() => {
-                              void onTogglePin(project);
-                            }}
-                          >
-                            {pinBusyProjectId === project.id ? "Saving..." : project.isPinned ? "Unpin" : "Pin"}
-                          </button>
-                          {isAdmin ? (
-                            <button
-                              className="button button-danger"
-                              type="button"
-                              disabled={deletingProjectId === project.id}
-                              onClick={() => {
-                                void onDeleteProject(project);
-                              }}
-                            >
-                              {deletingProjectId === project.id ? "Deleting..." : "Delete"}
-                            </button>
-                          ) : null}
-                        </div>
-                      </div>
-                    </ArchiveRow>
+                    <ProjectDirectoryRow
+                      key={project.id}
+                      createdLabel={formatProjectDate(project)}
+                      deleting={deletingProjectId === project.id}
+                      isAdmin={isAdmin}
+                      onDeleteProject={onDeleteProject}
+                      onTogglePin={onTogglePin}
+                      pinBusy={pinBusyProjectId === project.id}
+                      project={project}
+                    />
                   ))}
                 </ArchiveIndex>
               ) : (
@@ -1091,6 +1232,86 @@ export default function ProjectsPage(): JSX.Element {
               )
             ) : null}
           </>
+        ) : workspaceMode === "operations" ? (
+          <div className="projects-operations-workspace">
+            <section className="projects-operations-summary">
+              <div>
+                <h3 className="section-heading">Backup operations</h3>
+                <p className="projects-toolbar-helper">
+                  Restore drills run from maintenance tooling; this ledger queues backups and records readiness evidence only.
+                </p>
+              </div>
+              <MetadataStrip
+                items={[
+                  `${operationsLedger?.backups.summary.succeeded ?? 0} succeeded`,
+                  `${operationsLedger?.backups.summary.failed ?? 0} failed`,
+                  `${operationsLedger?.backups.summary.running ?? 0} running`
+                ]}
+              />
+            </section>
+
+            {operationsLoading ? <LoadingState title="Loading operations" detail="Reading backup runs and integrity metadata." /> : null}
+
+            {!operationsLoading && !operationsLedger ? (
+              <p className="alert alert-info">Operations ledger has not been loaded yet.</p>
+            ) : null}
+
+            {!operationsLoading && operationsLedger ? (
+              operationsLedger.backups.runs.length > 0 ? (
+                <ArchiveIndex className="projects-operations-index">
+                  <div className="archive-index-header">
+                    <div className="stack-xxs">
+                      <p className="eyebrow">Backups</p>
+                      <h3 className="section-heading">Recent runs</h3>
+                    </div>
+                    <span className="projects-index-count">{operationsLedger.backups.runs.length} shown</span>
+                  </div>
+
+                  {operationsLedger.backups.runs.map((run) => {
+                    const versions = Object.entries(run.toolVersions);
+
+                    return (
+                      <ArchiveRow className="projects-operations-row" key={run.id}>
+                        <div className="archive-row-main">
+                          <div className="stack-xxs">
+                            <div className="projects-list-header">
+                              <h4 className="archive-row-title">
+                                <span className="projects-key">{run.id}</span> Backup run
+                              </h4>
+                              <span className={`badge projects-operation-badge projects-operation-badge-${run.status}`}>
+                                {backupStatusLabel(run.status)}
+                              </span>
+                            </div>
+                            <p className="archive-row-detail">
+                              Started {formatDateTime(run.startedAt)}. Completed {formatDateTime(run.completedAt)}.
+                            </p>
+                            <MetadataStrip
+                              items={[
+                                `Duration ${formatDuration(run.durationMs)}`,
+                                `Database ${formatBytes(run.dbDumpBytes)}`,
+                                `Storage ${formatBytes(run.storageArchiveBytes)}`,
+                                `Retention ${formatDateTime(run.retentionUntil)}`
+                              ]}
+                            />
+                            {run.error ? <p className="projects-operation-error">{run.error}</p> : null}
+                            <div className="projects-operation-integrity">
+                              <span>DB SHA {formatSha(run.dbDumpSha256)}</span>
+                              <span>Storage SHA {formatSha(run.storageArchiveSha256)}</span>
+                              {versions.slice(0, 4).map(([tool, version]) => (
+                                <span key={`${run.id}-${tool}`}>{tool} {version}</span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </ArchiveRow>
+                    );
+                  })}
+                </ArchiveIndex>
+              ) : (
+                <p className="alert alert-info">No backup runs have been recorded yet.</p>
+              )
+            ) : null}
+          </div>
         ) : (
           <div className="projects-users-workspace">
             <aside className="projects-users-sidebar">

@@ -13,6 +13,8 @@ describe("ProjectsController HTTP", () => {
     projectsService = {
       createProject: jest.fn(),
       listProjects: jest.fn(),
+      listOperations: jest.fn(),
+      enqueueBackup: jest.fn(),
       getProjectAccess: jest.fn(),
       updateProject: jest.fn(),
       pinProject: jest.fn(),
@@ -86,6 +88,67 @@ describe("ProjectsController HTTP", () => {
         isPinned: false
       }
     ]);
+  });
+
+  it("lists admin operations for admins only", async () => {
+    projectsService.listOperations.mockResolvedValue({
+      generatedAt: "2026-06-19T10:00:00.000Z",
+      backups: {
+        summary: {
+          total: 1,
+          running: 0,
+          succeeded: 1,
+          failed: 0
+        },
+        runs: []
+      }
+    });
+
+    await request(app.getHttpServer())
+      .get("/projects/admin/operations")
+      .set(authHeaders("editor"))
+      .expect(403);
+
+    const response = await request(app.getHttpServer())
+      .get("/projects/admin/operations")
+      .set(authHeaders("admin", { userId: "admin-1" }))
+      .expect(200);
+
+    expect(projectsService.listOperations).toHaveBeenCalledWith({
+      userId: "admin-1",
+      email: "admin@example.com",
+      globalRole: "admin"
+    });
+    expect(response.body.backups.summary.total).toBe(1);
+  });
+
+  it("enqueues backups for admins only", async () => {
+    projectsService.enqueueBackup.mockResolvedValue({
+      jobId: "backup-job-1",
+      queuedAt: "2026-06-19T10:00:00.000Z"
+    });
+
+    await request(app.getHttpServer())
+      .post("/projects/admin/operations/backups")
+      .set(authHeaders("reader"))
+      .send({})
+      .expect(403);
+
+    const response = await request(app.getHttpServer())
+      .post("/projects/admin/operations/backups")
+      .set(authHeaders("admin", { userId: "admin-1" }))
+      .send({})
+      .expect(201);
+
+    expect(projectsService.enqueueBackup).toHaveBeenCalledWith({
+      userId: "admin-1",
+      email: "admin@example.com",
+      globalRole: "admin"
+    });
+    expect(response.body).toEqual({
+      jobId: "backup-job-1",
+      queuedAt: "2026-06-19T10:00:00.000Z"
+    });
   });
 
   it("binds add-member params, DTO, and current user", async () => {

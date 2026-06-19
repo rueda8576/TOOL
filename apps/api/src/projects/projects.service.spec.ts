@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { CompileStatus, ProjectRole, TaskPriority, TaskStatus } from "@prisma/client";
+import { BackupStatus, CompileStatus, ProjectRole, TaskPriority, TaskStatus } from "@prisma/client";
 
 import { ProjectsService } from "./projects.service";
 
@@ -10,6 +10,7 @@ describe("ProjectsService", () => {
     accessService: any;
     auditService: any;
     gitlabService: any;
+    queueService: any;
   } => {
     const prisma: any = {
       project: {
@@ -37,6 +38,10 @@ describe("ProjectsService", () => {
       },
       auditLog: {
         findMany: jest.fn()
+      },
+      backupRun: {
+        findMany: jest.fn(),
+        count: jest.fn()
       },
       projectMember: {
         findMany: jest.fn(),
@@ -75,12 +80,17 @@ describe("ProjectsService", () => {
       unarchiveManagedRepository: jest.fn()
     };
 
+    const queueService: any = {
+      enqueueBackup: jest.fn()
+    };
+
     return {
-      service: new ProjectsService(prisma, accessService, auditService, gitlabService),
+      service: new ProjectsService(prisma, accessService, auditService, gitlabService, queueService),
       prisma,
       accessService,
       auditService,
-      gitlabService
+      gitlabService,
+      queueService
     };
   };
 
@@ -146,6 +156,151 @@ describe("ProjectsService", () => {
         where: { deletedAt: null }
       })
     );
+  });
+
+  it("lists the admin operations ledger with backup integrity metadata", async () => {
+    const { service, prisma } = makeService();
+    const startedAt = new Date("2026-06-19T08:00:00.000Z");
+    const completedAt = new Date("2026-06-19T08:02:00.000Z");
+    const retentionUntil = new Date("2026-07-19T08:02:00.000Z");
+
+    prisma.backupRun.findMany.mockResolvedValue([
+      {
+        id: "backup-1",
+        status: BackupStatus.SUCCEEDED,
+        startedAt,
+        completedAt,
+        retentionUntil,
+        details: {
+          durationMs: 120_000,
+          dbDump: {
+            bytes: 2048,
+            sha256: "db-sha"
+          },
+          storageArchive: {
+            bytes: 4096,
+            sha256: "storage-sha"
+          },
+          versions: {
+            pgDump: "pg_dump 16.9",
+            tar: "tar 1.34"
+          }
+        }
+      },
+      {
+        id: "backup-2",
+        status: BackupStatus.FAILED,
+        startedAt: new Date("2026-06-18T08:00:00.000Z"),
+        completedAt: new Date("2026-06-18T08:00:10.000Z"),
+        retentionUntil: null,
+        details: {
+          error: "pg_dump failed"
+        }
+      }
+    ]);
+    prisma.backupRun.count
+      .mockResolvedValueOnce(8)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(6)
+      .mockResolvedValueOnce(1);
+
+    const result = await service.listOperations({
+      userId: "admin-1",
+      email: "admin@example.com",
+      globalRole: "admin"
+    });
+
+    expect(prisma.backupRun.findMany).toHaveBeenCalledWith({
+      orderBy: { startedAt: "desc" },
+      take: 25,
+      select: {
+        id: true,
+        status: true,
+        startedAt: true,
+        completedAt: true,
+        retentionUntil: true,
+        details: true
+      }
+    });
+    expect(result.backups.summary).toEqual({
+      total: 8,
+      running: 1,
+      succeeded: 6,
+      failed: 1
+    });
+    expect(result.backups.runs[0]).toEqual({
+      id: "backup-1",
+      status: "succeeded",
+      startedAt: "2026-06-19T08:00:00.000Z",
+      completedAt: "2026-06-19T08:02:00.000Z",
+      retentionUntil: "2026-07-19T08:02:00.000Z",
+      durationMs: 120000,
+      dbDumpBytes: 2048,
+      storageArchiveBytes: 4096,
+      dbDumpSha256: "db-sha",
+      storageArchiveSha256: "storage-sha",
+      toolVersions: {
+        pgDump: "pg_dump 16.9",
+        tar: "tar 1.34"
+      },
+      error: null
+    });
+    expect(result.backups.runs[1]).toEqual(expect.objectContaining({
+      id: "backup-2",
+      status: "failed",
+      error: "pg_dump failed"
+    }));
+  });
+
+  it("rejects operations ledger access for non-admin users", async () => {
+    const { service, prisma } = makeService();
+
+    await expect(
+      service.listOperations({
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      })
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.backupRun.findMany).not.toHaveBeenCalled();
+  });
+
+  it("enqueues a manual backup for admins and writes audit", async () => {
+    const { service, queueService, auditService } = makeService();
+    queueService.enqueueBackup.mockResolvedValue("backup-job-1");
+
+    const result = await service.enqueueBackup({
+      userId: "admin-1",
+      email: "admin@example.com",
+      globalRole: "admin"
+    });
+
+    expect(queueService.enqueueBackup).toHaveBeenCalledWith({ requestedBy: "admin-1" });
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "admin-1",
+      entityType: "backup_run",
+      entityId: "backup-job-1",
+      action: "backup.enqueue"
+    });
+    expect(result).toEqual({
+      jobId: "backup-job-1",
+      queuedAt: expect.any(String)
+    });
+  });
+
+  it("rejects manual backup enqueue for non-admin users", async () => {
+    const { service, queueService } = makeService();
+
+    await expect(
+      service.enqueueBackup({
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      })
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(queueService.enqueueBackup).not.toHaveBeenCalled();
   });
 
   it("allows admins to create projects and logs audit", async () => {
