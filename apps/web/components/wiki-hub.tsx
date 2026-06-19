@@ -3182,6 +3182,10 @@ export function WikiHub({
             role="separator"
             aria-label="Resize wiki pages and content panels"
             aria-orientation="vertical"
+            aria-valuemin={WIKI_SIDEBAR_MIN_PX}
+            aria-valuemax={WIKI_SIDEBAR_MAX_PX}
+            aria-valuenow={Math.round(sidebarWidthPx ?? WIKI_SIDEBAR_AUTO_FALLBACK_PX)}
+            aria-valuetext={`${Math.round(sidebarWidthPx ?? WIKI_SIDEBAR_AUTO_FALLBACK_PX)} pixels`}
             tabIndex={0}
             onPointerDown={onSidebarSplitterPointerDown}
             onDoubleClick={onSidebarSplitterDoubleClick}

@@ -14,7 +14,6 @@ import {
 import { useRouter } from "next/navigation";
 import { FileText } from "lucide-react";
 import type { editor as MonacoEditorApi } from "monaco-editor";
-import { MonacoBinding } from "y-monaco";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 
@@ -29,6 +28,7 @@ import {
   buildCollaboratorIdentity,
   CollaboratorIdentity,
   CollaboratorPresence,
+  getCollaboratorTextColor,
   listCollaboratorsFromAwareness,
   resolveCollaborationServerUrl
 } from "../../../../../lib/documents-collaboration";
@@ -50,6 +50,8 @@ import { inferMonacoDocumentLanguage } from "../../../../../lib/monaco-languages
 import { getProjectAccess, ProjectAccess } from "../../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../../lib/use-confirm-dialog";
 import { useUnsavedChangesGuard } from "../../../../../lib/use-unsaved-changes-guard";
+
+type MonacoCollaborationBinding = { destroy: () => void };
 
 type LatexTreeEntry = { path: string; isDirectory: boolean };
 type LatexTreeNode = { name: string; path: string; isDirectory: boolean; children: LatexTreeNode[] };
@@ -274,7 +276,7 @@ export default function DocumentDetailPage({
   const autoCompileVersionRef = useRef<string | null>(null);
   const fileCollabProviderRef = useRef<WebsocketProvider | null>(null);
   const fileCollabDocRef = useRef<Y.Doc | null>(null);
-  const fileCollabBindingRef = useRef<MonacoBinding | null>(null);
+  const fileCollabBindingRef = useRef<MonacoCollaborationBinding | null>(null);
   const presenceCollabProviderRef = useRef<WebsocketProvider | null>(null);
   const presenceCollabDocRef = useRef<Y.Doc | null>(null);
   const monacoInstanceRef = useRef<MonacoEditorApi.IStandaloneCodeEditor | null>(null);
@@ -859,16 +861,25 @@ export default function DocumentDetailPage({
       fileCollabBindingRef.current = null;
     }
 
-    const binding = new MonacoBinding(fileDoc.getText(DOCUMENT_COLLAB_TEXT_KEY), model, new Set([editor]), fileProvider.awareness);
-    fileCollabBindingRef.current = binding;
+    let cancelled = false;
+    let binding: MonacoCollaborationBinding | null = null;
+    void import("y-monaco").then(({ MonacoBinding }) => {
+      if (cancelled) {
+        return;
+      }
+      binding = new MonacoBinding(fileDoc.getText(DOCUMENT_COLLAB_TEXT_KEY), model, new Set([editor]), fileProvider.awareness);
+      fileCollabBindingRef.current = binding;
+    });
 
     return () => {
-      if (fileCollabBindingRef.current === binding) {
-        binding.destroy();
-        fileCollabBindingRef.current = null;
-      } else {
-        binding.destroy();
+      cancelled = true;
+      if (!binding) {
+        return;
       }
+      if (fileCollabBindingRef.current === binding) {
+        fileCollabBindingRef.current = null;
+      }
+      binding.destroy();
     };
   }, [currentVersion?.id, monacoReadyTick, selectedLatexPath, showLatexWorkspace]);
 
@@ -1490,7 +1501,11 @@ export default function DocumentDetailPage({
               <span
                 key={`${collaborator.id}-${collaborator.clientId}`}
                 className={collaborator.isSelf ? "documents-collaborator-pill documents-collaborator-pill-self" : "documents-collaborator-pill"}
-                style={{ backgroundColor: collaborator.color, borderColor: collaborator.color }}
+                style={{
+                  backgroundColor: collaborator.color,
+                  borderColor: collaborator.color,
+                  color: getCollaboratorTextColor(collaborator.color)
+                }}
                 title={
                   collaborator.activePath
                     ? `${collaborator.name} editing ${collaborator.activePath}`
@@ -1705,6 +1720,10 @@ export default function DocumentDetailPage({
                 role="separator"
                 aria-label="Resize editor and preview panels"
                 aria-orientation="vertical"
+                aria-valuemin={MIN_DOCUMENT_PANE_WIDTH_PX}
+                aria-valuemax={Math.max(MIN_DOCUMENT_PANE_WIDTH_PX, Math.round((leftPaneWidthPx ?? MIN_DOCUMENT_PANE_WIDTH_PX) * 2))}
+                aria-valuenow={Math.round(leftPaneWidthPx ?? MIN_DOCUMENT_PANE_WIDTH_PX)}
+                aria-valuetext={`${Math.round(leftPaneWidthPx ?? MIN_DOCUMENT_PANE_WIDTH_PX)} pixels`}
                 tabIndex={0}
                 onPointerDown={onSplitterPointerDown}
                 onKeyDown={onSplitterKeyDown}

@@ -13,6 +13,8 @@ export type CollaboratorPresence = CollaboratorIdentity & {
   activePath: string | null;
 };
 
+type RgbColor = { red: number; green: number; blue: number };
+
 function extractInitials(name: string): string {
   const parts = name
     .trim()
@@ -41,6 +43,136 @@ function stableColorFromSeed(seed: string): string {
 
   const hue = Math.abs(hash) % 360;
   return `hsl(${hue} 72% 42%)`;
+}
+
+function clampColorChannel(value: number): number {
+  return Math.min(Math.max(Math.round(value), 0), 255);
+}
+
+function parseHexColor(color: string): RgbColor | null {
+  const hex = color.trim().replace(/^#/, "");
+  if (!/^[\da-f]{6}$/i.test(hex)) {
+    return null;
+  }
+
+  return {
+    red: Number.parseInt(hex.slice(0, 2), 16),
+    green: Number.parseInt(hex.slice(2, 4), 16),
+    blue: Number.parseInt(hex.slice(4, 6), 16)
+  };
+}
+
+function parseRgbColor(color: string): RgbColor | null {
+  const match = color.match(/^rgba?\((.+)\)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const channels = match[1]
+    .split(/[,\s/]+/)
+    .filter(Boolean)
+    .slice(0, 3)
+    .map((channel) => Number.parseFloat(channel));
+
+  if (channels.length !== 3 || channels.some((channel) => !Number.isFinite(channel))) {
+    return null;
+  }
+
+  return {
+    red: clampColorChannel(channels[0]),
+    green: clampColorChannel(channels[1]),
+    blue: clampColorChannel(channels[2])
+  };
+}
+
+function hslToRgb(hue: number, saturation: number, lightness: number): RgbColor {
+  const normalizedHue = ((((hue % 360) + 360) % 360) / 360);
+  const normalizedSaturation = Math.min(Math.max(saturation / 100, 0), 1);
+  const normalizedLightness = Math.min(Math.max(lightness / 100, 0), 1);
+
+  if (normalizedSaturation === 0) {
+    const channel = clampColorChannel(normalizedLightness * 255);
+    return { red: channel, green: channel, blue: channel };
+  }
+
+  const q =
+    normalizedLightness < 0.5
+      ? normalizedLightness * (1 + normalizedSaturation)
+      : normalizedLightness + normalizedSaturation - normalizedLightness * normalizedSaturation;
+  const p = 2 * normalizedLightness - q;
+  const channel = (offset: number): number => {
+    let t = normalizedHue + offset;
+    if (t < 0) {
+      t += 1;
+    }
+    if (t > 1) {
+      t -= 1;
+    }
+    if (t < 1 / 6) {
+      return p + (q - p) * 6 * t;
+    }
+    if (t < 1 / 2) {
+      return q;
+    }
+    if (t < 2 / 3) {
+      return p + (q - p) * (2 / 3 - t) * 6;
+    }
+    return p;
+  };
+
+  return {
+    red: clampColorChannel(channel(1 / 3) * 255),
+    green: clampColorChannel(channel(0) * 255),
+    blue: clampColorChannel(channel(-1 / 3) * 255)
+  };
+}
+
+function parseHslColor(color: string): RgbColor | null {
+  const match = color.match(/^hsla?\(\s*([+-]?\d+(?:\.\d+)?)(?:deg)?[\s,]+(\d+(?:\.\d+)?)%[\s,]+(\d+(?:\.\d+)?)%/i);
+  if (!match) {
+    return null;
+  }
+
+  const hue = Number.parseFloat(match[1]);
+  const saturation = Number.parseFloat(match[2]);
+  const lightness = Number.parseFloat(match[3]);
+  if (![hue, saturation, lightness].every((value) => Number.isFinite(value))) {
+    return null;
+  }
+
+  return hslToRgb(hue, saturation, lightness);
+}
+
+function parseCssColor(color: string): RgbColor | null {
+  const normalizedColor = color.trim();
+  return parseHexColor(normalizedColor) ?? parseRgbColor(normalizedColor) ?? parseHslColor(normalizedColor);
+}
+
+function relativeLuminance(color: RgbColor): number {
+  const channel = (value: number): number => {
+    const normalized = value / 255;
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+
+  return 0.2126 * channel(color.red) + 0.7152 * channel(color.green) + 0.0722 * channel(color.blue);
+}
+
+function contrastRatio(left: number, right: number): number {
+  const lighter = Math.max(left, right);
+  const darker = Math.min(left, right);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+export function getCollaboratorTextColor(backgroundColor: string): string {
+  const parsedBackground = parseCssColor(backgroundColor);
+  if (!parsedBackground) {
+    return "#111515";
+  }
+
+  const backgroundLuminance = relativeLuminance(parsedBackground);
+  const lightContrast = contrastRatio(backgroundLuminance, 1);
+  const darkContrast = contrastRatio(backgroundLuminance, relativeLuminance({ red: 17, green: 21, blue: 21 }));
+  return lightContrast >= darkContrast ? "#ffffff" : "#111515";
 }
 
 export function buildCollaboratorIdentity(user: LoginResponse["user"] | null): CollaboratorIdentity | null {
