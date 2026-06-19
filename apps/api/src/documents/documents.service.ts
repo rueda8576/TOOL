@@ -1,4 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import type {
+  CompileStatusValue,
+  DocumentDetail,
+  DocumentListItem,
+  DocumentTypeValue,
+  DocumentVersionSummary
+} from "@doctoral/shared";
 import { CompileStatus, DocumentType } from "@prisma/client";
 import AdmZip from "adm-zip";
 import { mkdir, readdir, readFile, writeFile } from "fs/promises";
@@ -15,43 +22,7 @@ import { CreateDocumentBranchDto } from "./dto/create-document-branch.dto";
 import { CreateDocumentDto } from "./dto/create-document.dto";
 import { CreateDocumentVersionDto } from "./dto/create-document-version.dto";
 
-type CompileStatusValue = "pending" | "running" | "succeeded" | "failed" | "timeout";
-type DocumentTypeValue = "paper" | "manual" | "model" | "draft" | "minutes" | "other";
-
-export type DocumentVersionSummary = {
-  id: string;
-  versionNumber: number;
-  compileStatus: CompileStatusValue;
-  hasPdf: boolean;
-  hasLatex: boolean;
-  latexEntryFile: string | null;
-  createdAt: string;
-};
-
-export type DocumentListItem = {
-  id: string;
-  projectId: string;
-  title: string;
-  type: DocumentTypeValue;
-  authors: string[];
-  tags: string[];
-  publishedAt: string | null;
-  updatedAt: string;
-  latestMainVersion: DocumentVersionSummary | null;
-};
-
-export type DocumentDetail = {
-  id: string;
-  projectId: string;
-  title: string;
-  type: DocumentTypeValue;
-  authors: string[];
-  tags: string[];
-  publishedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  latestMainVersion: DocumentVersionSummary | null;
-};
+export type { DocumentDetail, DocumentListItem, DocumentVersionSummary } from "@doctoral/shared";
 
 const mapDocumentType = (type?: string): DocumentType => {
   switch (type) {

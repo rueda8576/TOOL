@@ -1583,7 +1583,7 @@ describe("WikiService", () => {
     );
 
     expect(result.totals.conflicts).toBe(2);
-    expect(result.pages.map((page) => page.reason)).toEqual([
+    expect(result.pages.map((page: { reason: string | null }) => page.reason)).toEqual([
       "Destination Docs file exists with different content",
       "Destination wiki path is already used"
     ]);
@@ -2163,7 +2163,7 @@ describe("WikiService", () => {
         docsKind: "research"
       })
     );
-    expect(tree[0]?.children[0]?.children.map((node) => node.path)).toEqual([
+    expect(tree[0]?.children[0]?.children.map((node: { path: string }) => node.path)).toEqual([
       "research/backend/readme",
       "research/backend/methods"
     ]);
