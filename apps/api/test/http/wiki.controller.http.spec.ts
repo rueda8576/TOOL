@@ -704,7 +704,7 @@ describe("WikiController HTTP", () => {
   it("streams asset bytes with inline headers", async () => {
     wikiService.getWikiAssetContent.mockResolvedValue({
       mimeType: "image/png",
-      fileName: "diagram.png",
+      fileName: "diagram\r\n\"quoted\".png",
       buffer: Buffer.from("png")
     });
 
@@ -719,7 +719,9 @@ describe("WikiController HTTP", () => {
       globalRole: "reader"
     });
     expect(response.headers["content-type"]).toContain("image/png");
-    expect(response.headers["content-disposition"]).toBe('inline; filename="diagram.png"');
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers["content-disposition"]).toBe('inline; filename="diagram___quoted_.png"');
     expect(Buffer.isBuffer(response.body)).toBe(true);
     expect(response.body.toString()).toBe("png");
   });

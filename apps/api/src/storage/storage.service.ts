@@ -5,6 +5,7 @@ import { join } from "path";
 
 import { getEnv } from "../config/env";
 import { PrismaService } from "../prisma/prisma.service";
+import { resolveContainedPath } from "../common/path-confinement";
 
 @Injectable()
 export class StorageService {
@@ -24,7 +25,7 @@ export class StorageService {
 
     const normalizedName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
     const objectKey = `${new Date().toISOString().slice(0, 10)}/${randomUUID()}-${normalizedName}`;
-    const absolutePath = join(this.storageRoot, objectKey);
+    const absolutePath = resolveContainedPath(this.storageRoot, objectKey, "Invalid storage path");
 
     const buffer = file.buffer && file.buffer.length > 0 ? file.buffer : await readFile(file.path);
 
@@ -67,7 +68,7 @@ export class StorageService {
 
     const normalizedName = params.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
     const objectKey = `${new Date().toISOString().slice(0, 10)}/${randomUUID()}-${normalizedName}`;
-    const absolutePath = join(this.storageRoot, objectKey);
+    const absolutePath = resolveContainedPath(this.storageRoot, objectKey, "Invalid storage path");
 
     await mkdir(join(this.storageRoot, new Date().toISOString().slice(0, 10)), { recursive: true });
     await writeFile(absolutePath, params.buffer);
@@ -93,8 +94,9 @@ export class StorageService {
   }
 
   async readObject(storagePath: string): Promise<Buffer> {
+    const absolutePath = resolveContainedPath(this.storageRoot, storagePath, "Invalid storage path");
     try {
-      return await readFile(join(this.storageRoot, storagePath));
+      return await readFile(absolutePath);
     } catch {
       throw new InternalServerErrorException("Stored file is unavailable");
     }

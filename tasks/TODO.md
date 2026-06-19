@@ -1,5 +1,16 @@
 # Implementation TODO (v1 bootstrap)
 
+## PR06 Security Review Blocker (2026-06-20)
+- [x] Stop PR #6 merge after exact-SHA reviewer blocked `254501870716f56a73519847055a3a4bfdcd51f3`.
+- [x] Reject cross-origin `/collab` WebSocket upgrades before `handleUpgrade` when browser `Origin` is not an allowed Atlasium origin.
+- [x] Revalidate persisted LaTeX entry files and stored workspace/bundle/output paths inside the worker before filesystem or compiler access.
+- [x] Add focused API/worker regression coverage for origin rejection, option-like/non-`.tex` entries, workspace traversal, and bundle traversal.
+- [x] Run focused specs, type-checks/builds, diff hygiene, and worker coverage gate before force-pushing a new PR #6 SHA.
+
+### Review
+- PR #6 was blocked on cookie-authenticated WebSocket origin validation and worker-side trust of persisted LaTeX paths. The correction now validates `Origin` before WebSocket upgrade, uses worker path-confinement helpers for stored LaTeX paths, and fails compile preparation without invoking LaTeX when records are corrupt.
+- Verification passed locally: `pnpm --filter @doctoral/api exec jest --config jest.config.ts --runInBand --forceExit src/documents/documents-collaboration.server.spec.ts`; `pnpm --filter @doctoral/worker exec jest --config jest.config.ts --runInBand --forceExit src/jobs/latex-compile.job.spec.ts`; `pnpm --filter @doctoral/api exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/worker exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/api build`; `pnpm --filter @doctoral/worker build`; `pnpm --filter @doctoral/worker test:coverage:gate`; `git diff --check`.
+
 ## PR04 Password Reset Queue Token Blocker (2026-06-20)
 - [x] Stop the merge train after the exact-SHA reviewer blocked PR #4.
 - [x] Remove clear password reset tokens from persisted BullMQ email payloads.
@@ -20,6 +31,16 @@
 - [x] Wait `main` CI for the #18 squash SHA and confirm `Deploy Atlasium` reached the VPS and deployed the new containers.
 - [x] Stop the train again because #18 deploy failed in final retention: `df -h` reported `12G` free, but the script required 12 GiB.
 - [x] Open fix-forward PR #19 to align retention `GB` thresholds with decimal gigabytes, then wait CI and deploy before resuming PR stack #3-#15.
+- [x] Restack PRs #3-#15 on `origin/main` after the green #19 deploy.
+- [x] Resume the autonomous merge train from PR #3.
+
+## Stacked PR05 Safety Correction (2026-06-19)
+- [x] Register the focused correction plan before edits and re-read `DESIGN.md`, `tasks/LESSONS.md`, and `tasks/TODO.md`.
+- [x] Make PR05 independently safe by keeping LaTeX ZIP materialization and version persistence atomic.
+- [x] Make the PR05 worker use the safe ZIP extractor instead of `AdmZip.extractAllTo`.
+- [x] Add focused API/worker regression tests for rejected ZIP bundles and unsafe worker extraction.
+- [x] Run focused verification, restack affected PR branches, update PR metadata, and repeat agent reviews for changed SHAs.
+- [x] Document final review, commands, remaining limits, and merge-control state.
 
 ## Git Access Persistent HTTPS Credentials (2026-06-07)
 - [x] Register the approved implementation plan before edits.

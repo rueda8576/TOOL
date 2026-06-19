@@ -51,7 +51,7 @@ import {
 const WIKI_SEGMENT_PATTERN = /^[a-z0-9-]+$/;
 const WIKI_LINK_PATTERN = /\[\[([^[\]]+)\]\]/g;
 const MARKDOWN_LINK_PATTERN = /(?<!!)\[[^\]]+]\(([^)]+)\)/g;
-const WIKI_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"]);
+const WIKI_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const WIKI_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const WIKI_DOCS_ROOT = "Docs";
 const WIKI_DOCS_BINDING_STATUS_ACTIVE = "active";

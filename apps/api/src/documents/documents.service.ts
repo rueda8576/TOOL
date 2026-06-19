@@ -14,6 +14,7 @@ import { dirname, join, resolve, sep } from "path";
 import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { ProjectAccessService } from "../common/project-access.service";
+import { extractZipSafely } from "../common/safe-zip";
 import { getEnv } from "../config/env";
 import { PrismaService } from "../prisma/prisma.service";
 import { QueueService } from "../queues/queue.service";
@@ -101,8 +102,16 @@ export class DocumentsService {
 
   private normalizeLatexPath(filePath: string): string {
     const normalized = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
-    if (!normalized || normalized.includes("..")) {
+    if (!normalized || normalized.split("/").some((segment) => segment === ".." || segment.startsWith("-"))) {
       throw new BadRequestException("Invalid latex file path");
+    }
+    return normalized;
+  }
+
+  private normalizeLatexEntryFile(filePath?: string): string {
+    const normalized = this.normalizeLatexPath(filePath ?? "main.tex");
+    if (!normalized.toLowerCase().endsWith(".tex")) {
+      throw new BadRequestException("latexEntryFile must be a .tex file");
     }
     return normalized;
   }
@@ -126,7 +135,7 @@ export class DocumentsService {
 
     const zipBuffer = await this.storageService.readObject(params.latexBundleStoragePath);
     const zip = new AdmZip(zipBuffer);
-    zip.extractAllTo(workspaceAbsolutePath, true);
+    await extractZipSafely(zip, workspaceAbsolutePath);
 
     return workspaceRelativePath;
   }
@@ -647,6 +656,7 @@ Start writing here.
     }
 
     const normalizedLatexPaths = usingLatexFolder ? this.validateLatexFolderPaths(latexPaths ?? []) : [];
+    const latexEntryFile = this.normalizeLatexEntryFile(dto.latexEntryFile);
 
     if (usingLatexFolder && latexBundleUpload) {
       throw new BadRequestException("Provide either latexBundle or latexFiles, not both");
@@ -657,60 +667,64 @@ Start writing here.
       latexBundleUpload ? this.storageService.saveUpload(latexBundleUpload, user.userId) : Promise.resolve(null)
     ]);
 
-    const createdVersion = await this.prisma.documentVersion.create({
-      data: {
-        documentId,
-        branchId: branch.id,
-        versionNumber: (latestVersion?.versionNumber ?? 0) + 1,
-        notes: dto.notes,
-        latexEntryFile: dto.latexEntryFile ?? "main.tex",
-        pdfFileId: pdfFile?.id,
-        latexBundleFileId: latexBundle?.id,
-        compileStatus: latexBundle || usingLatexFolder || usingBlankWorkspace ? CompileStatus.PENDING : CompileStatus.SUCCEEDED,
-        createdById: user.userId
-      },
-      select: {
-        id: true,
-        documentId: true,
-        branchId: true,
-        versionNumber: true,
-        compileStatus: true
+    const version = await this.prisma.$transaction(async (tx) => {
+      const createdVersion = await tx.documentVersion.create({
+        data: {
+          documentId,
+          branchId: branch.id,
+          versionNumber: (latestVersion?.versionNumber ?? 0) + 1,
+          notes: dto.notes,
+          latexEntryFile,
+          pdfFileId: pdfFile?.id,
+          latexBundleFileId: latexBundle?.id,
+          compileStatus: latexBundle || usingLatexFolder || usingBlankWorkspace ? CompileStatus.PENDING : CompileStatus.SUCCEEDED,
+          createdById: user.userId
+        },
+        select: {
+          id: true,
+          documentId: true,
+          branchId: true,
+          versionNumber: true,
+          compileStatus: true
+        }
+      });
+
+      let latexWorkspacePath: string | null = null;
+      if (latexBundle && createdVersion.id) {
+        latexWorkspacePath = await this.materializeLatexWorkspace({
+          documentVersionId: createdVersion.id,
+          latexBundleStoragePath: latexBundle.storagePath
+        });
+      } else if (usingLatexFolder && createdVersion.id) {
+        latexWorkspacePath = await this.materializeLatexWorkspaceFromFolder({
+          documentVersionId: createdVersion.id,
+          latexFiles,
+          latexPaths: normalizedLatexPaths
+        });
+      } else if (usingBlankWorkspace && createdVersion.id) {
+        latexWorkspacePath = await this.materializeDefaultLatexWorkspace({
+          documentVersionId: createdVersion.id
+        });
       }
+
+      if (!latexWorkspacePath) {
+        return createdVersion;
+      }
+
+      return tx.documentVersion.update({
+        where: { id: createdVersion.id },
+        data: {
+          latexWorkspacePath
+        },
+        select: {
+          id: true,
+          documentId: true,
+          branchId: true,
+          versionNumber: true,
+          compileStatus: true
+        }
+      });
     });
-
-    let latexWorkspacePath: string | null = null;
-    if (latexBundle && createdVersion.id) {
-      latexWorkspacePath = await this.materializeLatexWorkspace({
-        documentVersionId: createdVersion.id,
-        latexBundleStoragePath: latexBundle.storagePath
-      });
-    } else if (usingLatexFolder && createdVersion.id) {
-      latexWorkspacePath = await this.materializeLatexWorkspaceFromFolder({
-        documentVersionId: createdVersion.id,
-        latexFiles,
-        latexPaths: normalizedLatexPaths
-      });
-    } else if (usingBlankWorkspace && createdVersion.id) {
-      latexWorkspacePath = await this.materializeDefaultLatexWorkspace({
-        documentVersionId: createdVersion.id
-      });
-    }
-
-    const version = latexWorkspacePath
-      ? await this.prisma.documentVersion.update({
-          where: { id: createdVersion.id },
-          data: {
-            latexWorkspacePath
-          },
-          select: {
-            id: true,
-            documentId: true,
-            branchId: true,
-            versionNumber: true,
-            compileStatus: true
-          }
-        })
-      : createdVersion;
 
     await this.auditService.log({
       userId: user.userId,

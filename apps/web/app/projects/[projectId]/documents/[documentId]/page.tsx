@@ -328,7 +328,7 @@ export default function DocumentDetailPage({
       console.error("Failed to resolve collaboration websocket URL.", error);
       return {
         collaborationServerUrl: null,
-        collaborationConfigError: "Realtime collaboration is unavailable. You can continue editing locally."
+        collaborationConfigError: "Realtime unavailable. Local editing remains active."
       };
     }
   }, []);
@@ -687,7 +687,6 @@ export default function DocumentDetailPage({
         connect: true,
         disableBc: true,
         params: {
-          token,
           kind: "presence",
           documentId: params.documentId
         }
@@ -695,7 +694,7 @@ export default function DocumentDetailPage({
     } catch (connectionError) {
       console.error("Failed to initialize collaboration presence provider.", connectionError);
       setIsRealtimeConnected(false);
-      setRealtimeStatusNote("Realtime collaboration is unavailable. You can continue editing locally.");
+      setRealtimeStatusNote("Realtime unavailable. Local editing remains active.");
       presenceDoc.destroy();
       return;
     }
@@ -718,7 +717,7 @@ export default function DocumentDetailPage({
       if (isConnected) {
         setRealtimeStatusNote(null);
       } else if (event.status === "disconnected") {
-        setRealtimeStatusNote("Realtime collaboration is offline. You can continue editing locally.");
+        setRealtimeStatusNote("Realtime unavailable. Local editing remains active.");
       }
     };
 
@@ -780,7 +779,6 @@ export default function DocumentDetailPage({
         connect: true,
         disableBc: true,
         params: {
-          token,
           kind: "file",
           documentVersionId: currentVersion.id,
           path: selectedLatexPath
@@ -788,7 +786,7 @@ export default function DocumentDetailPage({
       });
     } catch (connectionError) {
       console.error("Failed to initialize collaboration file provider.", connectionError);
-      setRealtimeStatusNote("Realtime collaboration is unavailable. You can continue editing locally.");
+      setRealtimeStatusNote("Realtime unavailable. Local editing remains active.");
       fileDoc.destroy();
       void loadLatexFileContent(currentVersion.id, selectedLatexPath, token);
       return;
