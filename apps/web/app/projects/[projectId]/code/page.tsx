@@ -20,7 +20,16 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell, openAccountSettings } from "../../../../components/app-shell";
+import { CodeBranchList, CodeCommitList, CodeMergeRequestList } from "../../../../components/code-workspace";
 import { ArchiveEntryPanel, EmptyState, IconButton, LoadingState, MetadataStrip, Modal, StatusLine, WorkspaceHeader } from "../../../../components/ui";
+import {
+  buildCodeBreadcrumbSegments,
+  fileExtBadge,
+  formatBytes,
+  relativeDate,
+  repositoryPathPreview,
+  repositoryRemovalBindingItems
+} from "../../../../lib/code-workspace-helpers";
 import {
   createProjectRepository,
   createRepositoryBranch,
@@ -39,89 +48,18 @@ import {
   listRepositoryCommits,
   listRepositoryMergeRequests,
   removeProjectRepository,
-  ProjectRepositoryStatus,
   ProjectRepositorySummary,
   RepositoryBranch,
   RepositoryCommit,
   RepositoryFile,
   RepositoryMergeRequest,
   RepositoryMergeRequestState,
-  RepositoryRemovalBindingCounts,
   RepositoryRemovalPreview,
   RepositoryTree
 } from "../../../../lib/gitlab";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 
 type CodeTab = "files" | "commits" | "branches" | "merge-requests";
-
-function relativeDate(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 2) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days === 1) return "yesterday";
-  if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
-function authorInitials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0].toUpperCase())
-    .join("");
-}
-
-function fileExtBadge(filename: string): string {
-  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
-  const map: Record<string, string> = {
-    tex: "TEX", bib: "BIB", pdf: "PDF",
-    md: "MD", txt: "TXT",
-    ts: "TS", tsx: "TSX", js: "JS", jsx: "JSX",
-    py: "PY", sh: "SH", rb: "RB",
-    json: "JSON", yml: "YML", yaml: "YML", toml: "TOML",
-    css: "CSS", html: "HTML", svg: "SVG",
-    png: "IMG", jpg: "IMG", jpeg: "IMG", gif: "IMG",
-    csv: "CSV", xml: "XML",
-  };
-  return map[ext] ?? (ext.toUpperCase().slice(0, 4) || "FILE");
-}
-
-function formatBytes(size: number): string {
-  if (size < 1024) {
-    return `${size} B`;
-  }
-  const units = ["KB", "MB", "GB"];
-  let value = size / 1024;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
-}
-
-function repositoryPathPreview(name: string, path: string): string {
-  const raw = path.trim() || name.trim();
-  return raw
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function repositoryRemovalBindingItems(counts: RepositoryRemovalBindingCounts): string[] {
-  const items: string[] = [];
-  if (counts.active > 0) items.push(`${counts.active} active`);
-  if (counts.deleted > 0) items.push(`${counts.deleted} deleted`);
-  if (counts.conflict > 0) items.push(`${counts.conflict} conflict`);
-  if (counts.error > 0) items.push(`${counts.error} error`);
-  if (counts.unassigned > 0) items.push(`${counts.unassigned} unassigned`);
-  return items;
-}
 
 const TAB_LABELS: Record<CodeTab, string> = {
   files: "Files",
@@ -752,13 +690,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
     return null;
   }, [connection]);
 
-  // Breadcrumb segments from the current browser path
-  const breadcrumbSegments = browserPath
-    ? browserPath.split("/").filter(Boolean).map((seg, i, arr) => ({
-        label: seg,
-        path: arr.slice(0, i + 1).join("/")
-      }))
-    : [];
+  const breadcrumbSegments = buildCodeBreadcrumbSegments(browserPath);
 
   return (
     <AppShell projectId={params.projectId}>
@@ -1079,25 +1011,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                     </div>
                     {contentError ? <StatusLine tone="error">{contentError}</StatusLine> : null}
                     {commits.length === 0 && !contentLoading && !contentError ? <EmptyState title="No commits available" detail="This branch does not expose commits through GitLab yet." /> : null}
-                    <div className="code-commit-list">
-                      {commits.map((commit) => (
-                        <article key={commit.id} className="code-commit-row">
-                          <div className="code-commit-avatar" aria-hidden="true">{authorInitials(commit.authorName)}</div>
-                          <div className="code-commit-body stack-xs">
-                            <strong className="code-commit-title">{commit.title}</strong>
-                            <p className="text-muted code-commit-meta">
-                              {commit.authorName}
-                              <span className="code-meta-separator" aria-hidden="true">/</span>
-                              {relativeDate(commit.authoredDate)}
-                            </p>
-                          </div>
-                          <div className="code-commit-actions">
-                            <code className="code-short-id">{commit.shortId}</code>
-                            {commit.webUrl ? <a className="button button-secondary" href={commit.webUrl} target="_blank" rel="noreferrer">Open</a> : null}
-                          </div>
-                        </article>
-                      ))}
-                    </div>
+                    <CodeCommitList commits={commits} />
                   </section>
                 ) : null}
 
@@ -1125,23 +1039,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                       </div>
                     </div>
                     {contentError ? <StatusLine tone="error">{contentError}</StatusLine> : null}
-                    <div className="code-branch-list">
-                      {branches.map((branch) => (
-                        <div key={branch.name} className="code-branch-row">
-                          <div className="stack-xs">
-                            <strong>{branch.name}</strong>
-                            <div className="button-row">
-                              {branch.default ? <span className="badge">Default</span> : null}
-                              {branch.protected ? <span className="badge">Protected</span> : null}
-                              {branch.canPush ? <span className="badge">Writable</span> : null}
-                            </div>
-                          </div>
-                          {branch.webUrl ? <a className="button button-secondary" href={branch.webUrl} target="_blank" rel="noreferrer">Open</a> : null}
-                        </div>
-                      ))}
-                      {branches.length === 0 && !contentLoading && !contentError ? <EmptyState title="No branches found" detail="GitLab did not return repository branches for this project." /> : null}
-                    </div>
-                    {!canWrite ? <StatusLine tone="info">Reader role can browse repository content but cannot create branches.</StatusLine> : null}
+                    <CodeBranchList branches={branches} canWrite={canWrite} contentError={contentError} contentLoading={contentLoading} />
                   </section>
                 ) : null}
 
@@ -1182,30 +1080,7 @@ export default function ProjectCodePage({ params }: { params: { projectId: strin
                       </div>
                     </div>
                     {mergeRequestsError ? <StatusLine tone="error">{mergeRequestsError}</StatusLine> : null}
-                    <div className="code-mr-list">
-                      {mergeRequests.map((mr) => (
-                        <article key={mr.id} className="code-mr-row">
-                          <div className="code-mr-number text-muted">!{mr.iid}</div>
-                          <div className="code-mr-body stack-xs">
-                            <strong>{mr.title}</strong>
-                            <div className="button-row">
-                              <span className={`badge code-mr-state-${mr.state}`}>{mr.state}</span>
-                              {mr.draft ? <span className="badge">Draft</span> : null}
-                            </div>
-                            <p className="text-muted code-mr-meta">
-                              <span className="code-mr-branches">{mr.sourceBranch} - {mr.targetBranch}</span>
-                              <span className="code-meta-separator" aria-hidden="true">/</span>
-                              {mr.author ? mr.author.name : "Unknown"}
-                              <span className="code-meta-separator" aria-hidden="true">/</span>
-                              {relativeDate(mr.updatedAt)}
-                            </p>
-                          </div>
-                          <a className="button button-secondary" href={mr.webUrl} target="_blank" rel="noreferrer">Open</a>
-                        </article>
-                      ))}
-                      {!mergeRequestsLoading && mergeRequests.length === 0 ? <EmptyState title="No merge requests" detail="No merge requests match the selected state." /> : null}
-                    </div>
-                    {!canWrite ? <StatusLine tone="info">Reader role can browse repository content but cannot create merge requests.</StatusLine> : null}
+                    <CodeMergeRequestList canWrite={canWrite} mergeRequests={mergeRequests} mergeRequestsLoading={mergeRequestsLoading} />
                   </section>
                 ) : null}
               </>

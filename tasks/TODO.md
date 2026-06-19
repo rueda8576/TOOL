@@ -1,5 +1,14 @@
 # Implementation TODO (v1 bootstrap)
 
+## PR12 Frontend Helper Extraction Typecheck Blocker (2026-06-21)
+- [x] Stop PR #12 merge after local web typecheck failed on `MIN_DOCUMENT_PANE_WIDTH_PX` missing from Documents detail.
+- [x] Import the extracted splitter width constant from `document-workspace-helpers`.
+- [x] Re-run web typecheck/build/QA, force-push #12, restack #13-#15, and repeat exact-SHA UI review/CI before merge.
+
+### Review
+- The first local PR #12 gate caught a missed import after splitter constants were extracted into `document-workspace-helpers`.
+- Verification passed after the correction: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; `pnpm --filter @doctoral/web test:qa`; `git diff --check`.
+
 ## Deploy Fix-Forward: Final Docker Retention Soft Gate (2026-06-21)
 - [x] Stop the merge train after PR #10 because `Deploy Atlasium` failed on the post-deploy Docker retention threshold.
 - [x] Confirm production deploy reached the VPS and local API health passed before the retention failure.

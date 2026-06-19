@@ -15,6 +15,7 @@ import {
   DocumentTypeValue,
   listProjectDocuments
 } from "../../../../lib/documents";
+import { inferLatexEntryFile } from "../../../../lib/document-workspace-helpers";
 import { getProjectAccess, ProjectAccess } from "../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../lib/use-confirm-dialog";
 
@@ -32,24 +33,6 @@ function parseCommaSeparatedList(rawValue: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
-}
-
-function inferLatexEntryFile(latexPaths: string[]): string | undefined {
-  if (latexPaths.length === 0) {
-    return undefined;
-  }
-
-  const mainTexAtRoot = latexPaths.find((path) => path.toLowerCase() === "main.tex");
-  if (mainTexAtRoot) {
-    return mainTexAtRoot;
-  }
-
-  const mainTexNested = latexPaths.find((path) => path.toLowerCase().endsWith("/main.tex"));
-  if (mainTexNested) {
-    return mainTexNested;
-  }
-
-  return latexPaths.find((path) => path.toLowerCase().endsWith(".tex")) ?? undefined;
 }
 
 export default function ProjectDocumentsPage({
