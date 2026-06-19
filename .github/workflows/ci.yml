@@ -39,11 +39,13 @@ jobs:
           corepack enable
           corepack prepare pnpm@9.15.4 --activate
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile=false --prod=false
+        run: pnpm install --frozen-lockfile --prod=false
       - name: Generate Prisma client
         run: pnpm db:generate
       - name: Lint
         run: pnpm lint
+      - name: Repo hygiene
+        run: pnpm repo:check
       - name: Diagnose test environment
         run: |
           echo "NODE_ENV=${NODE_ENV:-<unset>}"

@@ -8,10 +8,15 @@
     "build": "next build",
     "dev": "next dev -p 3000",
     "start": "next start -p 3000",
-    "lint": "echo 'No lint configured for @doctoral/web'",
-    "test": "echo 'No tests configured for @doctoral/web'"
+    "lint": "eslint .",
+    "test": "pnpm run test:qa",
+    "test:e2e": "playwright test --project=chromium --grep @e2e",
+    "test:visual": "playwright test --project=chromium --grep @visual",
+    "test:a11y": "playwright test --project=chromium --grep @a11y",
+    "test:qa": "playwright test --project=chromium"
   },
   "dependencies": {
+    "@doctoral/shared": "workspace:*",
     "@monaco-editor/react": "^4.7.0",
     "katex": "^0.16.11",
     "lucide-react": "^1.16.0",
