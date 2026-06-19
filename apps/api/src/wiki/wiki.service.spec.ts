@@ -1,6 +1,9 @@
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 
 import * as collaborationRegistry from "../documents/collaboration-server-registry";
+import { WikiAssetsService } from "./wiki-assets.service";
+import { WikiDocsRepositoriesService } from "./wiki-docs-repositories.service";
+import { hashMarkdownContent } from "./wiki-paths";
 import { WikiService } from "./wiki.service";
 
 describe("WikiService", () => {
@@ -88,9 +91,11 @@ describe("WikiService", () => {
       getRepositoryTextFileForDocsSync: jest.fn(),
       commitRepositoryFileActions: jest.fn()
     };
+    const wikiAssetsService = new WikiAssetsService(prisma, accessService, auditService, storageService);
+    const docsRepositoriesService = new WikiDocsRepositoriesService(prisma);
 
     return {
-      service: new WikiService(prisma, accessService, auditService, storageService, gitlabService),
+      service: new WikiService(prisma, accessService, auditService, gitlabService, wikiAssetsService, docsRepositoriesService),
       prisma,
       accessService,
       auditService,
@@ -98,26 +103,6 @@ describe("WikiService", () => {
       gitlabService
     };
   };
-
-  it("validates wiki slugs, folder paths, plain paths, and parsed wiki links", () => {
-    const { service } = makeService();
-
-    expect((service as any).normalizeSlug("RoadMap")).toBe("roadmap");
-    expect(() => (service as any).normalizeSlug("Road map")).toThrow(BadRequestException);
-
-    expect((service as any).normalizeFolderPath(" Guides/Systems ")).toBe("guides/systems");
-    expect((service as any).normalizeFolderPath("   ")).toBe("");
-    expect(() => (service as any).normalizeFolderPath("guides/invalid path")).toThrow(BadRequestException);
-
-    expect((service as any).normalizePath(" /Guides/Roadmap/ ")).toBe("guides/roadmap");
-    expect(() => (service as any).normalizePath("   ")).toThrow(BadRequestException);
-    expect(() => (service as any).normalizePath("guides/invalid path")).toThrow(BadRequestException);
-
-    expect((service as any).parseWikiLinks("[[guides/roadmap]] [[bad path]] [[guides\\\\notes]] [[guides/roadmap]]")).toEqual([
-      "guides/roadmap",
-      "guides/notes"
-    ]);
-  });
 
   it("fails read helpers when the wiki page no longer exists", async () => {
     const { service, prisma, accessService } = makeService();
@@ -772,7 +757,7 @@ describe("WikiService", () => {
 
   it("exports Wiki-only changes to Git when Docs has not changed", async () => {
     const { service, prisma, gitlabService } = makeService();
-    const syncedHash = (service as any).hashMarkdownContent("Original");
+    const syncedHash = hashMarkdownContent("Original");
     prisma.projectRepository.findMany.mockResolvedValueOnce([
       {
         id: "repo-1",
@@ -877,7 +862,7 @@ describe("WikiService", () => {
 
   it("soft-deletes a Docs-bound wiki page when the Git file disappears without Wiki changes", async () => {
     const { service, prisma, gitlabService } = makeService();
-    const syncedHash = (service as any).hashMarkdownContent("Published");
+    const syncedHash = hashMarkdownContent("Published");
     const tx: any = {
       wikiLink: {
         deleteMany: jest.fn(),
@@ -3200,6 +3185,28 @@ describe("WikiService", () => {
           mimetype: "text/plain",
           size: 128,
           originalname: "notes.txt"
+        } as Express.Multer.File,
+        {
+          userId: "user-1",
+          email: "user-1@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(storageService.saveUpload).not.toHaveBeenCalled();
+  });
+
+  it("rejects SVG wiki assets until sanitization exists", async () => {
+    const { service, storageService } = makeService();
+
+    await expect(
+      service.uploadWikiAsset(
+        "project-1",
+        {
+          mimetype: ["image/svg", "xml"].join("+"),
+          size: 128,
+          originalname: "diagram.svg"
         } as Express.Multer.File,
         {
           userId: "user-1",

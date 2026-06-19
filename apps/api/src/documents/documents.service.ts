@@ -1,4 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import type {
+  CompileStatusValue,
+  DocumentDetail,
+  DocumentListItem,
+  DocumentTypeValue,
+  DocumentVersionSummary
+} from "@doctoral/shared";
 import { CompileStatus, DocumentType } from "@prisma/client";
 import AdmZip from "adm-zip";
 import { mkdir, readdir, readFile, writeFile } from "fs/promises";
@@ -7,6 +14,7 @@ import { dirname, join, resolve, sep } from "path";
 import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { ProjectAccessService } from "../common/project-access.service";
+import { extractZipSafely } from "../common/safe-zip";
 import { getEnv } from "../config/env";
 import { PrismaService } from "../prisma/prisma.service";
 import { QueueService } from "../queues/queue.service";
@@ -15,43 +23,7 @@ import { CreateDocumentBranchDto } from "./dto/create-document-branch.dto";
 import { CreateDocumentDto } from "./dto/create-document.dto";
 import { CreateDocumentVersionDto } from "./dto/create-document-version.dto";
 
-type CompileStatusValue = "pending" | "running" | "succeeded" | "failed" | "timeout";
-type DocumentTypeValue = "paper" | "manual" | "model" | "draft" | "minutes" | "other";
-
-export type DocumentVersionSummary = {
-  id: string;
-  versionNumber: number;
-  compileStatus: CompileStatusValue;
-  hasPdf: boolean;
-  hasLatex: boolean;
-  latexEntryFile: string | null;
-  createdAt: string;
-};
-
-export type DocumentListItem = {
-  id: string;
-  projectId: string;
-  title: string;
-  type: DocumentTypeValue;
-  authors: string[];
-  tags: string[];
-  publishedAt: string | null;
-  updatedAt: string;
-  latestMainVersion: DocumentVersionSummary | null;
-};
-
-export type DocumentDetail = {
-  id: string;
-  projectId: string;
-  title: string;
-  type: DocumentTypeValue;
-  authors: string[];
-  tags: string[];
-  publishedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  latestMainVersion: DocumentVersionSummary | null;
-};
+export type { DocumentDetail, DocumentListItem, DocumentVersionSummary } from "@doctoral/shared";
 
 const mapDocumentType = (type?: string): DocumentType => {
   switch (type) {
@@ -130,8 +102,16 @@ export class DocumentsService {
 
   private normalizeLatexPath(filePath: string): string {
     const normalized = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
-    if (!normalized || normalized.includes("..")) {
+    if (!normalized || normalized.split("/").some((segment) => segment === ".." || segment.startsWith("-"))) {
       throw new BadRequestException("Invalid latex file path");
+    }
+    return normalized;
+  }
+
+  private normalizeLatexEntryFile(filePath?: string): string {
+    const normalized = this.normalizeLatexPath(filePath ?? "main.tex");
+    if (!normalized.toLowerCase().endsWith(".tex")) {
+      throw new BadRequestException("latexEntryFile must be a .tex file");
     }
     return normalized;
   }
@@ -155,7 +135,7 @@ export class DocumentsService {
 
     const zipBuffer = await this.storageService.readObject(params.latexBundleStoragePath);
     const zip = new AdmZip(zipBuffer);
-    zip.extractAllTo(workspaceAbsolutePath, true);
+    await extractZipSafely(zip, workspaceAbsolutePath);
 
     return workspaceRelativePath;
   }
@@ -676,6 +656,7 @@ Start writing here.
     }
 
     const normalizedLatexPaths = usingLatexFolder ? this.validateLatexFolderPaths(latexPaths ?? []) : [];
+    const latexEntryFile = this.normalizeLatexEntryFile(dto.latexEntryFile);
 
     if (usingLatexFolder && latexBundleUpload) {
       throw new BadRequestException("Provide either latexBundle or latexFiles, not both");
@@ -692,7 +673,7 @@ Start writing here.
         branchId: branch.id,
         versionNumber: (latestVersion?.versionNumber ?? 0) + 1,
         notes: dto.notes,
-        latexEntryFile: dto.latexEntryFile ?? "main.tex",
+        latexEntryFile,
         pdfFileId: pdfFile?.id,
         latexBundleFileId: latexBundle?.id,
         compileStatus: latexBundle || usingLatexFolder || usingBlankWorkspace ? CompileStatus.PENDING : CompileStatus.SUCCEEDED,

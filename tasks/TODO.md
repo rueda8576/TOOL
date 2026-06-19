@@ -1,5 +1,313 @@
 # Implementation TODO (v1 bootstrap)
 
+## Atlasium Multi-Agent Hardening Plan (2026-06-18)
+- [x] Re-read `DESIGN.md`, `tasks/LESSONS.md`, and `tasks/TODO.md` before edits.
+- [x] Confirm clean source-control baseline before implementation.
+- [x] Agent 1: implement hashed password reset tokens, Atlasium transactional emails, and auth reset UI.
+- [x] Agent 1 verification: Prisma generate, focused API/worker/web tests, builds, static audits, and visual QA notes.
+- [x] Agent 2 critical: worker runtime binaries, custom-format backup validation, metadata, temporary cleanup, and AI opt-in guards.
+- [x] Agent 3 phase 1: storage/path/ZIP/LaTeX/realtime security hardening.
+- [x] Agent 4: ESLint v9, repo hygiene checks, CI install/build hardening, and Dockerfile lockfile discipline.
+- [x] Agent 5: Playwright, axe, responsive Atlasium UI/UX QA, deterministic route fixtures, and CI artifacts.
+- [x] Agent 2 operations: worker healthcheck, restore validation/drill script, and admin operations ledger.
+  - [x] Add a worker health endpoint that proves queue/database/runtime readiness without leaking secrets.
+  - [x] Add `scripts/restore-backup.sh validate|restore|drill` with non-destructive validation by default.
+  - [x] Expose backup operation history through an admin-only API surface.
+  - [x] Render an admin-only operations ledger on `/projects` using Atlasium row/ledger patterns and no destructive restore controls.
+  - [x] Verify API/worker/web tests, Playwright QA, builds, static audits, and document limitations.
+- [x] Agent 3 sandbox/container: scratch LaTeX workspace, process-group timeout, minimal env, and worker container restrictions.
+  - [x] Compile LaTeX from fresh `/tmp/atlasium-latex-*` workspaces instead of directly inside `STORAGE_ROOT`.
+  - [x] Run TeX tools with `-no-shell-escape`, minimal environment, bounded logs, and process-group timeout cleanup.
+  - [x] Copy only validated PDF/log outputs back into confined storage paths.
+  - [x] Harden the worker runtime/container with non-root user plus compose security/resource limits where supported.
+  - [x] Verify worker LaTeX/security tests, build, static audits, and document Docker limitations.
+- [x] Agent 6: incremental shared contracts package adoption without UI copy migration.
+  - [x] Review `packages/shared` and duplicated unions/constants across common, tasks, meetings, documents, and wiki.
+  - [x] Add backend/frontend-safe shared exports without Prisma, Nest, React, `File`, `Blob`, raw GitLab payloads, or visible copy labels.
+  - [x] Adopt shared contracts incrementally while keeping backend `ValidationPipe` and frontend label maps local.
+  - [x] Run shared/API/web builds, typechecks, focused tests, and duplication/static audits.
+- [ ] Agent 7: characterization-led module refactor tranches preserving current behavior and Atlasium canon.
+  - [x] Tramo 0: run/record Wiki, GitLab, and HTTP characterization baselines before extraction.
+  - [x] Tramo 1A: extract low-risk pure Wiki helpers without changing `WikiService` public methods or Docs sync semantics.
+  - [x] Tramo 1B: extract low-risk pure GitLab helpers without changing token refresh, inherited membership, repository removal, OIDC, or bootstrap behavior.
+  - [x] Tramo 2: extract API mappers/builders only after Tramo 1 specs are green.
+    - [x] Re-read candidate Wiki/GitLab mapper/builder code and choose only pure, low-risk extractions.
+    - [x] Add characterization specs for extracted mapper/builder modules before rewiring services.
+    - [x] Keep `WikiService` and `GitlabService` as facades with unchanged public methods, DTO contracts, errors, auth, Docs sync, and repository semantics.
+    - [x] Run focused Wiki/GitLab unit and HTTP specs, API build, lint/repo hygiene, diff check, and document results.
+  - [x] Tramo 3: extract a low-level GitLab client only after retry/error characterization is explicit.
+    - [x] Characterize current JSON/binary request behavior and `GitlabApiError` metadata.
+    - [x] Move low-level GitLab HTTP execution into a dedicated helper without changing service-level retry/error mapping.
+    - [x] Keep private `GitlabService` wrappers or equivalent compatibility until higher-level tests no longer depend on internals.
+    - [x] Run GitLab client/service/HTTP specs, API build, lint/repo hygiene, diff check, and document results.
+  - [x] Tramo 4: split GitLab content/archive domains before identity/membership domains.
+    - [x] Re-read content/archive methods and confirm extraction boundaries around repository content, Docs files, commit actions, merge requests, and archive fallback.
+    - [x] Add direct characterization for extracted content/archive helpers before rewiring `GitlabService`.
+    - [x] Extract only backend content/archive helpers or domain executor code that can receive explicit dependencies; do not touch OAuth, OIDC, token refresh, memberships, repository removal, or managed bootstrap.
+    - [x] Keep `GitlabService` as the public facade and preserve current audit/error mapping semantics.
+    - [x] Run GitLab content/archive helper specs, service/HTTP specs, API build, lint/repo hygiene, diff check, and document results.
+  - [x] Tramo 5: split Wiki Docs sync vertical services after sync status/migration/assignment coverage is stable.
+    - [x] Re-read Wiki Docs sync, assignment, migration, conflict, and GitLab commit call paths before extraction.
+    - [x] Confirm existing characterization and add direct specs for any extracted Docs sync helpers/services.
+    - [x] Extract only vertical Docs sync helpers/services that receive explicit dependencies; do not change draft/publish, page visibility, GitLab content contracts, Prisma transactions, or UI copy.
+    - [x] Keep `WikiService` as the public facade and preserve controller DTOs, response shapes, conflict semantics, audit behavior, and Atlasium Docs taxonomy.
+    - [x] Run Wiki Docs helper/service/HTTP specs, API build, lint/repo hygiene, diff check, and document results.
+  - [x] Tramo 6: split Wiki core assets/search/tree/read/draft/publish/revisions after Docs sync is stable.
+    - [x] Re-read Wiki core assets/search/tree/read/draft/publish/revision methods and choose the smallest safe extraction.
+    - [x] Add direct characterization for any extracted Wiki core helper/service before rewiring `WikiService`.
+    - [x] Extract only isolated Wiki core behavior; do not change Docs sync, draft/publish semantics, realtime flush, page visibility, controller DTOs, or UI/copy.
+    - [x] Keep `WikiService` as the public facade and preserve route response shapes plus permission checks.
+    - [x] Run Wiki core helper/service/HTTP specs, API build, lint/repo hygiene, diff check, and document results.
+  - [x] Tramo 7: extract frontend pure helpers/hooks before presentational components; preserve Atlasium UI/copy exactly.
+    - [x] Re-read candidate frontend modules and choose only pure helpers with no JSX, CSS, copy, API, Monaco, PDF, or realtime side effects.
+    - [x] Add direct characterization for extracted helpers where practical.
+    - [x] Rewire imports while preserving rendered markup, class names, text, aria labels, loading/empty/error states, and Atlasium visual canon exactly.
+    - [x] Run web typecheck/build, lint/repo hygiene, diff check, and document why visual QA is or is not required.
+  - [x] Tramo 8: extract frontend presentational components with visual QA for Wiki, Documents detail, Code, Account, and Projects.
+    - [x] Subtramo 8A Code: extract one low-risk leaf set before touching larger modules.
+    - [x] Subtramo 8A Code: preserve DOM order, class names, copy, aria labels, loading/empty/error states, focus behavior, and Atlasium visual canon.
+    - [x] Subtramo 8A Code: run focused web typecheck/build/lint/repo hygiene/diff checks.
+    - [x] Subtramo 8A Code: run Playwright smoke, responsive, and a11y coverage for the affected route(s), plus static Atlasium drift audits.
+    - [x] Subtramo 8A Code: document visual QA results, residual risks, and whether another Tramo 8 sub-extraction is justified.
+    - [x] Subtramo 8B Account: extract Git credential setup and verify Account/Code visual gates.
+    - [x] Subtramo 8C Projects: extract directory row and verify Projects/Account/Code visual gates.
+    - [x] Subtramo 8D Documents detail: extract collaborator strip with route-specific visual/a11y coverage.
+    - [x] Subtramo 8E Wiki: extract a low-risk presentational component without moving editor/realtime/markdown transform logic.
+  - [ ] Tramo 9: partition `globals.css` only after stable visual snapshots and cascade audits.
+    - [x] Tramo 9A: extract only Code-page-scoped `.code-*` CSS plus its dedicated responsive rules into an imported global stylesheet.
+    - [x] Tramo 9A: preserve Atlasium tokens, shared primitives, import order, and route rendering with no visual redesign.
+    - [x] Tramo 9A: verify Code route with typecheck/build/lint/repo hygiene, Playwright smoke/a11y/visual, and static selector audits.
+    - [x] Tramo 9B: extract Account-scoped `.account-*` CSS plus its dedicated responsive rules into an imported global stylesheet.
+    - [x] Tramo 9B: preserve Account drawer availability across all routes by keeping global `layout.tsx` imports in historical order.
+    - [x] Tramo 9B: verify Account route/drawer with typecheck/build/lint/repo hygiene, Playwright smoke/a11y/visual, and static selector audits.
+- [x] Docker verification follow-up: close the previous local Docker limitation now that Docker is available.
+  - [x] Confirm Docker daemon and Compose plugin availability.
+  - [x] Validate `docker-compose.yml` and `docker-compose.prod.yml` configuration.
+  - [x] Build API, Web, and Worker runtime images from the repo Dockerfiles.
+  - [x] Run lightweight runtime smoke checks for built images where possible without destructive services.
+  - [x] Document Docker verification results and any residual limits.
+- [ ] Final review: document commands, limitations, UI evidence, and residual risks.
+
+### Agent 1 Review
+- Added `PasswordResetToken` with SHA-256 `tokenHash`, expiry, consumed timestamp, user cascade, indexes, and a migration that cancels old pending `PASSWORD_RESET` notification events.
+- Reworked `POST /auth/password/reset` to avoid account enumeration, generate 32-byte reset tokens, store only token hashes, apply a 10-minute cooldown, expire tokens after 30 minutes, and queue a transactional Atlasium email without raw-token persistence.
+- Added `POST /auth/password/reset/confirm` with one-time token consumption, password confirmation validation, session revocation, no automatic login session, audit logging, and best-effort GitLab HTTPS password sync that cannot fail the reset.
+- Replaced generic worker notification email rendering with Atlasium transactional/operational templates and direct-email status updates for notification-backed transactional jobs.
+- Added `/forgot-password` and `/reset-password?token=...`, linked reset access from `/login`, and kept `/accept-invite` visually aligned with the existing Atlasium auth gate.
+- Verification passed: `pnpm install --frozen-lockfile --prod=false` (optional `canvas` native build warning due missing `pixman-1`, install completed with code 0); baseline `pnpm --filter @doctoral/db db:generate`; baseline `pnpm build`; post-change `pnpm --filter @doctoral/db db:generate`; focused API unit auth; focused API HTTP auth; focused worker email; API build; worker build; web `tsc --noEmit`; web build; final `pnpm build`; static audits for `Doctoral Platform`, `resetToken`, reset routes, and `git diff --check`.
+- Visual QA used `next start` on `http://localhost:3018` and Edge headless screenshots in `C:\Users\Luis\AppData\Local\Temp\atlasium-agent1-auth-qa` for `/login`, `/forgot-password`, `/reset-password?token=sample-reset-token`, and `/accept-invite?token=sample-invite-token` at desktop and mobile sizes. Mobile screenshots were inspected for Atlasium mark visibility, panel containment, token/input wrapping, and absence of obvious horizontal overflow.
+- Local limitation: no Playwright/axe suite exists yet, so Agent 1 visual QA is screenshot-based; Agent 5 remains responsible for repeatable visual/a11y gates.
+
+### Agent 2 Critical Review
+- Changed new database backups to `pg_dump --format=custom --no-owner --no-acl`, validated dumps with `pg_restore --list`, validated storage archives with `tar -tzf`, and wrote backup artifacts through a temporary directory that is removed in `finally`.
+- Added backup integrity metadata to `BackupRun.details`: format, final paths, SHA-256, byte counts, duration, and tool versions for `pg_dump`, `pg_restore`, `psql`, `tar`, `pdflatex`, `biber`, and `bibtex`. Backup failures now sanitize command output so `DATABASE_URL` is not persisted.
+- Updated the worker runtime image to install `postgresql-client-16` from PGDG alongside LaTeX/Biber runtime tools.
+- Made meeting AI automation explicit opt-in: `AI_MEETING_AUTOMATION_ENABLED` is enabled only by `true`, `.env.example` defaults it to `false`, and production config rejects enabled automation without `OPENAI_API_KEY` and `OPENAI_MODEL`.
+- Updated Meetings UI status copy to operational Atlasium labels: `Task extraction queued`, `Extracting tasks`, `Tasks created`, `Needs review`, and `Outdated`.
+- Verification passed: worker backup/env/meeting automation specs; API env/Meetings specs; API build; worker build; web typecheck; final `pnpm build`; static audits for legacy AI labels/defaults, backup custom-format commands, worker Docker runtime packages, and `git diff --check`.
+- Local runtime smoke: `pdflatex`, `bibtex`, and `tar` are installed in this WSL; `pg_dump`, `pg_restore`, `psql`, and `biber` are missing locally. Docker is not available in this WSL distro, so worker image build/smoke must run in CI or Docker Desktop WSL integration.
+
+### Agent 3 Phase 1 Review
+- Added local path confinement helpers in API and worker, then applied them to storage object reads/writes, LaTeX bundle paths, workspace paths, and compiled output paths.
+- Replaced unsafe ZIP extraction with bounded extractors that reject absolute paths, traversal, drive-prefixed paths, symlinks, duplicates, excessive depth/path length, excessive entry count, and excessive uncompressed bytes.
+- Hardened LaTeX entry validation so entry files must be relative `.tex` files without `..` or dash-prefixed segments.
+- Blocked new Wiki SVG image assets, removed SVG from the Wiki upload accept list, and added private no-store, `nosniff`, and attachment filename headers for Wiki asset responses.
+- Changed collaboration auth so `/collab` accepts the `atlasium_session` cookie, removed WebsocketProvider token query params from Documents and Wiki, and kept legacy query-token auth behind `COLLAB_ALLOW_QUERY_TOKEN=true`.
+- Normalized realtime fallback copy to `Realtime unavailable. Local editing remains active.` across the affected Atlasium editing surfaces.
+- Verification passed: focused API storage/documents/wiki/collab specs; focused worker LaTeX spec; API build; worker build; web typecheck; final `pnpm build`; `git diff --check`; static audits for `extractAllTo`, active Wiki SVG allowlists, old realtime fallback copy, and WebsocketProvider token query params.
+- Deferred by design to Agent 3 sandbox/container phase: compile LaTeX from a fresh scratch workspace, process-group timeout kill behavior, minimal compiler environment, and worker container hardening.
+
+### Agent 4 Review
+- Added a root ESLint v9 flat config with `@eslint/js`, `typescript-eslint`, `globals`, and the Next plugin flat rules, while ignoring vendored PDF.js, build output, coverage, `*.tsbuildinfo`, storage/tmp, migrations, and accidental compiled smoke-test artifacts.
+- Made `pnpm lint` a real monorepo lint command and replaced workspace lint stubs with real `eslint .` scripts.
+- Added `pnpm repo:check` via `scripts/repo-check.mjs` to fail if generated/runtime files are tracked.
+- Removed `apps/web/tsconfig.tsbuildinfo` and compiled `apps/api/test/api-smoke.e2e-spec.{d.ts,js,js.map}` from the index, and added ignores so they remain local-only if regenerated.
+- Changed CI dependency installation to `pnpm install --frozen-lockfile --prod=false` and added `pnpm repo:check` to CI.
+- Updated API, Web, and Worker Dockerfiles to copy `pnpm-lock.yaml` before dependency install and use `--frozen-lockfile`.
+- Added focused worker tests for email branches, env normalization/cache, path confinement, safe ZIP extraction, and LaTeX entry validation so the existing worker coverage gate is meaningful and passes.
+- Verification passed: `pnpm install --frozen-lockfile --prod=false`; `pnpm lint`; `pnpm repo:check`; Prisma validate with explicit `DATABASE_URL`; worker coverage gate at 99.6% statements, 96.51% branches, 100% functions, 99.59% lines; `git diff --check`; final `pnpm build`; static audits for lockfile discipline and lint stubs.
+- API coverage gate was attempted with test env: unit coverage passed with 23 suites and 333 tests, HTTP coverage passed with 9 suites and 86 tests, then integration coverage failed because no PostgreSQL server was reachable at `localhost:5432` in this WSL environment.
+- Docker image build/smoke was not run locally because Docker is not available in this WSL distro.
+
+### Agent 5 Review
+- Added Playwright and axe coverage for the web app with deterministic API fixtures, role-seeded sessions, mocked public/auth flows, and critical authenticated module routes across Projects, Overview, Wiki, Documents, Code, Tasks, Meetings, and Account.
+- Added repeatable Atlasium QA helpers for desktop/mobile viewports, first-viewport brand presence, horizontal overflow detection, serious/critical axe violations, and static visual drift checks for decorative gradients/orbs/emojis.
+- Added `test:e2e`, `test:visual`, `test:a11y`, and `test:qa` scripts at the root and web package, plus CI Chromium installation and failure artifacts for Playwright reports/results.
+- Fixed issues found by the new QA gate: Documents detail no longer imports `y-monaco` during SSR, the web Playwright server runs with an absolute API base URL, and low-contrast Atlasium subtle text/eyebrow colors were raised to pass axe while preserving the institutional palette.
+- Verification passed: `pnpm --filter @doctoral/web exec playwright install chromium`; `pnpm --filter @doctoral/web test:e2e`; `pnpm --filter @doctoral/web test:a11y`; `pnpm --filter @doctoral/web test:visual`; `pnpm --filter @doctoral/web test:qa`; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm lint`; `pnpm repo:check`; `pnpm install --frozen-lockfile --prod=false`; `git diff --check`; final `pnpm build`.
+- Local limitation: Monaco/PDF/realtime remain smoke-level surfaces in this QA pass rather than deterministic pixel snapshots; the next refinement should add masks or module-specific fixtures before making those visual snapshots strict.
+- Non-blocking local warnings observed during Playwright: Next dev `allowedDevOrigins`, `NO_COLOR` with `FORCE_COLOR`, and duplicate Yjs import warnings. The suite passed with one Chromium worker to avoid Next dev-server race conditions.
+
+### Agent 2 Operations Review
+- Added a worker `/health` endpoint on `WORKER_HEALTH_PORT` with database, BullMQ queue, and BullMQ worker readiness probes, short timeouts, no-store responses, and redacted dependency errors. `WORKER_HEALTH_PORT=0` disables the endpoint for exceptional local cases.
+- Wired worker healthchecks into `docker-compose.yml` and `docker-compose.prod.yml` using runtime `WORKER_HEALTH_PORT` expansion, so compose waits can observe the worker rather than only API/Postgres.
+- Added `scripts/restore-backup.sh validate|restore|drill`: `validate` checks `pg_restore --list`, `tar -tzf`, and SHA-256; `drill` restores into `ATLASIUM_DRILL_DATABASE_URL` plus a temporary storage extraction; `restore` requires `ATLASIUM_RESTORE_CONFIRM=restore`, separate target DB/storage env vars, refuses `DATABASE_URL`, and swaps storage only after `pg_restore` succeeds.
+- Added admin-only operations API under `/projects/admin/operations` and `/projects/admin/operations/backups`, backed by `BackupRun` history, integrity metadata, status counts, manual backup queueing, and `backup.enqueue` audit logging.
+- Added `/projects` admin Operations mode using Atlasium ledger rows, metadata strips, semantic status badges, SHA/version evidence, responsive wrapping, loading/error/empty states, and no restore button or destructive restore action.
+- Updated Playwright fixtures and QA coverage so Operations is included in smoke, axe, and responsive checks.
+- Verification passed: worker health/env tests; worker coverage gate at 98.9% statements, 95.05% branches, 98.88% functions, 98.85% lines; focused API Projects unit spec; focused API Projects HTTP spec; `bash -n scripts/restore-backup.sh`; restore script help smoke; web e2e; web a11y; web visual; full web `test:qa`; web typecheck; `pnpm lint`; `pnpm repo:check`; `git diff --check`; final `pnpm build`; static audit for restore/API/UI exposure.
+- Local limitation: Docker is not available in this WSL distro, so `docker compose config`, Docker image build, and compose healthcheck smoke could not run locally. Real `validate|drill|restore` against backup artifacts also needs local `pg_restore`/`psql` and a target database; this WSL still lacks the PostgreSQL client binaries noted in Agent 2 Critical.
+- Non-blocking QA note: one `test:visual` attempt failed because it was run in parallel with `test:a11y` and both tried to bind the Playwright Next dev server on port `3100`; the visual test passed when rerun alone, and full serial `test:qa` passed.
+
+### Agent 3 Sandbox/Container Review
+- Changed LaTeX compilation so every job creates a fresh `/tmp/atlasium-latex-*` scratch workspace. Persisted workspaces are copied into scratch through confined paths, bundled ZIPs still use the safe extractor, and scratch is removed in `finally`.
+- TeX commands now run with `-no-shell-escape`, `shell: false`, detached process groups, a fixed minimal PATH, HOME/TMP/TEXMF directories scoped to scratch, bounded logs, and timeout handling that kills the process group with PID fallback.
+- Compiled PDF output is read only from the scratch workspace and written back through confined `compiled/<date>/...pdf` storage paths. Source workspaces in `STORAGE_ROOT` are no longer compiler working directories.
+- Persisted workspaces now reject symlinks and unsupported file types before compiler spawn; existing entry-file validation remains `.tex`-only, relative, and no dash-prefixed segments.
+- Hardened the worker runtime image with a non-root `atlasium` user and chowned runtime files. Added compose worker limits: `no-new-privileges`, `cap_drop: ALL`, `pids_limit: 256`, `mem_limit: 3g`, plus the worker healthcheck from Agent 2 operations.
+- Verification passed: focused LaTeX worker spec with 18 tests; worker health spec; worker build; worker coverage gate at 99.15% statements, 95.4% branches, 100% functions, 99.12% lines; `pnpm lint`; `pnpm repo:check`; `git diff --check`; final `pnpm build`; static audits for scratch workspace, `-no-shell-escape`, removed direct storage cwd, non-root worker user, and compose runtime limits.
+- Local limitation: Docker is still unavailable in this WSL distro, so Docker build, `docker compose config`, non-root container startup, and compose resource-limit smoke must run in CI or a Docker-enabled environment. Production storage host path permissions may need to be owned/writable by UID/GID `10001` for the non-root worker.
+
+### Agent 6 Review
+- Split `packages/shared` into domain contract modules for `common`, `tasks`, `meetings`, `documents`, and `wiki`, with value unions, TypeScript response/input contracts, and existing Zod schemas preserved for optional client-side validation.
+- Adopted shared contracts incrementally through local API/Web facades: Tasks, Meetings, Documents, and Wiki now import or re-export shared types while controllers, services, DTOs, mappers, fetch helpers, UI state, labels, and visible copy remain local.
+- Added `@doctoral/shared` as a workspace dependency for API and Web, updated the lockfile, and made the Web Dockerfile copy `packages/shared/package.json` before filtered frozen installs.
+- Kept forbidden dependencies and UI concerns out of shared: no Prisma, Nest, React, `File`, `Blob`, raw GitLab payloads, visible labels, or product copy were moved into `packages/shared/src`.
+- Verification passed: `pnpm install --prod=false`; `pnpm install --frozen-lockfile --prod=false`; `pnpm --filter @doctoral/shared build`; focused API unit specs for Tasks/Meetings/Documents/Wiki with 4 suites and 115 tests; focused API HTTP specs for Tasks/Meetings/Documents/Wiki with 4 suites and 36 tests; `pnpm --filter @doctoral/api build`; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; static duplication/prohibited-dependency audits; `pnpm lint`; `pnpm repo:check`; `git diff --check`; final `pnpm build`.
+- UI/visual QA was not applicable for Agent 6 because no user-facing copy, CSS, layout, page, modal, drawer, or state rendering changed. Docker build was not run locally because Docker remains unavailable in this WSL distro.
+
+### Agent 7 Tramo 0/1A Review
+- Recorded the Agent 7 tranche plan before extraction and confirmed baseline characterization for Wiki/GitLab: Wiki and GitLab unit specs passed with 2 suites and 138 tests; Wiki and GitLab HTTP specs passed with 2 suites and 31 tests.
+- Extracted low-risk Wiki helpers from `WikiService` into `wiki-paths.ts`, `wiki-docs-paths.ts`, and `wiki-markdown-links.ts`. The service remains the public facade; no controller route, DTO, database write, GitLab sync, draft/publish, asset, realtime, or response contract was intentionally changed.
+- Added direct characterization specs for the new helper modules, including current path normalization, Docs taxonomy mapping, structure counts, markdown relative links, wiki links, and the existing permissive `../../escape.md` resolution behavior.
+- Updated the existing Wiki service spec to stop asserting private implementation methods directly; it now imports the extracted hash helper where fixture hashes are needed.
+- Verification passed: Wiki helper specs with 3 suites and 12 tests; `wiki.service.spec.ts` with 57 tests; Wiki HTTP spec with 18 tests; `pnpm --filter @doctoral/api build`; static audit for removed private helper duplicates; `pnpm lint`; `pnpm repo:check`; `git diff --check`; final `pnpm build`.
+- UI/visual QA was not applicable for Tramo 1A because this was backend-only pure helper extraction with no copy, CSS, React, page layout, modal, drawer, or user-facing state changes.
+
+### Agent 7 Tramo 1B Review
+- Extracted low-risk GitLab formatting/detection helpers into `gitlab-format.ts`: archive filename, raw filename, preview image content-type detection, binary buffer detection, Docs root constant, and Docs Markdown path matching.
+- Kept `GitlabService` as the public facade and did not move or alter token refresh, `GitlabApiError`, HTTP request execution, inherited membership handling, OIDC identity resolution, repository removal, archive fallback semantics, or managed Docs bootstrap behavior.
+- Added direct helper characterization in `gitlab-format.spec.ts`, including current raw filename replacement behavior where CR/LF/quote each become `-`.
+- Updated the existing GitLab service spec so archive filename assertions import the extracted helper instead of reaching into private service methods.
+- Verification passed: `gitlab-format.spec.ts` with 4 tests; `gitlab.service.spec.ts` with 80 tests; GitLab HTTP spec with 13 tests; `pnpm --filter @doctoral/api build`; static audit for removed private helper duplicates; `pnpm lint`; `pnpm repo:check`; `git diff --check`; final `pnpm build`.
+- UI/visual QA was not applicable for Tramo 1B because this was backend-only pure helper extraction with no copy, CSS, React, page layout, modal, drawer, or user-facing state changes.
+
+### Agent 7 Tramo 2 Review
+- Extracted pure Wiki API builders into `wiki-view-builders.ts`: prepared Docs page mapping, Docs-aware tree building, page summary/revision mapping, search snippet cleanup, Docs source/status rows, structure migration rows, sync result/conflict helpers, unassigned-page grouping, and wiki-change detection.
+- Extracted conservative GitLab API mappers into `gitlab-mappers.ts`: repository path normalization, clone URL builders, token expiry, persisted repository summary mapping, remote repository status mapping, SSH key mapping/id validation, and managed repository provisioning payload mapping.
+- Kept `WikiService` and `GitlabService` as the public facades. No controller route, DTO, auth/role check, Prisma query, transaction, token refresh, `GitlabApiError`, inherited membership, OIDC, repository removal, archive fallback, Docs sync side effect, or user-facing Atlasium UI/copy was intentionally changed.
+- Added direct characterization specs for the extracted modules: `wiki-view-builders.spec.ts` and `gitlab-mappers.spec.ts`, covering API field names, ISO dates, Docs taxonomy paths, tree sorting, clone URLs, validation errors, SSH key mapping, token expiry, and sync conflict helpers.
+- Updated the existing GitLab service spec so helper validation asserts the extracted mapper functions instead of reaching into removed private service methods.
+- Verification passed: new mapper/builder specs with 2 suites and 10 tests; Wiki/GitLab service specs with 2 suites and 137 tests; Wiki/GitLab HTTP specs with 2 suites and 31 tests; `pnpm --filter @doctoral/api build`; `pnpm lint`; `pnpm repo:check`; `git diff --check`; static audits for removed private mapper/builder duplicates.
+- UI/visual QA was not applicable for Tramo 2 because this was backend-only mapper/builder extraction with no copy, CSS, React, page layout, modal, drawer, or user-facing state rendering changes.
+
+### Agent 7 Tramo 3 Review
+- Extracted low-level GitLab API request execution into `gitlab-client.ts`, including `GitlabApiError`, JSON request handling, binary archive/raw request handling, query-token auth fallback, response body parsing, and binary error metadata.
+- Kept `GitlabService` as the public facade and preserved private wrapper methods so higher-level specs and service-level retry/error mapping remain stable while the transport code is isolated.
+- Added direct client characterization in `gitlab-client.spec.ts` for bearer JSON requests, empty JSON success responses, JSON failures, binary query-token auth, binary response content type, and `GitlabApiError` metadata (`contentType`, `requestId`, `gitlabMeta`, `path`).
+- No repository route, DTO, auth/role guard, token refresh policy, inherited membership handling, OIDC identity flow, repository removal path, archive retry/fallback behavior, or user-facing Atlasium UI/copy was intentionally changed.
+- Verification passed: `gitlab-client.spec.ts` with 4 tests; `gitlab.service.spec.ts` with 80 tests; GitLab HTTP spec with 13 tests; `pnpm --filter @doctoral/api build`; `pnpm lint`; `pnpm repo:check`; `git diff --check`; static audit confirming `GitlabApiError` and low-level request helpers now live in `gitlab-client.ts` while facade wrappers remain in `GitlabService`.
+- UI/visual QA was not applicable for Tramo 3 because this was backend-only transport extraction with no copy, CSS, React, page layout, modal, drawer, or user-facing state rendering changes.
+
+### Agent 7 Tramo 4 Review
+- Extracted GitLab repository content/archive helpers into `gitlab-content.ts`: content API path builders, file path normalization, branch/commit/tree/file/raw/Docs/MR mappers, Docs commit payload validation, branch/MR creation payloads, archive attempt ordering, archive SHA resolution, fallback tree paths, and archive response mapping.
+- Rewired `GitlabService` to use the extracted helpers while keeping it as the public facade and owner of project permissions, readable/writable repository lookup, user token refresh, system tokens, audit logging, repository error mapping, archive attempt logging, and Docs sync method contracts.
+- Left OAuth, OIDC identity, token refresh, inherited membership handling, repository removal, managed repository bootstrap, Prisma writes, and Atlasium UI/copy untouched.
+- Added direct characterization in `gitlab-content.spec.ts` for current URL query ordering, encoded file paths, branch/commit/tree mappers, binary/text file behavior, raw content-type fallback, Docs Markdown mapping, commit action validation/default commit message, branch/MR validation, draft MR detection, archive attempts, fallback tree path, and empty archive SHA errors.
+- Verification passed: GitLab helper specs (`gitlab-client`, `gitlab-format`, `gitlab-mappers`, `gitlab-content`) with 4 suites and 18 tests; `gitlab-content.spec.ts` + `gitlab.service.spec.ts` with 2 suites and 85 tests; GitLab HTTP spec with 13 tests; `pnpm --filter @doctoral/api build`; `pnpm lint`; `pnpm repo:check`; `git diff --check`; static audit found no remaining direct content/archive URL builders or old format helpers inside `GitlabService`.
+- API coverage gate was attempted with Docker Postgres `16-alpine` on `localhost:55432`. Unit, HTTP, and integration suites all passed (31 unit suites/371 tests, 9 HTTP suites/88 tests, 1 integration suite/3 tests), but `pnpm --filter @doctoral/api test:coverage:gate` failed the existing global 95% threshold: statements 87.67%, branches 68.43%, functions 91.36%, lines 87.51%. The temporary Postgres container was stopped after the run.
+- UI/visual QA was not applicable for Tramo 4 because this was backend-only GitLab content/archive extraction with no copy, CSS, React, page layout, modal, drawer, or user-facing state rendering changes.
+
+### Agent 7 Tramo 5 Review
+- Extracted Wiki Docs repository/prefix handling into `WikiDocsRepositoriesService`, registered it in `WikiModule`, and kept private `WikiService` wrappers so existing sync/status/assignment/create/list call paths remain stable.
+- Added direct provider characterization for existing prefix passthrough, generated unique prefixes, `P2002` reload behavior, and ensuring all repository prefixes in listed order.
+- Extracted pure Docs assignment helpers into `wiki-docs-assignment.ts`: destination/path construction, assignment result rows, repository grouping for Git export commits, current commit message generation, totals, and final row sorting.
+- Rewired `assignDocsPages` to use the helper while leaving GitLab remote inspection, commit ordering, Prisma transactions, link hydration, audit logging, conflict semantics, DTOs, response shape, and Atlasium Docs taxonomy unchanged.
+- Did not move `syncDocs`, migration apply, publish/delete Docs-bound export, draft/publish visibility logic, GitLab content contracts, or UI/copy. Those remain in `WikiService` until broader characterization is added.
+- Verification passed: `wiki-docs-repositories.service.spec.ts`, `wiki-docs-assignment.spec.ts`, and `wiki.service.spec.ts` with 3 suites and 65 tests; Wiki helper/provider specs with 4 suites and 18 tests; Wiki HTTP spec with 18 tests; `pnpm --filter @doctoral/api build`; `pnpm lint`; `pnpm repo:check`; `git diff --check`; static audits for removed assignment duplication and prefix candidate ownership.
+- UI/visual QA was not applicable for Tramo 5 because this was backend-only Wiki Docs sync extraction with no copy, CSS, React, page layout, modal, drawer, or user-facing state rendering changes.
+
+### Agent 7 Tramo 6 Review
+- Extracted Wiki asset upload/read behavior into `WikiAssetsService`, registered it in `WikiModule`, and kept `WikiService.uploadWikiAsset` / `getWikiAssetContent` as public facade methods for existing controller contracts.
+- Added direct characterization for missing uploads, unsupported MIME types, blocked SVG uploads, oversized images, valid image persistence/audit metadata, missing file metadata, readable asset content, and missing assets.
+- Preserved route response shapes, permission checks, no-store/inline headers at controller level, storage path behavior, audit action `wiki.asset.upload`, and existing asset URL shape `/wiki-assets/:assetId/content`.
+- Did not move search, tree/read, draft/publish, realtime flush, revisions/backlinks, Docs sync, page visibility, controller DTOs, UI, CSS, or copy in this tranche. Those remain unchanged behind `WikiService`.
+- Verification passed: `wiki-assets.service.spec.ts` and `wiki.service.spec.ts` with 2 suites and 62 tests; Wiki helper/provider specs with 5 suites and 23 tests; Wiki HTTP spec with 18 tests; `pnpm --filter @doctoral/api build`; `pnpm lint`; `pnpm repo:check`; `git diff --check`; static audit confirmed asset storage/MIME logic now lives in `WikiAssetsService`, not `WikiService`.
+- UI/visual QA was not applicable for Tramo 6 because this was backend-only Wiki asset service extraction with no copy, CSS, React, page layout, modal, drawer, or user-facing state rendering changes.
+
+### Agent 7 Tramo 7 Review
+- Extracted Code workspace pure display/path helpers into `apps/web/lib/code-workspace-helpers.ts`: relative dates, author initials, file extension badges, byte formatting, repository path preview, repository removal binding summaries, and breadcrumb segment construction.
+- Extracted Documents workspace pure helpers into `apps/web/lib/document-workspace-helpers.ts`: split-pane sizing constants/helpers, PDF filename sanitization, PDF/editor word token normalization, LaTeX entry inference, LaTeX tree building, directory collection, compile status labels, terminal status detection, and the small delay helper.
+- Rewired Code, Documents list, and Documents detail pages to import those helpers while leaving rendered JSX, class names, aria labels, loading/empty/error states, Monaco/PDF/realtime wiring, and Atlasium layout/copy behavior unchanged.
+- Direct web unit characterization was not added because `@doctoral/web` currently has Playwright/QA scripts but no unit-test runner. The extraction was kept as exact pure-function moves, with TypeScript/build/lint/static duplicate audits as the practical characterization for this tranche.
+- Verification passed: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web build`; `pnpm lint`; `pnpm repo:check`; `git diff --check`; static audit confirmed the extracted frontend helper implementations no longer remain duplicated in app/component files except the intentionally separate nullable `/projects` backup byte formatter.
+- Visual QA was not run for Tramo 7 because no CSS, markup structure, component composition, visible state branching, modal/drawer behavior, or Atlasium visual treatment changed. Agent 5 Playwright coverage remains the required gate for the next frontend presentational tranche.
+
+### Agent 7 Tramo 8A Code Review
+- Extracted Code repository list rendering into `apps/web/components/code-workspace.tsx`: `CodeCommitList`, `CodeBranchList`, and `CodeMergeRequestList`.
+- Kept the Code page as the stateful facade. Repository loading, tab state, branch/MR creation, GitLab access, clone/manage dialogs, file tree, image previews, API calls, copy handlers, and repository removal behavior remain in `apps/web/app/projects/[projectId]/code/page.tsx`.
+- Preserved the moved JSX class names, DOM order, visible copy, aria-hidden separators, badge text, empty states, reader-role info states, and external-link attributes. No CSS or visual tokens changed.
+- Added Playwright coverage for the moved lists by navigating Code tabs and asserting commit, branch, and empty merge-request states. Added `/projects/project-1/code` to the a11y route list.
+- Verification passed: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm lint`; `pnpm --filter @doctoral/web test:e2e`; `pnpm --filter @doctoral/web test:a11y`; `pnpm --filter @doctoral/web test:visual`; `pnpm --filter @doctoral/web build`; `pnpm repo:check`; `git diff --check`; code-only static Atlasium drift audit returned no matches for obsolete branding, decorative terms, `href="#"`, or `window.confirm`.
+- Non-blocking Playwright warnings remained the known Agent 5 environment warnings: `NO_COLOR` with `FORCE_COLOR`, Next `allowedDevOrigins`, and duplicate Yjs import warnings when the broader suites visit Documents/Wiki surfaces.
+- Tramo 8 remains open. The next safest candidates from read-only exploration are Account Git credential setup, Projects directory row/role list, or Documents collaborator strip; avoid Documents editor/PDF workspace and Wiki recursive tree until extra visual characterization is added.
+
+### Agent 7 Tramo 8B Account Review
+- Extracted Account HTTPS credential-helper rendering into `apps/web/components/account-git-credential-setup.tsx` with parent-owned state for copied helper feedback and reset/example expansion.
+- Kept `AccountSettingsSurface` as the stateful facade. GitLab connection loading, password sync form, clipboard write, connection/disconnect actions, SSH key workflows, tab state, alerts, and drawer behavior remain unchanged.
+- Preserved the moved JSX class names, DOM order, visible copy, aria labels, `aria-expanded`, command formatting, helper platform rows, reset command, and clone URL pattern.
+- Added Playwright smoke coverage that opens `/account`, switches to `Git access`, verifies credential-helper commands, opens `Reset or examples`, and checks horizontal overflow.
+- Verification passed: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm lint`; `pnpm --filter @doctoral/web test:e2e`; `pnpm --filter @doctoral/web test:a11y`; `pnpm --filter @doctoral/web test:visual`; `pnpm --filter @doctoral/web build`; `pnpm repo:check`; `git diff --check`; Account code-only static Atlasium drift audit returned no matches for obsolete branding, decorative terms, `href="#"`, or `window.confirm`.
+- Non-blocking Playwright warnings remained the known Agent 5 environment warnings: `NO_COLOR` with `FORCE_COLOR`, Next `allowedDevOrigins`, and duplicate Yjs import warnings when the broader suites visit Documents/Wiki surfaces.
+- Tramo 8 remains open. Projects directory row is the next conservative candidate; Documents collaborator strip is viable but should be paired with `/projects/project-1/documents/document-1` a11y/responsive route coverage if touched.
+
+### Agent 7 Tramo 8C Projects Review
+- Extracted the Projects directory record into `apps/web/components/project-directory-row.tsx`.
+- Kept `/projects` as the stateful facade. Project loading, filtering, sorting, date formatting, pin/delete API calls, admin checks, confirmation dialog, Operations ledger, invites, and user management remain unchanged.
+- Preserved the moved JSX class names, DOM order, `ArchiveRow` structure, metadata order, fallback copy `No description`, pinned badge, Open link, Pin/Unpin saving state, and admin Delete button behavior.
+- Added Playwright smoke coverage for the extracted directory row by asserting project key/name, pinned metadata, Open, Unpin, and Delete actions on `/projects`.
+- Verification passed: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm lint`; `pnpm --filter @doctoral/web test:e2e`; `pnpm --filter @doctoral/web test:a11y`; `pnpm --filter @doctoral/web test:visual`; `pnpm --filter @doctoral/web build`; `pnpm repo:check`; `git diff --check`; Projects code-only static Atlasium drift audit returned no matches for obsolete branding, decorative terms, `href="#"`, or `window.confirm`.
+- Non-blocking Playwright warnings remained the known Agent 5 environment warnings: `NO_COLOR` with `FORCE_COLOR`, Next `allowedDevOrigins`, and duplicate Yjs import warnings when the broader suites visit Documents/Wiki surfaces.
+- Tramo 8 remains open for Documents detail and Wiki. The next selected candidate is the Documents collaborator strip, with `/projects/project-1/documents/document-1` added to visual/a11y route coverage before claiming the subtramo complete.
+
+### Agent 7 Tramo 8D Documents Detail Review
+- Extracted the Documents collaborator/realtime strip into `apps/web/components/document-collaborator-strip.tsx`.
+- Kept Documents detail as the stateful facade. Document loading, PDF loading, compile/polling, Monaco, PDF iframe messaging, Yjs providers, splitters, unsaved-change guard, and save/compile/delete actions remain unchanged.
+- Preserved the moved JSX class names, DOM order, `aria-live`, collaborator aria label, titles, self class, hidden collaborator count, `Live`/`Offline` copy, and realtime note rendering.
+- Added `/projects/project-1/documents/document-1` to responsive and a11y route lists, plus smoke coverage for the collaborator strip. The new a11y coverage exposed a real existing contrast issue in dynamic collaborator pills; fixed it locally by choosing white or graphite initials from the HSL background luminance while preserving the collaborator color as the state marker.
+- Verification passed: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm lint`; `pnpm --filter @doctoral/web test:e2e`; `pnpm --filter @doctoral/web test:a11y`; `pnpm --filter @doctoral/web test:visual`; `pnpm --filter @doctoral/web build`; `pnpm repo:check`; `git diff --check`; Documents code-only static Atlasium drift audit returned no matches for obsolete branding, decorative terms, `href="#"`, or `window.confirm`.
+- Non-blocking Playwright warnings remained the known Agent 5 environment warnings: `NO_COLOR` with `FORCE_COLOR`, Next `allowedDevOrigins`, and duplicate Yjs import warnings when the broader suites visit Documents/Wiki surfaces.
+- Tramo 8 remains open for Wiki. The next selected candidate is the Markdown toolbar because it can be extracted without moving markdown transform logic, page loading, draft/publish state, Docs sync, or realtime behavior.
+
+### Agent 7 Tramo 8E Wiki Review
+- Extracted the Wiki editor Markdown toolbar into `apps/web/components/wiki-markdown-toolbar.tsx`.
+- Kept `WikiHub` as the stateful facade. Page loading, tree selection, draft/publish state, markdown transforms, Docs sync, imports, upload handlers, Yjs realtime providers, autosave/conflict behavior, history, and delete flow remain unchanged.
+- Preserved toolbar class names, role, aria label, group structure, button titles, visible labels, keyboard shortcut labels, and action dispatch semantics.
+- Added Wiki toolbar smoke coverage and included Wiki in a11y coverage. The smoke exposed an incomplete Wiki fixture: the mocked tree lacked `type: "page"`, so the UI could render the row without selecting/loading the page. The fixture now matches the shared `WikiTreeNode` contract.
+- Rechecked the Wiki SVG guardrail while touching Wiki UI. Backend already rejects SVG assets, and the frontend now aligns with that by removing SVG/BMP/AVIF from import image extensions and replacing `image/*` file accepts with explicit PNG/JPEG/WEBP/GIF accepts.
+- Verification passed: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm lint`; `pnpm --filter @doctoral/web exec playwright test apps/web/e2e/atlasium-smoke.spec.ts --grep "wiki markdown toolbar"`; `pnpm --filter @doctoral/web test:e2e`; `pnpm --filter @doctoral/web test:a11y`; `pnpm --filter @doctoral/web test:visual`; `pnpm --filter @doctoral/web build`; `pnpm repo:check`; `git diff --check`; Wiki static Atlasium/security audit returned no active matches for obsolete branding, decorative drift, query-token params, unsafe ZIP extraction, SVG allowlists, or `image/*` accepts.
+- Non-blocking Playwright warnings remained the known Agent 5 environment warnings: `NO_COLOR` with `FORCE_COLOR`, Next `allowedDevOrigins`, duplicate Yjs import warnings, and intermittent font-request retries.
+- Tramo 8 is complete. Tramo 9 remains intentionally separate because partitioning `globals.css` has higher cascade risk and should start only with its own CSS/visual regression plan.
+
+### Agent 7 Tramo 9A Code CSS Review
+- Started the `globals.css` partition with a narrow global split: `apps/web/app/code.css` now owns Code-page-scoped `.code-*` selectors and their dedicated `1100px`/`640px` responsive rules.
+- Preserved import legality and cascade order by importing `./code.css` from `apps/web/app/layout.tsx` immediately after `./globals.css`. No route-level global CSS imports or CSS Modules were introduced.
+- Kept Atlasium tokens, reset/base rules, shell, shared primitives, `workspace-*`, `archive-*`, forms/buttons/modals/badges/loading states, and shared Documents technical styles in `globals.css`.
+- Deliberately left `.code-toolbar`, `.code-block`, and `.documents-code-editor` in `globals.css` because those selectors are shared with Documents editor/log surfaces and are not Code module CSS.
+- Read-only CSS exploration confirmed Tramo 9 should proceed via global tail-first slices, not route-local CSS, to avoid changing App Router global CSS legality or load order. Account is the next likely tail slice; Wiki/Documents/shared primitives should stay deferred.
+- Verification passed: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm lint`; `pnpm --filter @doctoral/web exec playwright test apps/web/e2e/atlasium-smoke.spec.ts --grep "code repository sections"`; `pnpm --filter @doctoral/web test:e2e`; `pnpm --filter @doctoral/web test:a11y`; `pnpm --filter @doctoral/web test:visual`; `pnpm --filter @doctoral/web build`; `pnpm repo:check`; `git diff --check`; CSS import audit confirmed global CSS imports remain only in `layout.tsx`; selector audit confirmed no Code-page `.code-*` duplicate block remains in `globals.css`.
+- Non-blocking Playwright warnings remained the known Agent 5 environment warnings: `NO_COLOR` with `FORCE_COLOR`, Next `allowedDevOrigins`, duplicate Yjs import warnings, and intermittent font-request retries.
+- Tramo 9 remains open. Continue only with similarly isolated, tail-ordered CSS slices and full Playwright visual/a11y coverage after each slice.
+
+### Agent 7 Tramo 9B Account CSS Review
+- Extracted Account-scoped `.account-*` styles and their dedicated `1100px` responsive rules into `apps/web/app/account.css`.
+- Preserved global availability for the Account drawer by importing `./account.css` from `apps/web/app/layout.tsx` after `./globals.css` and before `./code.css`, matching the historical Account-before-Code cascade order.
+- Kept Atlasium tokens, shared primitives, utilities, public/auth, Projects, Overview, Documents, Tasks, Meetings, Wiki, and shared technical styles in `globals.css`.
+- Verification exposed a real accessibility issue in existing resizable separators: Wiki and Documents used keyboard-focusable `role="separator"` elements without `aria-valuenow`. Added `aria-valuenow` and operational `aria-valuetext` to both split handles without changing resize behavior or layout.
+- Verification passed: `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm lint`; `pnpm --filter @doctoral/web exec playwright test apps/web/e2e/atlasium-smoke.spec.ts --grep "account Git credential setup"`; `pnpm --filter @doctoral/web test:e2e`; `pnpm --filter @doctoral/web test:a11y`; `pnpm --filter @doctoral/web test:visual`; `pnpm --filter @doctoral/web build`; `pnpm repo:check`; `git diff --check`; CSS import audit confirmed global CSS imports remain only in `layout.tsx`; selector audit confirmed no Account or Code-page duplicate block remains in `globals.css`.
+- Final repo hygiene required removing generated files from the index with `git rm --cached`: `apps/api/test/api-smoke.e2e-spec.{d.ts,js,js.map}` and `apps/web/tsconfig.tsbuildinfo`. The files remain generated/ignored locally, and `pnpm repo:check` now passes.
+- Non-blocking Playwright warnings remained the known Agent 5 environment warnings: `NO_COLOR` with `FORCE_COLOR`, Next `allowedDevOrigins`, duplicate Yjs import warnings, and intermittent font-request retries.
+- Tramo 9 remains open. The next slice should continue from the tail only if its responsive rules are isolated; shared primitives, Documents/Wiki splitters, Monaco/PDF/KaTeX, and mixed responsive blocks remain deferred.
+
+### Docker Verification Follow-up Review
+- Docker is now available locally: Docker Client/Server `28.5.1` and Docker Compose `v2.40.2-desktop.1`.
+- Fixed Compose runtime defaults so container services no longer inherit local-development `DATABASE_URL`/`REDIS_URL` values pointing at `localhost`. `docker-compose.yml` and `docker-compose.prod.yml` now default to `postgres` and `redis` service hostnames, with `ATLASIUM_DOCKER_DATABASE_URL` and `ATLASIUM_DOCKER_REDIS_URL` as explicit external-service escape hatches.
+- Verification passed: `docker compose -f docker-compose.yml config --quiet`; `docker compose -f docker-compose.prod.yml config --quiet`; resolved config audit for `DATABASE_URL`/`REDIS_URL` showing `postgres`/`redis` service hosts only.
+- Built current repo images from Dockerfiles: `atlasium-api:codex-smoke` (`1caf231cccb4`, 490MB), `atlasium-web:codex-smoke` (`29379eb70b54`, 1.26GB), and `atlasium-worker:codex-smoke` (`1e18a3269876`, 4.76GB).
+- Runtime smokes passed: API resolves `@nestjs/core` and `@prisma/client` from `/app/apps/api/dist/main.js`; Web has `.next`, the package-local Next binary, and resolves `next/package.json`; Worker runs as `uid=10001(atlasium)`, resolves `bullmq` and `@prisma/client`, and includes `/usr/bin/pg_dump`, `/usr/bin/pg_restore`, `/usr/bin/psql`, `/usr/bin/pdflatex`, `/usr/bin/biber`, and `/usr/bin/bibtex`.
+- Worker binary versions confirmed in-container: PostgreSQL client tools `16.14`, pdfTeX `3.141592653-2.6-1.40.24` from TeX Live 2022/Debian, Biber `2.18`, and BibTeX `0.99d`.
+- Residual limit: this follow-up intentionally did not run a full destructive restore or long-lived Compose stack startup. Restore drills still require explicit backup artifacts and target DB/storage env vars through `scripts/restore-backup.sh`.
+
 ## Git Access Persistent HTTPS Credentials (2026-06-07)
 - [x] Register the approved implementation plan before edits.
 - [x] Update `DESIGN.md` and `tasks/LESSONS.md` with concise persistent credential guidance.

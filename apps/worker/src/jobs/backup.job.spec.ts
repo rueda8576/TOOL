@@ -51,7 +51,7 @@ describe("processBackupJob", () => {
   };
 
   const makeSpawnSuccess = (): jest.Mock =>
-    jest.fn((_command: string, args: string[]) => {
+    jest.fn((command: string, args: string[]) => {
       const child = new EventEmitter() as EventEmitter & {
         stdout: EventEmitter;
         stderr: EventEmitter;
@@ -61,7 +61,12 @@ describe("processBackupJob", () => {
       const outputPath = args.find((arg) => arg.startsWith("--file="))?.slice("--file=".length) ?? "";
 
       process.nextTick(async () => {
-        await writeFile(outputPath, "dump");
+        if (args.includes("--version")) {
+          child.stdout.emit("data", Buffer.from(`${command} version 16.0\n`));
+        }
+        if (outputPath) {
+          await writeFile(outputPath, "dump");
+        }
         child.emit("close", 0);
       });
 
@@ -69,7 +74,7 @@ describe("processBackupJob", () => {
     });
 
   const makeSpawnFailure = (): jest.Mock =>
-    jest.fn(() => {
+    jest.fn((command: string, args: string[]) => {
       const child = new EventEmitter() as EventEmitter & {
         stdout: EventEmitter;
         stderr: EventEmitter;
@@ -77,16 +82,28 @@ describe("processBackupJob", () => {
       child.stdout = new EventEmitter();
       child.stderr = new EventEmitter();
 
-      process.nextTick(() => {
-        child.stderr.emit("data", Buffer.from("pg_dump exploded"));
-        child.emit("close", 1);
+      process.nextTick(async () => {
+        if (command === "pg_dump" && !args.includes("--version")) {
+          child.stderr.emit("data", Buffer.from(`pg_dump exploded for ${process.env.DATABASE_URL}`));
+          child.emit("close", 1);
+          return;
+        }
+
+        if (args.includes("--version")) {
+          child.stdout.emit("data", Buffer.from(`${command} version 16.0\n`));
+        }
+        const outputPath = args.find((arg) => arg.startsWith("--file="))?.slice("--file=".length) ?? "";
+        if (outputPath) {
+          await writeFile(outputPath, "dump");
+        }
+        child.emit("close", 0);
       });
 
       return child;
     });
 
   const makeSpawnError = (): jest.Mock =>
-    jest.fn(() => {
+    jest.fn((command: string, args: string[]) => {
       const child = new EventEmitter() as EventEmitter & {
         stdout: EventEmitter;
         stderr: EventEmitter;
@@ -94,8 +111,20 @@ describe("processBackupJob", () => {
       child.stdout = new EventEmitter();
       child.stderr = new EventEmitter();
 
-      process.nextTick(() => {
-        child.emit("error", new Error("pg_dump crashed"));
+      process.nextTick(async () => {
+        if (command === "pg_dump" && !args.includes("--version")) {
+          child.emit("error", new Error("pg_dump crashed"));
+          return;
+        }
+
+        if (args.includes("--version")) {
+          child.stdout.emit("data", Buffer.from(`${command} version 16.0\n`));
+        }
+        const outputPath = args.find((arg) => arg.startsWith("--file="))?.slice("--file=".length) ?? "";
+        if (outputPath) {
+          await writeFile(outputPath, "dump");
+        }
+        child.emit("close", 0);
       });
 
       return child;
@@ -135,7 +164,23 @@ describe("processBackupJob", () => {
     });
     expect(spawnImpl).toHaveBeenCalledWith(
       "pg_dump",
-      expect.arrayContaining([expect.stringContaining("--dbname="), expect.stringContaining("--file=")]),
+      expect.arrayContaining([
+        expect.stringContaining("--dbname="),
+        "--format=custom",
+        "--no-owner",
+        "--no-acl",
+        expect.stringContaining("--file=")
+      ]),
+      expect.any(Object)
+    );
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "pg_restore",
+      expect.arrayContaining(["--list", expect.stringContaining("db-")]),
+      expect.any(Object)
+    );
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "tar",
+      expect.arrayContaining(["-tzf", expect.stringContaining("storage-")]),
       expect.any(Object)
     );
     expect(tarImpl).toHaveBeenCalledWith(
@@ -154,8 +199,28 @@ describe("processBackupJob", () => {
         completedAt: expect.any(Date),
         retentionUntil: expect.any(Date),
         details: {
-          dbDumpPath: expect.stringContaining("db-"),
-          storageArchivePath: expect.stringContaining("storage-")
+          format: "pg_dump_custom",
+          dbDumpPath: expect.stringMatching(/db-.*\.dump$/),
+          storageArchivePath: expect.stringContaining("storage-"),
+          dbDump: {
+            path: expect.stringMatching(/db-.*\.dump$/),
+            sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+            bytes: expect.any(Number)
+          },
+          storageArchive: {
+            path: expect.stringContaining("storage-"),
+            sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+            bytes: expect.any(Number)
+          },
+          durationMs: expect.any(Number),
+          versions: expect.objectContaining({
+            pgDump: expect.stringContaining("pg_dump"),
+            pgRestore: expect.stringContaining("pg_restore"),
+            psql: expect.stringContaining("psql"),
+            pdflatex: expect.stringContaining("pdflatex"),
+            biber: expect.stringContaining("biber"),
+            bibtex: expect.stringContaining("bibtex")
+          })
         }
       }
     });
@@ -190,10 +255,14 @@ describe("processBackupJob", () => {
         status: BackupStatus.FAILED,
         completedAt: expect.any(Date),
         details: {
-          error: expect.stringContaining("pg_dump failed with code 1")
+          error: expect.stringContaining("pg_dump failed with code 1"),
+          durationMs: expect.any(Number),
+          versions: expect.any(Object)
         }
       }
     });
+    const failureDetails = prisma.backupRun.update.mock.calls[0][0].data.details;
+    expect(failureDetails.error).not.toContain(process.env.DATABASE_URL);
   });
 
   it("cleans up stale backup files after a successful run", async () => {
@@ -254,7 +323,9 @@ describe("processBackupJob", () => {
         status: BackupStatus.FAILED,
         completedAt: expect.any(Date),
         details: {
-          error: "pg_dump crashed"
+          error: "pg_dump failed to start: pg_dump crashed",
+          durationMs: expect.any(Number),
+          versions: expect.any(Object)
         }
       }
     });

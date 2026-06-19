@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 import { CompileStatus, ProjectRole } from "@prisma/client";
-import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
+import { UnauthorizedException } from "@nestjs/common";
 import * as encoding from "lib0/encoding";
 import * as Y from "yjs";
 import * as syncProtocol from "y-protocols/sync";
@@ -13,16 +13,17 @@ import { WebSocket } from "ws";
 describe("DocumentsCollaborationServer", () => {
   const createdServers: any[] = [];
 
-  const loadServer = async (storageRoot: string) => {
+  const loadServer = async (storageRoot: string, envOverrides: Record<string, string> = {}) => {
     jest.resetModules();
     process.env.STORAGE_ROOT = storageRoot;
     process.env.JWT_SECRET = "integration-secret-123";
+    process.env.COLLAB_ALLOW_QUERY_TOKEN = envOverrides.COLLAB_ALLOW_QUERY_TOKEN ?? "true";
+    process.env.ATLASIUM_SESSION_COOKIE_NAME = "atlasium_session";
     jest.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
       const [message] = args;
       if (typeof message === "string" && message.includes("Yjs was already imported")) {
         return;
       }
-      // eslint-disable-next-line no-console
       console.warn(...args);
     });
     return import("./documents-collaboration.server");
@@ -125,6 +126,39 @@ describe("DocumentsCollaborationServer", () => {
     });
 
     expect(socket.close).toHaveBeenCalledWith(1008, "Invalid collaboration token");
+  });
+
+  it("authenticates collaboration handshakes from the Atlasium session cookie", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-collab-cookie-"));
+    const { DocumentsCollaborationServer } = await loadServer(storageRoot, { COLLAB_ALLOW_QUERY_TOKEN: "false" });
+    const prisma: any = {
+      document: {
+        findFirst: jest.fn().mockResolvedValue({ id: "doc-1", projectId: "project-1" })
+      }
+    };
+    const sessionAuthService: any = {
+      authenticateToken: jest.fn().mockResolvedValue({
+        userId: "user-1",
+        email: "user@example.com",
+        globalRole: "editor"
+      })
+    };
+    const accessService: any = {
+      getProjectAccess: jest.fn().mockResolvedValue({ canWrite: true })
+    };
+    const server = instantiateServer(DocumentsCollaborationServer, prisma, sessionAuthService, accessService);
+    const socket = makeSocket(WebSocket.OPEN);
+
+    await (server as any).handleConnection(socket, {
+      url: "/collab?kind=presence&documentId=doc-1",
+      headers: {
+        host: "localhost",
+        cookie: "atlasium_session=cookie-token"
+      }
+    });
+
+    expect(sessionAuthService.authenticateToken).toHaveBeenCalledWith("cookie-token", expect.any(Object));
+    expect(socket.close).not.toHaveBeenCalled();
   });
 
   it("rejects malformed collaboration room queries before authentication", async () => {

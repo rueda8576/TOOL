@@ -14,11 +14,11 @@ import {
 import { useRouter } from "next/navigation";
 import { FileText } from "lucide-react";
 import type { editor as MonacoEditorApi } from "monaco-editor";
-import { MonacoBinding } from "y-monaco";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 
 import { AppShell } from "../../../../../components/app-shell";
+import { DocumentCollaboratorStrip } from "../../../../../components/document-collaborator-strip";
 import { LoadingState } from "../../../../../components/ui";
 import {
   LatexMonacoEditor,
@@ -46,68 +46,38 @@ import {
   loadDocumentPdfBlobUrl,
   updateLatexFile
 } from "../../../../../lib/documents";
+import {
+  buildLatexTree,
+  clampLeftPaneWidth,
+  collectDirectoryPaths,
+  compileStatusLabel,
+  DOCUMENT_SPLIT_MIN_VIEWPORT_PX,
+  getResizableWorkspaceMetrics,
+  inferLatexEntryFile,
+  LatexTreeEntry,
+  LatexTreeNode,
+  MIN_DOCUMENT_PANE_WIDTH_PX,
+  normalizeWordToken,
+  sanitizePdfFilename,
+  SPLITTER_KEYBOARD_STEP_PX,
+  SPLITTER_SIZE_PX,
+  terminalCompileStatus,
+  wait
+} from "../../../../../lib/document-workspace-helpers";
 import { inferMonacoDocumentLanguage } from "../../../../../lib/monaco-languages";
 import { getProjectAccess, ProjectAccess } from "../../../../../lib/project-access";
 import { useConfirmDialog } from "../../../../../lib/use-confirm-dialog";
 import { useUnsavedChangesGuard } from "../../../../../lib/use-unsaved-changes-guard";
 
-type LatexTreeEntry = { path: string; isDirectory: boolean };
-type LatexTreeNode = { name: string; path: string; isDirectory: boolean; children: LatexTreeNode[] };
+type MonacoCollaborationBinding = { destroy: () => void };
 
 const TREE_COLLAPSED_STORAGE_KEY = "documents_tree_collapsed";
 const SPLIT_WIDTH_STORAGE_KEY = "documents_split_left_px";
-const SPLITTER_SIZE_PX = 20;
-const MIN_DOCUMENT_PANE_WIDTH_PX = 380;
-const SPLITTER_KEYBOARD_STEP_PX = 24;
-const DOCUMENT_SPLIT_MIN_VIEWPORT_PX = 768;
 const DOCUMENT_PDF_HIGHLIGHT_EVENT = "doctoral:pdf-highlight-word";
 const DOCUMENT_PDF_WORD_PICKED_EVENT = "doctoral:pdf-word-picked";
 const DOCUMENT_WORD_HIGHLIGHT_DURATION_MS = 1500;
 const DOCUMENT_COLLAB_TEXT_KEY = "content";
 const DOCUMENT_COLLAB_AUTOSAVE_MS = 3000;
-
-function clampLeftPaneWidth(nextWidth: number, containerWidth: number, fixedColumnsWidth: number): number {
-  const availableWidth = containerWidth - fixedColumnsWidth;
-  if (availableWidth <= MIN_DOCUMENT_PANE_WIDTH_PX * 2) {
-    return Math.max(0, Math.round(availableWidth / 2));
-  }
-
-  const maxLeftWidth = availableWidth - MIN_DOCUMENT_PANE_WIDTH_PX;
-  return Math.min(Math.max(nextWidth, MIN_DOCUMENT_PANE_WIDTH_PX), maxLeftWidth);
-}
-
-function getResizableWorkspaceMetrics(workspace: HTMLElement | null): { containerWidth: number; fixedColumnsWidth: number } | null {
-  if (!workspace) {
-    return null;
-  }
-
-  const containerWidth = workspace.clientWidth;
-  if (containerWidth <= 0) {
-    return null;
-  }
-
-  const computed = window.getComputedStyle(workspace);
-  const columnGap = Number.parseFloat(computed.columnGap || computed.gap || "0");
-  const resolvedGap = Number.isFinite(columnGap) ? columnGap : 0;
-  const fixedColumnsWidth = SPLITTER_SIZE_PX + resolvedGap * 2;
-  return { containerWidth, fixedColumnsWidth };
-}
-
-function sanitizePdfFilename(title?: string): string {
-  const normalized = (title ?? "")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return `${normalized.length > 0 ? normalized : "document"}-latest.pdf`;
-}
-
-function normalizeWordToken(rawValue: string): string {
-  return rawValue.trim().replace(/^[^A-Za-z0-9_]+|[^A-Za-z0-9_]+$/g, "");
-}
 
 function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
   if (!rawUser) {
@@ -119,143 +89,6 @@ function parseStoredUser(rawUser: string | null): LoginResponse["user"] | null {
   } catch {
     return null;
   }
-}
-
-function inferLatexEntryFile(latexPaths: string[]): string | undefined {
-  if (latexPaths.length === 0) {
-    return undefined;
-  }
-
-  const mainTexAtRoot = latexPaths.find((path) => path.toLowerCase() === "main.tex");
-  if (mainTexAtRoot) {
-    return mainTexAtRoot;
-  }
-
-  const mainTexNested = latexPaths.find((path) => path.toLowerCase().endsWith("/main.tex"));
-  if (mainTexNested) {
-    return mainTexNested;
-  }
-
-  return latexPaths.find((path) => path.toLowerCase().endsWith(".tex")) ?? undefined;
-}
-
-function buildLatexTree(entries: LatexTreeEntry[]): LatexTreeNode[] {
-  const root: LatexTreeNode = { name: "", path: "", isDirectory: true, children: [] };
-  const nodesByPath = new Map<string, LatexTreeNode>([["", root]]);
-
-  const ensureDirectory = (directoryPath: string): LatexTreeNode => {
-    if (!directoryPath) {
-      return root;
-    }
-
-    const existing = nodesByPath.get(directoryPath);
-    if (existing) {
-      return existing;
-    }
-
-    const segments = directoryPath.split("/").filter(Boolean);
-    const parentPath = segments.slice(0, -1).join("/");
-    const parent = ensureDirectory(parentPath);
-    const created: LatexTreeNode = {
-      name: segments[segments.length - 1] ?? directoryPath,
-      path: directoryPath,
-      isDirectory: true,
-      children: []
-    };
-    parent.children.push(created);
-    nodesByPath.set(directoryPath, created);
-    return created;
-  };
-
-  for (const entry of entries) {
-    const normalizedPath = entry.path.split("/").filter(Boolean).join("/");
-    if (!normalizedPath) {
-      continue;
-    }
-
-    const segments = normalizedPath.split("/");
-    const parentPath = segments.slice(0, -1).join("/");
-    const parent = ensureDirectory(parentPath);
-    const current = nodesByPath.get(normalizedPath);
-
-    if (current) {
-      current.isDirectory = current.isDirectory || entry.isDirectory;
-      continue;
-    }
-
-    const node: LatexTreeNode = {
-      name: segments[segments.length - 1] ?? normalizedPath,
-      path: normalizedPath,
-      isDirectory: entry.isDirectory,
-      children: []
-    };
-    parent.children.push(node);
-    nodesByPath.set(normalizedPath, node);
-
-    if (entry.isDirectory) {
-      ensureDirectory(normalizedPath);
-    }
-  }
-
-  const sortNodes = (nodes: LatexTreeNode[]): LatexTreeNode[] =>
-    [...nodes]
-      .sort((left, right) => {
-        if (left.isDirectory !== right.isDirectory) {
-          return left.isDirectory ? -1 : 1;
-        }
-        return left.name.localeCompare(right.name);
-      })
-      .map((node) =>
-        node.isDirectory
-          ? {
-              ...node,
-              children: sortNodes(node.children)
-            }
-          : node
-      );
-
-  return sortNodes(root.children);
-}
-
-function collectDirectoryPaths(entries: LatexTreeEntry[]): string[] {
-  const paths = new Set<string>();
-  for (const entry of entries) {
-    const segments = entry.path.split("/").filter(Boolean);
-    if (entry.isDirectory && segments.length > 0) {
-      paths.add(segments.join("/"));
-    }
-    for (let depth = 1; depth < segments.length; depth += 1) {
-      paths.add(segments.slice(0, depth).join("/"));
-    }
-  }
-
-  return [...paths].sort((left, right) => left.length - right.length || left.localeCompare(right));
-}
-
-function terminalCompileStatus(status: string): boolean {
-  return status === "succeeded" || status === "failed" || status === "timeout";
-}
-
-function compileStatusLabel(status: string): string {
-  switch (status) {
-    case "running":
-      return "Compiling";
-    case "succeeded":
-      return "Compiled";
-    case "failed":
-      return "Compile failed";
-    case "timeout":
-      return "Compile timeout";
-    case "pending":
-    default:
-      return "Pending compile";
-  }
-}
-
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolveDelay) => {
-    setTimeout(resolveDelay, milliseconds);
-  });
 }
 
 export default function DocumentDetailPage({
@@ -274,7 +107,7 @@ export default function DocumentDetailPage({
   const autoCompileVersionRef = useRef<string | null>(null);
   const fileCollabProviderRef = useRef<WebsocketProvider | null>(null);
   const fileCollabDocRef = useRef<Y.Doc | null>(null);
-  const fileCollabBindingRef = useRef<MonacoBinding | null>(null);
+  const fileCollabBindingRef = useRef<MonacoCollaborationBinding | null>(null);
   const presenceCollabProviderRef = useRef<WebsocketProvider | null>(null);
   const presenceCollabDocRef = useRef<Y.Doc | null>(null);
   const monacoInstanceRef = useRef<MonacoEditorApi.IStandaloneCodeEditor | null>(null);
@@ -328,7 +161,7 @@ export default function DocumentDetailPage({
       console.error("Failed to resolve collaboration websocket URL.", error);
       return {
         collaborationServerUrl: null,
-        collaborationConfigError: "Realtime collaboration is unavailable. You can continue editing locally."
+        collaborationConfigError: "Realtime unavailable. Local editing remains active."
       };
     }
   }, []);
@@ -687,7 +520,6 @@ export default function DocumentDetailPage({
         connect: true,
         disableBc: true,
         params: {
-          token,
           kind: "presence",
           documentId: params.documentId
         }
@@ -695,7 +527,7 @@ export default function DocumentDetailPage({
     } catch (connectionError) {
       console.error("Failed to initialize collaboration presence provider.", connectionError);
       setIsRealtimeConnected(false);
-      setRealtimeStatusNote("Realtime collaboration is unavailable. You can continue editing locally.");
+      setRealtimeStatusNote("Realtime unavailable. Local editing remains active.");
       presenceDoc.destroy();
       return;
     }
@@ -718,7 +550,7 @@ export default function DocumentDetailPage({
       if (isConnected) {
         setRealtimeStatusNote(null);
       } else if (event.status === "disconnected") {
-        setRealtimeStatusNote("Realtime collaboration is offline. You can continue editing locally.");
+        setRealtimeStatusNote("Realtime unavailable. Local editing remains active.");
       }
     };
 
@@ -780,7 +612,6 @@ export default function DocumentDetailPage({
         connect: true,
         disableBc: true,
         params: {
-          token,
           kind: "file",
           documentVersionId: currentVersion.id,
           path: selectedLatexPath
@@ -788,7 +619,7 @@ export default function DocumentDetailPage({
       });
     } catch (connectionError) {
       console.error("Failed to initialize collaboration file provider.", connectionError);
-      setRealtimeStatusNote("Realtime collaboration is unavailable. You can continue editing locally.");
+      setRealtimeStatusNote("Realtime unavailable. Local editing remains active.");
       fileDoc.destroy();
       void loadLatexFileContent(currentVersion.id, selectedLatexPath, token);
       return;
@@ -843,6 +674,7 @@ export default function DocumentDetailPage({
   ]);
 
   useEffect(() => {
+    let cancelled = false;
     const editor = monacoInstanceRef.current;
     const fileProvider = fileCollabProviderRef.current;
     const fileDoc = fileCollabDocRef.current;
@@ -861,15 +693,26 @@ export default function DocumentDetailPage({
       fileCollabBindingRef.current = null;
     }
 
-    const binding = new MonacoBinding(fileDoc.getText(DOCUMENT_COLLAB_TEXT_KEY), model, new Set([editor]), fileProvider.awareness);
-    fileCollabBindingRef.current = binding;
+    let localBinding: MonacoCollaborationBinding | null = null;
+    void import("y-monaco").then(({ MonacoBinding }) => {
+      if (cancelled) {
+        return;
+      }
+      const binding = new MonacoBinding(fileDoc.getText(DOCUMENT_COLLAB_TEXT_KEY), model, new Set([editor]), fileProvider.awareness);
+      localBinding = binding;
+      fileCollabBindingRef.current = binding;
+    });
 
     return () => {
-      if (fileCollabBindingRef.current === binding) {
-        binding.destroy();
+      cancelled = true;
+      if (!localBinding) {
+        return;
+      }
+      if (fileCollabBindingRef.current === localBinding) {
+        localBinding.destroy();
         fileCollabBindingRef.current = null;
       } else {
-        binding.destroy();
+        localBinding.destroy();
       }
     };
   }, [currentVersion?.id, monacoReadyTick, selectedLatexPath, showLatexWorkspace]);
@@ -1487,31 +1330,12 @@ export default function DocumentDetailPage({
           )}
         </div>
         <div className="documents-detail-actions">
-          <div className="documents-collaborators" aria-live="polite" aria-label="Collaborators in this document">
-            {visibleCollaborators.map((collaborator) => (
-              <span
-                key={`${collaborator.id}-${collaborator.clientId}`}
-                className={collaborator.isSelf ? "documents-collaborator-pill documents-collaborator-pill-self" : "documents-collaborator-pill"}
-                style={{ backgroundColor: collaborator.color, borderColor: collaborator.color }}
-                title={
-                  collaborator.activePath
-                    ? `${collaborator.name} editing ${collaborator.activePath}`
-                    : `${collaborator.name} viewing`
-                }
-              >
-                {collaborator.initials}
-              </span>
-            ))}
-            {hiddenCollaboratorsCount > 0 ? (
-              <span className="documents-collaborator-more" title={`${hiddenCollaboratorsCount} more collaborators`}>
-                +{hiddenCollaboratorsCount}
-              </span>
-            ) : null}
-            <span className={isRealtimeConnected ? "documents-realtime-status documents-realtime-status-live" : "documents-realtime-status"}>
-              {isRealtimeConnected ? "Live" : "Offline"}
-            </span>
-            {realtimeStatusNote ? <span className="documents-realtime-note">{realtimeStatusNote}</span> : null}
-          </div>
+          <DocumentCollaboratorStrip
+            hiddenCollaboratorsCount={hiddenCollaboratorsCount}
+            isRealtimeConnected={isRealtimeConnected}
+            realtimeStatusNote={realtimeStatusNote}
+            visibleCollaborators={visibleCollaborators}
+          />
           {hasLatex ? (
             <button
               className={showLatexWorkspace ? "button button-secondary" : "button"}
@@ -1707,6 +1531,8 @@ export default function DocumentDetailPage({
                 role="separator"
                 aria-label="Resize editor and preview panels"
                 aria-orientation="vertical"
+                aria-valuenow={Math.round(leftPaneWidthPx ?? MIN_DOCUMENT_PANE_WIDTH_PX)}
+                aria-valuetext={`${Math.round(leftPaneWidthPx ?? MIN_DOCUMENT_PANE_WIDTH_PX)} pixel editor panel`}
                 tabIndex={0}
                 onPointerDown={onSplitterPointerDown}
                 onKeyDown={onSplitterKeyDown}

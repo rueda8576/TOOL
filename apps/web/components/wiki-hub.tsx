@@ -11,6 +11,7 @@ import { LoadingState, MetricPill, Modal, ModuleCockpit } from "./ui";
 import { WikiHistory } from "./wiki-history";
 import { WikiImportDraftEntry, WikiImportPanel } from "./wiki-import-panel";
 import { WikiMarkdown } from "./wiki-markdown";
+import { WikiMarkdownToolbar, WikiMarkdownAction, WikiMarkdownTool } from "./wiki-markdown-toolbar";
 import { WikiReader } from "./wiki-reader";
 import { API_BASE_URL, LoginResponse } from "../lib/client-api";
 import {
@@ -92,7 +93,9 @@ const WIKI_SIDEBAR_MIN_PX = 260;
 const WIKI_SIDEBAR_MAX_PX = 520;
 const WIKI_MAIN_MIN_PX = 520;
 const WIKI_SIDEBAR_AUTO_FALLBACK_PX = 320;
-const WIKI_IMPORT_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".avif"]);
+const WIKI_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
+const WIKI_IMPORT_ACCEPT = `.md,.markdown,${WIKI_IMAGE_ACCEPT}`;
+const WIKI_IMPORT_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 const DOCS_KIND_LABELS: Record<WikiDocsKind, string> = {
   research: "Research",
   implementation: "Implementation"
@@ -112,29 +115,6 @@ type TextTransformResult = {
   nextValue: string;
   nextSelectionStart: number;
   nextSelectionEnd: number;
-};
-
-type WikiMarkdownAction =
-  | "heading1"
-  | "heading2"
-  | "heading3"
-  | "bold"
-  | "italic"
-  | "link"
-  | "inlineCode"
-  | "codeBlock"
-  | "quote"
-  | "bullets"
-  | "numbered"
-  | "checklist"
-  | "horizontalRule"
-  | "indent"
-  | "outdent";
-
-type WikiMarkdownTool = {
-  action: WikiMarkdownAction;
-  label: string;
-  title: string;
 };
 
 type ListMarkerInfo = {
@@ -958,7 +938,7 @@ export function WikiHub({
       console.error("Failed to resolve wiki collaboration websocket URL.", collaborationError);
       return {
         collaborationServerUrl: null,
-        collaborationConfigError: "Realtime collaboration is unavailable. Editor fallback remains active."
+        collaborationConfigError: "Realtime unavailable. Local editing remains active."
       };
     }
   }, []);
@@ -1497,7 +1477,7 @@ export function WikiHub({
     }
 
     if (!collaborationServerUrl || !collaboratorIdentity) {
-      disableRealtimeWithFallback("Realtime collaboration is unavailable. Editor fallback remains active.");
+      disableRealtimeWithFallback("Realtime unavailable. Local editing remains active.");
       return;
     }
 
@@ -1510,7 +1490,6 @@ export function WikiHub({
         connect: true,
         disableBc: true,
         params: {
-          token,
           kind: "wiki-presence",
           wikiPageId: pageDetail.page.id
         }
@@ -1518,7 +1497,7 @@ export function WikiHub({
     } catch (connectionError) {
       console.error("Failed to initialize wiki presence provider.", connectionError);
       presenceDoc.destroy();
-      disableRealtimeWithFallback("Realtime collaboration is unavailable. Editor fallback remains active.");
+      disableRealtimeWithFallback("Realtime unavailable. Local editing remains active.");
       return;
     }
 
@@ -1585,7 +1564,7 @@ export function WikiHub({
     }
 
     if (!collaborationServerUrl || !collaboratorIdentity) {
-      disableRealtimeWithFallback("Realtime collaboration is unavailable. Editor fallback remains active.");
+      disableRealtimeWithFallback("Realtime unavailable. Local editing remains active.");
       return;
     }
 
@@ -1598,7 +1577,6 @@ export function WikiHub({
         connect: true,
         disableBc: true,
         params: {
-          token,
           kind: "wiki-page",
           wikiPageId: pageDetail.page.id
         }
@@ -1606,7 +1584,7 @@ export function WikiHub({
     } catch (connectionError) {
       console.error("Failed to initialize wiki page provider.", connectionError);
       pageDoc.destroy();
-      disableRealtimeWithFallback("Realtime collaboration is unavailable. Editor fallback remains active.");
+      disableRealtimeWithFallback("Realtime unavailable. Local editing remains active.");
       return;
     }
 
@@ -1638,7 +1616,7 @@ export function WikiHub({
       }
       if (event.status === "disconnected") {
         window.setTimeout(() => {
-          disableRealtimeWithFallback("Realtime collaboration is offline. Switched to local draft autosave.");
+          disableRealtimeWithFallback("Realtime unavailable. Local editing remains active.");
         }, 0);
         return;
       }
@@ -2526,24 +2504,7 @@ export function WikiHub({
 
   const renderMarkdownToolbar = useCallback(
     (): JSX.Element => (
-      <div className="wiki-markdown-toolbar" role="toolbar" aria-label="Markdown formatting toolbar">
-        {WIKI_MARKDOWN_TOOL_GROUPS.map((group, groupIndex) => (
-          <div className="wiki-markdown-toolbar-group" key={`wiki-markdown-group-${groupIndex}`}>
-            {group.map((tool) => (
-              <button
-                key={tool.action}
-                type="button"
-                className="wiki-markdown-tool"
-                title={tool.title}
-                aria-label={tool.title}
-                onClick={() => applyWikiMarkdownAction(tool.action)}
-              >
-                {tool.label}
-              </button>
-            ))}
-          </div>
-        ))}
-      </div>
+      <WikiMarkdownToolbar toolGroups={WIKI_MARKDOWN_TOOL_GROUPS} onAction={applyWikiMarkdownAction} />
     ),
     [applyWikiMarkdownAction]
   );
@@ -3121,7 +3082,7 @@ export function WikiHub({
           <input
             ref={importFilesInputRef}
             type="file"
-            accept=".md,.markdown,image/*"
+            accept={WIKI_IMPORT_ACCEPT}
             className="hidden-file-input"
             multiple
             onChange={(event) => {
@@ -3131,7 +3092,7 @@ export function WikiHub({
           <input
             ref={importFolderInputRef}
             type="file"
-            accept=".md,.markdown,image/*"
+            accept={WIKI_IMPORT_ACCEPT}
             className="hidden-file-input"
             multiple
             {...({ webkitdirectory: "", directory: "" } as {
@@ -3182,6 +3143,8 @@ export function WikiHub({
             role="separator"
             aria-label="Resize wiki pages and content panels"
             aria-orientation="vertical"
+            aria-valuenow={Math.round(sidebarWidthPx ?? WIKI_SIDEBAR_AUTO_FALLBACK_PX)}
+            aria-valuetext={`${Math.round(sidebarWidthPx ?? WIKI_SIDEBAR_AUTO_FALLBACK_PX)} pixel wiki page index`}
             tabIndex={0}
             onPointerDown={onSidebarSplitterPointerDown}
             onDoubleClick={onSidebarSplitterDoubleClick}
@@ -3377,7 +3340,7 @@ export function WikiHub({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                accept={WIKI_IMAGE_ACCEPT}
                 className="hidden-file-input"
                 onChange={(event) => {
                   void onImageFileChange(event);

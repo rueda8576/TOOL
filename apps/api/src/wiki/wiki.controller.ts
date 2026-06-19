@@ -209,8 +209,11 @@ export class WikiController {
     @Res() res: Response
   ): Promise<void> {
     const asset = await this.wikiService.getWikiAssetContent(assetId, user);
+    const fileName = asset.fileName.replace(/["\r\n]/g, "_");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Type", asset.mimeType);
-    res.setHeader("Content-Disposition", `inline; filename="${asset.fileName}"`);
+    res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
     res.send(asset.buffer);
   }
 

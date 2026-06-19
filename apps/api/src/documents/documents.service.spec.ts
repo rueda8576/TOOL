@@ -436,6 +436,9 @@ describe("DocumentsService", () => {
     expect((service as any).normalizeLatexPath("\\chapters\\intro.tex")).toBe("chapters/intro.tex");
     expect(() => (service as any).normalizeLatexPath("")).toThrow(BadRequestException);
     expect(() => (service as any).normalizeLatexPath("../outside.tex")).toThrow(BadRequestException);
+    expect(() => (service as any).normalizeLatexPath("-output-directory/main.tex")).toThrow(BadRequestException);
+    expect((service as any).normalizeLatexEntryFile("chapters/intro.tex")).toBe("chapters/intro.tex");
+    expect(() => (service as any).normalizeLatexEntryFile("main.pdf")).toThrow(BadRequestException);
     expect(() => (service as any).workspaceAbsolutePath("../outside")).toThrow(BadRequestException);
     expect((service as any).parseLatexPaths(undefined)).toBeNull();
     expect(() => (service as any).parseLatexPaths("{")).toThrow(BadRequestException);
@@ -443,6 +446,24 @@ describe("DocumentsService", () => {
     expect(() => (service as any).parseLatexPaths(JSON.stringify(["main.tex", 3]))).toThrow(BadRequestException);
     expect(() => (service as any).validateLatexFolderPaths(["main.tex", "main.tex"])).toThrow(BadRequestException);
     expect(() => (service as any).validateLatexFolderPaths(["../escape.tex"])).toThrow(BadRequestException);
+  });
+
+  it("rejects ZIP bundles that try to escape the LaTeX workspace", async () => {
+    const { service, storageService } = createService();
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-docs-zip-"));
+    (service as any).storageRoot = storageRoot;
+
+    const AdmZip = (await import("adm-zip")).default;
+    const zip = new AdmZip();
+    zip.addFile("C:/escape.tex", Buffer.from("escape"));
+    storageService.readObject.mockResolvedValue(zip.toBuffer());
+
+    await expect(
+      (service as any).materializeLatexWorkspace({
+        documentVersionId: "version-1",
+        latexBundleStoragePath: "uploads/bundle.zip"
+      })
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it("rejects invalid createVersion source combinations before any upload persistence", async () => {

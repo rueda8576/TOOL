@@ -22,6 +22,59 @@ import { CreateProjectRepositoryDto } from "./dto/create-project-repository.dto"
 import { CreateRepositoryBranchDto } from "./dto/create-repository-branch.dto";
 import { CreateRepositoryMergeRequestDto } from "./dto/create-repository-merge-request.dto";
 import { LinkProjectRepositoryDto } from "./dto/link-project-repository.dto";
+import {
+  executeGitlabBinaryRequest as executeGitlabBinaryClientRequest,
+  executeGitlabJsonRequest,
+  GitlabApiError,
+  GitlabBinaryRequestOptions,
+  GitlabBinaryResponse
+} from "./gitlab-client";
+import {
+  buildCreateBranchRequest,
+  buildCreateMergeRequestRequest,
+  buildRepositoryArchiveAttempts,
+  buildRepositoryArchiveFallbackTreePath,
+  buildRepositoryArchiveResolveCommitsPath,
+  buildRepositoryBranchesCollectionPath,
+  buildRepositoryBranchesPath,
+  buildRepositoryCommitPath,
+  buildRepositoryCommitRequest,
+  buildRepositoryCommitsPath,
+  buildRepositoryFilePath,
+  buildRepositoryMergeRequestsCollectionPath,
+  buildRepositoryMergeRequestsPath,
+  buildRepositoryRawFilePath,
+  buildRepositoryRecursiveTreePath,
+  buildRepositoryTreePath,
+  mapCreatedBranch,
+  mapCreatedMergeRequest,
+  mapGitlabBranch,
+  mapGitlabCommit,
+  mapGitlabDocsMarkdownFile,
+  mapGitlabFileContent,
+  mapGitlabMergeRequest,
+  mapGitlabRawFile,
+  mapGitlabTreeNode,
+  mapRepositoryArchiveResponse,
+  mapRepositoryDocsCommitResult,
+  normalizeRepositoryDocsFilePath,
+  normalizeRepositoryFilePath,
+  readTextFromGitlabFile,
+  resolveArchiveCommitSha
+} from "./gitlab-content";
+import {
+  GITLAB_DOCS_ROOT,
+  isDocsMarkdownPath
+} from "./gitlab-format";
+import {
+  mapManagedProvision,
+  mapRepositoryStatusFromProject,
+  mapRepositorySummaryFromRecord,
+  mapUserSshKey,
+  normalizeRepositoryPath,
+  normalizeUserSshKeyId,
+  resolveTokenExpiry
+} from "./gitlab-mappers";
 
 const GITLAB_ARCHIVE_FALLBACK_MAX_FILES = 2000;
 const GITLAB_ARCHIVE_FALLBACK_MAX_BYTES = 50 * 1024 * 1024;
@@ -291,12 +344,10 @@ const GITLAB_OAUTH_SCOPE = "api read_user";
 const GITLAB_ACCESS_LEVEL_REPORTER = 20;
 const GITLAB_ACCESS_LEVEL_DEVELOPER = 30;
 const GITLAB_ACCESS_LEVEL_MAINTAINER = 40;
-const GITLAB_MERGE_REQUEST_STATES = ["opened", "merged", "closed", "all"] as const;
-const GITLAB_DOCS_ROOT = "Docs";
 const GITLAB_DOCS_TREE_PAGE_SIZE = 100;
 const GITLAB_DOCS_MAX_MARKDOWN_FILES = 2000;
 
-type RepositoryMergeRequestState = (typeof GITLAB_MERGE_REQUEST_STATES)[number];
+type RepositoryMergeRequestState = "opened" | "merged" | "closed" | "all";
 
 export type RepositoryDocsMarkdownFile = {
   docsPath: string;
@@ -323,22 +374,6 @@ export type RepositoryDocsCommitResult = {
   message: string;
   webUrl: string | null;
 };
-
-class GitlabApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly responseBody: string,
-    message?: string,
-    readonly metadata?: {
-      contentType: string | null;
-      requestId: string | null;
-      gitlabMeta: string | null;
-      path: string;
-    }
-  ) {
-    super(message ?? responseBody ?? `GitLab API error (${status})`);
-  }
-}
 
 @Injectable()
 export class GitlabService {
@@ -394,7 +429,7 @@ export class GitlabService {
     const gitlabUser = await this.fetchGitlabUser(tokenPayload.access_token);
     await this.assertGitlabUserMatchesAtlasiumIdentity(userId, gitlabUser);
     const syncedGitlabUser = await this.syncManagedUserIdentity(atlasiumUser);
-    const tokenExpiresAt = this.resolveTokenExpiry(tokenPayload);
+    const tokenExpiresAt = resolveTokenExpiry(tokenPayload);
     const secret = getEnv().JWT_SECRET;
 
     await this.prisma.gitLabConnection.upsert({
@@ -554,7 +589,7 @@ export class GitlabService {
           "/user/keys?per_page=100"
         );
 
-        return keys.map((key) => this.mapUserSshKey(key));
+        return keys.map((key) => mapUserSshKey(key));
       } catch (error) {
         throw this.mapUserSshKeyError(error);
       }
@@ -587,7 +622,7 @@ export class GitlabService {
           }
         );
 
-        return this.mapUserSshKey(createdKey);
+        return mapUserSshKey(createdKey);
       } catch (error) {
         throw this.mapUserSshKeyError(error);
       }
@@ -595,7 +630,7 @@ export class GitlabService {
   }
 
   async deleteUserSshKey(userId: string, keyId: string): Promise<{ deleted: true }> {
-    const normalizedKeyId = this.normalizeUserSshKeyId(keyId);
+    const normalizedKeyId = normalizeUserSshKeyId(keyId);
 
     return this.withUserAccessToken(userId, async (accessToken) => {
       try {
@@ -622,7 +657,8 @@ export class GitlabService {
     await this.accessService.ensureProjectReadable(user.userId, user.globalRole, projectId);
 
     const repositories = await this.findRepositoryRecords(projectId);
-    return repositories.map((repository) => this.mapRepositorySummaryFromRecord(repository));
+    const browserBaseUrl = this.getGitlabBrowserBaseUrl();
+    return repositories.map((repository) => mapRepositorySummaryFromRecord(repository, browserBaseUrl));
   }
 
   async getRepositoryStatus(projectId: string, user: AuthenticatedUser, repositoryId?: string): Promise<RepositoryStatus> {
@@ -640,29 +676,11 @@ export class GitlabService {
         this.fetchRepositoryProject(repository.gitlabProjectId, accessToken)
       );
 
-      return {
-        connected: true,
-        id: repository.id,
-        gitlabProjectId: String(project.id),
-        name: project.name,
-        description: project.description,
-        webUrl: project.web_url,
-        sshCloneUrl:
-          project.ssh_url_to_repo ?? this.buildRepositorySshCloneUrl(project.path_with_namespace),
-        httpCloneUrl:
-          project.http_url_to_repo ?? this.buildRepositoryCloneUrl(project.path_with_namespace),
-        pathWithNamespace: project.path_with_namespace,
-        defaultBranch: project.default_branch ?? repository.defaultBranch,
-        visibility: project.visibility,
-        lastActivityAt: project.last_activity_at,
-        connectedAt: repository.connectedAt.toISOString(),
-        connectedByUserId: repository.connectedByUserId,
-        managed: true
-      };
+      return mapRepositoryStatusFromProject(project, repository, this.getGitlabBrowserBaseUrl());
     } catch {
       return {
         connected: true,
-        ...this.mapRepositorySummaryFromRecord(repository)
+        ...mapRepositorySummaryFromRecord(repository, this.getGitlabBrowserBaseUrl())
       };
     }
   }
@@ -718,7 +736,7 @@ export class GitlabService {
     repositoryName: string,
     options: { path?: string; description?: string | null } = {}
   ): Promise<ManagedRepositoryProvision> {
-    const repositoryPath = this.normalizeRepositoryPath(options.path ?? projectKey);
+    const repositoryPath = normalizeRepositoryPath(options.path ?? projectKey);
 
     return this.withSystemAccessToken(async (accessToken) => {
       const group = await this.ensureManagedGroup(accessToken);
@@ -742,7 +760,7 @@ export class GitlabService {
         );
 
         await this.bootstrapManagedRepositoryDocs(accessToken, remoteProject);
-        return this.mapManagedProvision(remoteProject);
+        return mapManagedProvision(remoteProject);
       } catch (error) {
         if (error instanceof GitlabApiError && error.status === 400) {
           throw new BadRequestException(
@@ -817,8 +835,8 @@ export class GitlabService {
     if (!repositoryName) {
       throw new BadRequestException("Repository name is required");
     }
-    const repositoryPathSuffix = this.normalizeRepositoryPath(dto.path?.trim() || repositoryName);
-    const repositoryPath = this.normalizeRepositoryPath(`${atlasiumProject.key}-${repositoryPathSuffix}`);
+    const repositoryPathSuffix = normalizeRepositoryPath(dto.path?.trim() || repositoryName);
+    const repositoryPath = normalizeRepositoryPath(`${atlasiumProject.key}-${repositoryPathSuffix}`);
     const provisioned = await this.provisionManagedRemoteRepository(atlasiumProject.key, repositoryName, {
       path: repositoryPath,
       description: dto.description
@@ -1150,16 +1168,9 @@ export class GitlabService {
     return this.withUserAccessToken(user.userId, async (accessToken) => {
       const branches = await this.executeGitlabRequest<GitlabBranch[]>(
         accessToken,
-        `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/branches?per_page=100`
+        buildRepositoryBranchesPath(repository.gitlabProjectId)
       );
-      return branches.map((branch) => ({
-        name: branch.name,
-        default: branch.default,
-        merged: branch.merged,
-        canPush: branch.can_push ?? false,
-        protected: branch.protected ?? false,
-        webUrl: branch.web_url ?? null
-      }));
+      return branches.map(mapGitlabBranch);
     });
   }
 
@@ -1175,24 +1186,11 @@ export class GitlabService {
     const repository = await this.requireReadableRepository(projectId, user, repositoryId);
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
-      const search = new URLSearchParams({ per_page: "25" });
-      if (ref?.trim()) {
-        search.set("ref_name", ref.trim());
-      }
-
       const commits = await this.executeGitlabRequest<GitlabCommit[]>(
         accessToken,
-        `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/commits?${search.toString()}`
+        buildRepositoryCommitsPath(repository.gitlabProjectId, ref)
       );
-      return commits.map((commit) => ({
-        id: commit.id,
-        shortId: commit.short_id,
-        title: commit.title,
-        message: commit.message,
-        authoredDate: commit.authored_date,
-        authorName: commit.author_name,
-        webUrl: commit.web_url ?? null
-      }));
+      return commits.map(mapGitlabCommit);
     });
   }
 
@@ -1211,25 +1209,21 @@ export class GitlabService {
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
       const resolvedRef = ref?.trim() || repository.defaultBranch;
-      const search = new URLSearchParams({ per_page: "200", ref: resolvedRef });
-      if (path?.trim()) {
-        search.set("path", path.trim());
-      }
 
       const entries = await this.executeGitlabRequest<GitlabTreeNode[]>(
         accessToken,
-        `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/tree?${search.toString()}`
+        buildRepositoryTreePath({
+          gitlabProjectId: repository.gitlabProjectId,
+          ref: resolvedRef,
+          path,
+          perPage: 200
+        })
       );
 
       return {
         ref: resolvedRef,
         path: path?.trim() || "",
-        entries: entries.map((entry) => ({
-          id: entry.id,
-          name: entry.name,
-          path: entry.path,
-          type: entry.type
-        }))
+        entries: entries.map(mapGitlabTreeNode)
       };
     });
   }
@@ -1249,30 +1243,16 @@ export class GitlabService {
     content: string | null;
   }> {
     const repository = await this.requireReadableRepository(projectId, user, repositoryId);
-    const normalizedFilePath = filePath.trim();
-    if (!normalizedFilePath) {
-      throw new BadRequestException("filePath is required");
-    }
+    const normalizedFilePath = normalizeRepositoryFilePath(filePath);
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
       const resolvedRef = ref?.trim() || repository.defaultBranch;
-      const search = new URLSearchParams({ ref: resolvedRef });
       const gitlabFile = await this.executeGitlabRequest<GitlabFile>(
         accessToken,
-        `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/files/${encodeURIComponent(normalizedFilePath)}?${search.toString()}`
+        buildRepositoryFilePath(repository.gitlabProjectId, normalizedFilePath, resolvedRef)
       );
 
-      const rawBuffer = Buffer.from(gitlabFile.content, "base64");
-      const binary = this.isBinaryBuffer(rawBuffer);
-
-      return {
-        filePath: gitlabFile.file_path,
-        fileName: gitlabFile.file_name,
-        ref: gitlabFile.ref,
-        size: gitlabFile.size,
-        binary,
-        content: binary ? null : rawBuffer.toString("utf8")
-      };
+      return mapGitlabFileContent(gitlabFile);
     });
   }
 
@@ -1288,19 +1268,15 @@ export class GitlabService {
     contentType: string;
   }> {
     const repository = await this.requireReadableRepository(projectId, user, repositoryId);
-    const normalizedFilePath = filePath.trim();
-    if (!normalizedFilePath) {
-      throw new BadRequestException("filePath is required");
-    }
+    const normalizedFilePath = normalizeRepositoryFilePath(filePath);
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
       const resolvedRef = ref?.trim() || repository.defaultBranch;
-      const search = new URLSearchParams({ ref: resolvedRef });
 
       try {
         const rawFile = await this.executeGitlabBinaryRequest(
           accessToken,
-          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/files/${encodeURIComponent(normalizedFilePath)}/raw?${search.toString()}`,
+          buildRepositoryRawFilePath(repository.gitlabProjectId, normalizedFilePath, resolvedRef),
           {
             headers: {
               Accept: "*/*"
@@ -1308,11 +1284,7 @@ export class GitlabService {
           }
         );
 
-        return {
-          buffer: rawFile.buffer,
-          fileName: this.buildRepositoryRawFileName(normalizedFilePath),
-          contentType: rawFile.contentType ?? this.detectRepositoryFileContentType(normalizedFilePath) ?? "application/octet-stream"
-        };
+        return mapGitlabRawFile(normalizedFilePath, rawFile);
       } catch (error) {
         throw this.mapRepositoryAccessError(error);
       }
@@ -1330,7 +1302,7 @@ export class GitlabService {
       const ref = repository.defaultBranch;
       const entries = await this.listRepositoryTreeRecursive(repository, accessToken, ref, GITLAB_DOCS_ROOT);
       const markdownEntries = entries
-        .filter((entry) => entry.type === "blob" && this.isDocsMarkdownPath(entry.path))
+        .filter((entry) => entry.type === "blob" && isDocsMarkdownPath(entry.path))
         .sort((left, right) => left.path.localeCompare(right.path));
 
       if (markdownEntries.length > GITLAB_DOCS_MAX_MARKDOWN_FILES) {
@@ -1340,16 +1312,7 @@ export class GitlabService {
       const files: RepositoryDocsMarkdownFile[] = [];
       for (const entry of markdownEntries) {
         const gitlabFile = await this.readRepositoryTextFile(repository, accessToken, entry.path, ref);
-        files.push({
-          docsPath: gitlabFile.file_path,
-          relativePath: gitlabFile.file_path.slice(`${GITLAB_DOCS_ROOT}/`.length),
-          fileName: gitlabFile.file_name,
-          ref: gitlabFile.ref,
-          blobId: gitlabFile.blob_id,
-          lastCommitId: gitlabFile.last_commit_id,
-          contentSha256: gitlabFile.content_sha256 ?? null,
-          content: gitlabFile.content
-        });
+        files.push(mapGitlabDocsMarkdownFile(gitlabFile));
       }
 
       return files;
@@ -1363,26 +1326,12 @@ export class GitlabService {
     filePath: string
   ): Promise<RepositoryDocsMarkdownFile | null> {
     const repository = await this.requireReadableRepository(projectId, user, repositoryId);
-    const normalizedFilePath = filePath.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-    if (!normalizedFilePath) {
-      throw new BadRequestException("filePath is required");
-    }
+    const normalizedFilePath = normalizeRepositoryDocsFilePath(filePath);
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
       try {
         const gitlabFile = await this.readRepositoryTextFile(repository, accessToken, normalizedFilePath, repository.defaultBranch);
-        return {
-          docsPath: gitlabFile.file_path,
-          relativePath: gitlabFile.file_path.startsWith(`${GITLAB_DOCS_ROOT}/`)
-            ? gitlabFile.file_path.slice(`${GITLAB_DOCS_ROOT}/`.length)
-            : gitlabFile.file_path,
-          fileName: gitlabFile.file_name,
-          ref: gitlabFile.ref,
-          blobId: gitlabFile.blob_id,
-          lastCommitId: gitlabFile.last_commit_id,
-          contentSha256: gitlabFile.content_sha256 ?? null,
-          content: gitlabFile.content
-        };
+        return mapGitlabDocsMarkdownFile(gitlabFile);
       } catch (error) {
         if (error instanceof GitlabApiError && error.status === 404) {
           return null;
@@ -1400,42 +1349,20 @@ export class GitlabService {
     commitMessage: string
   ): Promise<RepositoryDocsCommitResult> {
     const repository = await this.requireWritableRepository(projectId, user, repositoryId);
-    const normalizedActions = actions.map((action) => ({
-      ...action,
-      filePath: action.filePath.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
-    }));
-
-    if (normalizedActions.length === 0) {
-      throw new BadRequestException("At least one repository file action is required");
-    }
-    if (normalizedActions.some((action) => !action.filePath)) {
-      throw new BadRequestException("Repository file action paths are required");
-    }
-    if (
-      normalizedActions.some(
-        (action) => (action.action === "create" || action.action === "update") && typeof action.content !== "string"
-      )
-    ) {
-      throw new BadRequestException("Repository create/update actions require content");
-    }
+    const commitRequest = buildRepositoryCommitRequest({
+      branch: repository.defaultBranch,
+      commitMessage,
+      actions
+    });
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
       try {
         const commit = await this.executeGitlabRequest<GitlabCommit>(
           accessToken,
-          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/commits`,
+          buildRepositoryCommitPath(repository.gitlabProjectId),
           {
             method: "POST",
-            body: JSON.stringify({
-              branch: repository.defaultBranch,
-              commit_message: commitMessage.trim() || "Sync Atlasium Wiki Docs",
-              actions: normalizedActions.map((action) => ({
-                action: action.action,
-                file_path: action.filePath,
-                ...(action.content !== undefined ? { content: action.content } : {}),
-                ...(action.lastCommitId ? { last_commit_id: action.lastCommitId } : {})
-              }))
-            })
+            body: JSON.stringify(commitRequest.payload)
           }
         );
 
@@ -1447,17 +1374,11 @@ export class GitlabService {
           action: "project.repository.docs.commit",
           metadata: {
             commitId: commit.id,
-            actionCount: normalizedActions.length
+            actionCount: commitRequest.normalizedActions.length
           }
         });
 
-        return {
-          id: commit.id,
-          shortId: commit.short_id,
-          title: commit.title,
-          message: commit.message,
-          webUrl: commit.web_url ?? null
-        };
+        return mapRepositoryDocsCommitResult(commit);
       } catch (error) {
         throw this.mapRepositoryAccessError(error);
       }
@@ -1490,41 +1411,13 @@ export class GitlabService {
     const repository = await this.requireReadableRepository(projectId, user, repositoryId);
 
     return this.withUserAccessToken(user.userId, async (accessToken) => {
-      const resolvedState = state ?? "opened";
-      const search = new URLSearchParams({
-        state: resolvedState,
-        per_page: "20",
-        order_by: "updated_at",
-        sort: "desc"
-      });
-
       try {
         const mergeRequests = await this.executeGitlabRequest<GitlabMergeRequest[]>(
           accessToken,
-          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/merge_requests?${search.toString()}`
+          buildRepositoryMergeRequestsPath(repository.gitlabProjectId, state)
         );
 
-        return mergeRequests.map((mergeRequest) => ({
-          id: mergeRequest.id,
-          iid: mergeRequest.iid,
-          title: mergeRequest.title,
-          state: mergeRequest.state,
-          webUrl: mergeRequest.web_url,
-          sourceBranch: mergeRequest.source_branch,
-          targetBranch: mergeRequest.target_branch,
-          updatedAt: mergeRequest.updated_at,
-          draft:
-            mergeRequest.draft ??
-            mergeRequest.work_in_progress ??
-            /^(draft|wip):/i.test(mergeRequest.title),
-          author: mergeRequest.author
-            ? {
-                name: mergeRequest.author.name,
-                username: mergeRequest.author.username,
-                avatarUrl: mergeRequest.author.avatar_url ?? null
-              }
-            : null
-        }));
+        return mergeRequests.map(mapGitlabMergeRequest);
       } catch (error) {
         throw this.mapRepositoryAccessError(error);
       }
@@ -1552,29 +1445,7 @@ export class GitlabService {
         throw this.mapRepositoryAccessError(error);
       }
 
-      const attempts: Array<{
-        label: string;
-        path: string;
-        accept: string;
-        authMode?: "header" | "query";
-      }> = [
-        {
-          label: "archive_zip_header_auth",
-          path: this.buildRepositoryArchivePath(repository.gitlabProjectId, archiveSha, "zip"),
-          accept: "*/*"
-        },
-        {
-          label: "archive_no_extension_accept_zip",
-          path: this.buildRepositoryArchivePath(repository.gitlabProjectId, archiveSha),
-          accept: "application/zip"
-        },
-        {
-          label: "archive_zip_query_auth",
-          path: this.buildRepositoryArchivePath(repository.gitlabProjectId, archiveSha, "zip"),
-          accept: "*/*",
-          authMode: "query"
-        }
-      ];
+      const attempts = buildRepositoryArchiveAttempts(repository.gitlabProjectId, archiveSha);
 
       for (const attempt of attempts) {
         try {
@@ -1591,11 +1462,11 @@ export class GitlabService {
             }
           );
 
-          return {
-            buffer: archive.buffer,
-            fileName: this.buildRepositoryArchiveFileName(repository.pathWithNamespace, resolvedRef),
-            contentType: archive.contentType ?? "application/zip"
-          };
+          return mapRepositoryArchiveResponse({
+            pathWithNamespace: repository.pathWithNamespace,
+            ref: resolvedRef,
+            archive
+          });
         } catch (error) {
           this.logArchiveAttemptFailure({
             attempt: attempt.label,
@@ -1614,11 +1485,11 @@ export class GitlabService {
 
       try {
         const buffer = await this.buildRepositoryArchiveFallback(repository, archiveSha, accessToken);
-        return {
-          buffer,
-          fileName: this.buildRepositoryArchiveFileName(repository.pathWithNamespace, resolvedRef),
-          contentType: "application/zip"
-        };
+        return mapRepositoryArchiveResponse({
+          pathWithNamespace: repository.pathWithNamespace,
+          ref: resolvedRef,
+          archive: { buffer, contentType: "application/zip" }
+        });
       } catch (error) {
         this.logArchiveAttemptFailure({
           attempt: "atlasium_zip_fallback",
@@ -1643,30 +1514,16 @@ export class GitlabService {
     });
   }
 
-  private buildRepositoryArchivePath(gitlabProjectId: string, sha: string, format?: "zip"): string {
-    const search = new URLSearchParams({ sha });
-    const suffix = format ? `.${format}` : "";
-    return `/projects/${encodeURIComponent(gitlabProjectId)}/repository/archive${suffix}?${search.toString()}`;
-  }
-
   private async resolveRepositoryArchiveSha(
     repository: RepositoryRecord,
     resolvedRef: string,
     accessToken: string
   ): Promise<string> {
-    const search = new URLSearchParams({
-      per_page: "1",
-      ref_name: resolvedRef
-    });
     const commits = await this.executeGitlabRequest<GitlabCommit[]>(
       accessToken,
-      `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/commits?${search.toString()}`
+      buildRepositoryArchiveResolveCommitsPath(repository.gitlabProjectId, resolvedRef)
     );
-    const commitSha = commits[0]?.id;
-    if (!commitSha) {
-      throw new BadRequestException("GitLab archive ref could not be resolved");
-    }
-    return commitSha;
+    return resolveArchiveCommitSha(commits);
   }
 
   private async buildRepositoryArchiveFallback(
@@ -1680,15 +1537,9 @@ export class GitlabService {
     let totalBytes = 0;
 
     while (true) {
-      const search = new URLSearchParams({
-        recursive: "true",
-        per_page: "100",
-        page: String(page),
-        ref: archiveSha
-      });
       const entries = await this.executeGitlabRequest<GitlabTreeNode[]>(
         accessToken,
-        `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/tree?${search.toString()}`
+        buildRepositoryArchiveFallbackTreePath(repository.gitlabProjectId, archiveSha, page)
       );
       const files = entries.filter((entry) => entry.type === "blob");
 
@@ -1698,10 +1549,9 @@ export class GitlabService {
           throw new BadRequestException("GitLab archive fallback exceeded file limit (gitlab_archive_fallback_file_limit)");
         }
 
-        const rawSearch = new URLSearchParams({ ref: archiveSha });
         const rawFile = await this.executeGitlabBinaryRequest(
           accessToken,
-          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/files/${encodeURIComponent(file.path)}/raw?${rawSearch.toString()}`,
+          buildRepositoryRawFilePath(repository.gitlabProjectId, file.path, archiveSha),
           {
             headers: {
               Accept: "*/*"
@@ -1734,19 +1584,17 @@ export class GitlabService {
     let page = 1;
 
     while (true) {
-      const search = new URLSearchParams({
-        recursive: "true",
-        per_page: String(GITLAB_DOCS_TREE_PAGE_SIZE),
-        page: String(page),
-        ref,
-        path
-      });
-
       let pageEntries: GitlabTreeNode[];
       try {
         pageEntries = await this.executeGitlabRequest<GitlabTreeNode[]>(
           accessToken,
-          `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/tree?${search.toString()}`
+          buildRepositoryRecursiveTreePath({
+            gitlabProjectId: repository.gitlabProjectId,
+            ref,
+            path,
+            page,
+            pageSize: GITLAB_DOCS_TREE_PAGE_SIZE
+          })
         );
       } catch (error) {
         if (error instanceof GitlabApiError && error.status === 404 && page === 1) {
@@ -1771,25 +1619,11 @@ export class GitlabService {
     filePath: string,
     ref: string
   ): Promise<Omit<GitlabFile, "content"> & { content: string }> {
-    const search = new URLSearchParams({ ref });
     const gitlabFile = await this.executeGitlabRequest<GitlabFile>(
       accessToken,
-      `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/files/${encodeURIComponent(filePath)}?${search.toString()}`
+      buildRepositoryFilePath(repository.gitlabProjectId, filePath, ref)
     );
-    const rawBuffer = Buffer.from(gitlabFile.content, "base64");
-    if (this.isBinaryBuffer(rawBuffer)) {
-      throw new BadRequestException(`Repository file is binary and cannot be synced as Markdown: ${filePath}`);
-    }
-
-    return {
-      ...gitlabFile,
-      content: rawBuffer.toString("utf8")
-    };
-  }
-
-  private isDocsMarkdownPath(path: string): boolean {
-    const normalized = path.replace(/\\/g, "/");
-    return normalized.startsWith(`${GITLAB_DOCS_ROOT}/`) && /\.(md|markdown)$/i.test(normalized);
+    return readTextFromGitlabFile(gitlabFile, filePath);
   }
 
   private logArchiveAttemptFailure(params: {
@@ -1843,25 +1677,15 @@ export class GitlabService {
     repositoryId?: string
   ): Promise<{ name: string; webUrl: string | null; default: boolean }> {
     const repository = await this.requireWritableRepository(projectId, user, repositoryId);
-    const branchName = dto.name.trim();
-    const sourceRef = dto.sourceRef.trim();
-    if (!branchName) {
-      throw new BadRequestException("Branch name is required.");
-    }
-    if (!sourceRef) {
-      throw new BadRequestException("Source ref is required.");
-    }
+    const branchRequest = buildCreateBranchRequest(dto);
 
     const createdBranch = await this.withUserAccessToken(user.userId, async (accessToken) => {
       return this.executeGitlabRequest<GitlabBranch>(
         accessToken,
-        `/projects/${encodeURIComponent(repository.gitlabProjectId)}/repository/branches`,
+        buildRepositoryBranchesCollectionPath(repository.gitlabProjectId),
         {
           method: "POST",
-          body: JSON.stringify({
-            branch: branchName,
-            ref: sourceRef
-          })
+          body: JSON.stringify(branchRequest.payload)
         }
       );
     });
@@ -1873,15 +1697,11 @@ export class GitlabService {
       entityId: `${repository.id}:${createdBranch.name}`,
       action: "project.repository.branch.create",
       metadata: {
-        sourceRef
+        sourceRef: branchRequest.sourceRef
       }
     });
 
-    return {
-      name: createdBranch.name,
-      webUrl: createdBranch.web_url ?? null,
-      default: createdBranch.default
-    };
+    return mapCreatedBranch(createdBranch);
   }
 
   async createMergeRequest(
@@ -1891,35 +1711,15 @@ export class GitlabService {
     repositoryId?: string
   ): Promise<{ id: number; iid: number; title: string; state: string; webUrl: string }> {
     const repository = await this.requireWritableRepository(projectId, user, repositoryId);
-    const sourceBranch = dto.sourceBranch.trim();
-    const targetBranch = dto.targetBranch.trim();
-    const title = dto.title.trim();
-    const description = dto.description?.trim() || undefined;
-    if (!sourceBranch) {
-      throw new BadRequestException("Source branch is required.");
-    }
-    if (!targetBranch) {
-      throw new BadRequestException("Target branch is required.");
-    }
-    if (!title) {
-      throw new BadRequestException("Merge request title is required.");
-    }
-    if (sourceBranch === targetBranch) {
-      throw new BadRequestException("Source and target branches must be different.");
-    }
+    const mergeRequestRequest = buildCreateMergeRequestRequest(dto);
 
     const mergeRequest = await this.withUserAccessToken(user.userId, async (accessToken) => {
       return this.executeGitlabRequest<GitlabMergeRequest>(
         accessToken,
-        `/projects/${encodeURIComponent(repository.gitlabProjectId)}/merge_requests`,
+        buildRepositoryMergeRequestsCollectionPath(repository.gitlabProjectId),
         {
           method: "POST",
-          body: JSON.stringify({
-            source_branch: sourceBranch,
-            target_branch: targetBranch,
-            title,
-            description
-          })
+          body: JSON.stringify(mergeRequestRequest.payload)
         }
       );
     });
@@ -1932,18 +1732,12 @@ export class GitlabService {
       action: "project.repository.merge_request.create",
       metadata: {
         iid: mergeRequest.iid,
-        sourceBranch,
-        targetBranch
+        sourceBranch: mergeRequestRequest.sourceBranch,
+        targetBranch: mergeRequestRequest.targetBranch
       }
     });
 
-    return {
-      id: mergeRequest.id,
-      iid: mergeRequest.iid,
-      title: mergeRequest.title,
-      state: mergeRequest.state,
-      webUrl: mergeRequest.web_url
-    };
+    return mapCreatedMergeRequest(mergeRequest);
   }
 
   private async requireReadableRepository(projectId: string, user: AuthenticatedUser, repositoryId?: string): Promise<RepositoryRecord> {
@@ -2150,25 +1944,6 @@ export class GitlabService {
     } as const;
   }
 
-  private mapRepositorySummaryFromRecord(repository: RepositoryRecord): RepositorySummary {
-    return {
-      id: repository.id,
-      gitlabProjectId: repository.gitlabProjectId,
-      name: repository.name,
-      description: repository.description,
-      webUrl: repository.webUrl,
-      sshCloneUrl: this.buildRepositorySshCloneUrl(repository.pathWithNamespace),
-      httpCloneUrl: this.buildRepositoryCloneUrl(repository.pathWithNamespace),
-      pathWithNamespace: repository.pathWithNamespace,
-      defaultBranch: repository.defaultBranch,
-      visibility: repository.visibility,
-      lastActivityAt: repository.lastActivityAt.toISOString(),
-      connectedAt: repository.connectedAt.toISOString(),
-      connectedByUserId: repository.connectedByUserId,
-      managed: true
-    };
-  }
-
   private async fetchRepositoryProject(gitlabProjectId: string, accessToken: string): Promise<GitlabProject> {
     try {
       return await this.executeGitlabRequest<GitlabProject>(
@@ -2289,7 +2064,7 @@ export class GitlabService {
         refreshTokenEncrypted: refreshedPayload.refresh_token
           ? encryptValue(refreshedPayload.refresh_token, secret)
           : connection.refreshTokenEncrypted,
-        tokenExpiresAt: this.resolveTokenExpiry(refreshedPayload),
+        tokenExpiresAt: resolveTokenExpiry(refreshedPayload),
         reconnectRequired: false
       }
     });
@@ -2329,65 +2104,27 @@ export class GitlabService {
   }
 
   private async executeGitlabRequest<T>(accessToken: string, path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${this.getGitlabApiBaseUrl()}/api/v4${path}`, {
-      ...init,
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${accessToken}`,
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        ...(init?.headers ?? {})
-      }
+    return executeGitlabJsonRequest<T>({
+      apiBaseUrl: this.getGitlabApiBaseUrl(),
+      accessToken,
+      path,
+      init
     });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new GitlabApiError(response.status, text, text || `GitLab API error (${response.status})`);
-    }
-
-    const text = await response.text();
-    if (!text) {
-      return undefined as T;
-    }
-
-    return JSON.parse(text) as T;
   }
 
   private async executeGitlabBinaryRequest(
     accessToken: string,
     path: string,
     init?: RequestInit,
-    options?: { authMode?: "header" | "query" }
-  ): Promise<{ buffer: Buffer; contentType: string | null }> {
-    const url = new URL(`${this.getGitlabApiBaseUrl()}/api/v4${path}`);
-    const authMode = options?.authMode ?? "header";
-    if (authMode === "query") {
-      url.searchParams.set("access_token", accessToken);
-    }
-
-    const response = await fetch(url.toString(), {
-      ...init,
-      headers: {
-        Accept: "application/octet-stream",
-        ...(authMode === "header" ? { Authorization: `Bearer ${accessToken}` } : {}),
-        ...(init?.headers ?? {})
-      }
+    options?: GitlabBinaryRequestOptions
+  ): Promise<GitlabBinaryResponse> {
+    return executeGitlabBinaryClientRequest({
+      apiBaseUrl: this.getGitlabApiBaseUrl(),
+      accessToken,
+      path,
+      init,
+      options
     });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new GitlabApiError(response.status, text, text || `GitLab API error (${response.status})`, {
-        contentType: response.headers?.get("content-type") ?? null,
-        requestId: response.headers?.get("x-request-id") ?? null,
-        gitlabMeta: response.headers?.get("x-gitlab-meta") ?? null,
-        path
-      });
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    return {
-      buffer: Buffer.from(arrayBuffer),
-      contentType: response.headers.get("content-type")
-    };
   }
 
   private async markReconnectRequired(userId: string): Promise<void> {
@@ -2479,105 +2216,6 @@ export class GitlabService {
     }
   }
 
-  private normalizeRepositoryPath(path: string): string {
-    const normalized = path
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-
-    if (!normalized) {
-      throw new BadRequestException("Repository path must contain at least one valid character");
-    }
-
-    return normalized;
-  }
-
-  private buildRepositoryCloneUrl(pathWithNamespace: string): string {
-    return `${this.getGitlabBrowserBaseUrl()}/${pathWithNamespace.replace(/^\/+/, "")}.git`;
-  }
-
-  private buildRepositorySshCloneUrl(pathWithNamespace: string): string {
-    const browserUrl = new URL(this.getGitlabBrowserBaseUrl());
-    return `git@${browserUrl.hostname}:${pathWithNamespace.replace(/^\/+/, "")}.git`;
-  }
-
-  private buildRepositoryArchiveFileName(pathWithNamespace: string, ref: string): string {
-    const pathFragment = pathWithNamespace
-      .trim()
-      .replace(/^\/+|\/+$/g, "")
-      .replace(/[^a-zA-Z0-9._/-]+/g, "-")
-      .replace(/\//g, "-");
-    const refFragment = ref
-      .trim()
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-    return `${pathFragment || "repository"}-${refFragment || "archive"}.zip`;
-  }
-
-  private buildRepositoryRawFileName(filePath: string): string {
-    const fileName = filePath.split("/").pop()?.trim() || "repository-file";
-    return fileName.replace(/[\r\n"]/g, "-");
-  }
-
-  private detectRepositoryFileContentType(filePath: string): string | null {
-    const extension = filePath.split(".").pop()?.toLowerCase();
-    switch (extension) {
-      case "png":
-        return "image/png";
-      case "jpg":
-      case "jpeg":
-        return "image/jpeg";
-      case "gif":
-        return "image/gif";
-      case "webp":
-        return "image/webp";
-      case "avif":
-        return "image/avif";
-      case "bmp":
-        return "image/bmp";
-      case "ico":
-        return "image/x-icon";
-      default:
-        return null;
-    }
-  }
-
-  private resolveTokenExpiry(payload: GitlabOAuthTokenPayload): Date | null {
-    if (!payload.expires_in || payload.expires_in <= 0) {
-      return null;
-    }
-
-    return new Date(Date.now() + payload.expires_in * 1000);
-  }
-
-  private mapUserSshKey(key: GitlabSshKey): {
-    id: number;
-    title: string;
-    key: string;
-    createdAt: string;
-    expiresAt: string | null;
-    usageType: string | null;
-  } {
-    return {
-      id: key.id,
-      title: key.title,
-      key: key.key,
-      createdAt: key.created_at,
-      expiresAt: key.expires_at ?? null,
-      usageType: key.usage_type ?? null
-    };
-  }
-
-  private normalizeUserSshKeyId(keyId: string): string {
-    const normalized = keyId.trim();
-    if (!/^\d+$/.test(normalized)) {
-      throw new BadRequestException("SSH key id must be a numeric GitLab key id");
-    }
-
-    return normalized;
-  }
-
   private extractGitlabErrorMessage(responseBody: string, fallback: string): string {
     const normalized = responseBody.trim();
     if (!normalized) {
@@ -2611,25 +2249,6 @@ export class GitlabService {
     }
 
     return [];
-  }
-
-  private isBinaryBuffer(buffer: Buffer): boolean {
-    if (buffer.length === 0) {
-      return false;
-    }
-
-    const sample = buffer.subarray(0, Math.min(buffer.length, 2048));
-    let suspicious = 0;
-    for (const byte of sample) {
-      if (byte === 0) {
-        return true;
-      }
-      if ((byte < 7 || (byte > 13 && byte < 32)) && byte !== 9 && byte !== 10 && byte !== 13) {
-        suspicious += 1;
-      }
-    }
-
-    return suspicious / sample.length > 0.15;
   }
 
   private getGitlabApiBaseUrl(): string {
@@ -2730,19 +2349,6 @@ export class GitlabService {
     } catch (error) {
       throw this.mapInfrastructureError(error);
     }
-  }
-
-  private mapManagedProvision(project: GitlabProject): ManagedRepositoryProvision {
-    return {
-      gitlabProjectId: String(project.id),
-      pathWithNamespace: project.path_with_namespace,
-      webUrl: project.web_url,
-      defaultBranch: project.default_branch ?? "main",
-      name: project.name,
-      description: project.description,
-      visibility: project.visibility,
-      lastActivityAt: project.last_activity_at
-    };
   }
 
   private async deleteManagedRemoteRepository(gitlabProjectId: string): Promise<void> {

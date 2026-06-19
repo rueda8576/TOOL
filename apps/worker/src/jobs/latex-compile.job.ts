@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
-import { access, mkdir, readFile, writeFile } from "fs/promises";
-import { join, resolve } from "path";
+import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "fs/promises";
+import { join } from "path";
 import { tmpdir } from "os";
 import { spawn } from "child_process";
 
@@ -9,8 +9,31 @@ import AdmZip from "adm-zip";
 import type { Job } from "bullmq";
 
 import { getEnv } from "../config/env";
+import { normalizeContainedRelativePath, resolveContainedPath } from "../utils/path-confinement";
+import { extractZipSafely } from "../utils/safe-zip";
 
 const env = getEnv();
+const MAX_COMPILE_LOG_CHARS = 80_000;
+
+const appendBoundedLog = (current: string, next: string): string => {
+  const combined = current + next;
+  if (combined.length <= MAX_COMPILE_LOG_CHARS) {
+    return combined;
+  }
+
+  return `[log truncated to last ${MAX_COMPILE_LOG_CHARS} characters]\n${combined.slice(-MAX_COMPILE_LOG_CHARS)}`;
+};
+
+const buildLatexProcessEnv = (cwd: string): NodeJS.ProcessEnv => ({
+  PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+  HOME: cwd,
+  TMPDIR: cwd,
+  TEMP: cwd,
+  TMP: cwd,
+  TEXMFVAR: join(cwd, ".texmf-var"),
+  TEXMFCONFIG: join(cwd, ".texmf-config"),
+  TEXMFHOME: join(cwd, ".texmf-home")
+});
 
 const fileExists = async (targetPath: string): Promise<boolean> => {
   try {
@@ -18,6 +41,49 @@ const fileExists = async (targetPath: string): Promise<boolean> => {
     return true;
   } catch {
     return false;
+  }
+};
+
+const normalizeLatexEntryFile = (entryFile: string): string => {
+  const normalized = normalizeContainedRelativePath(entryFile, "Invalid LaTeX entry file");
+  if (!normalized.toLowerCase().endsWith(".tex")) {
+    throw new Error("LaTeX entry file must be a .tex file");
+  }
+  if (normalized.split("/").some((segment) => segment.startsWith("-"))) {
+    throw new Error("Invalid LaTeX entry file");
+  }
+  return normalized;
+};
+
+const copyWorkspaceSafely = async (sourceRoot: string, targetRoot: string, relativePath = ""): Promise<void> => {
+  const sourceDir = relativePath ? resolveContainedPath(sourceRoot, relativePath, "Invalid LaTeX workspace path") : sourceRoot;
+  const targetDir = relativePath ? resolveContainedPath(targetRoot, relativePath, "Invalid LaTeX workspace path") : targetRoot;
+  await mkdir(targetDir, { recursive: true });
+
+  const entries = await readdir(sourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryRelativePath = normalizeContainedRelativePath(
+      relativePath ? `${relativePath}/${entry.name}` : entry.name,
+      "Invalid LaTeX workspace path"
+    );
+
+    if (entry.isSymbolicLink()) {
+      throw new Error("LaTeX workspace cannot contain symlinks");
+    }
+
+    if (entry.isDirectory()) {
+      await copyWorkspaceSafely(sourceRoot, targetRoot, entryRelativePath);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      throw new Error("LaTeX workspace contains unsupported file type");
+    }
+
+    await copyFile(
+      resolveContainedPath(sourceRoot, entryRelativePath, "Invalid LaTeX workspace path"),
+      resolveContainedPath(targetRoot, entryRelativePath, "Invalid LaTeX workspace path")
+    );
   }
 };
 
@@ -35,27 +101,55 @@ const runCommand = async (params: {
   const child = spawn(params.command, params.args, {
     cwd: params.cwd,
     stdio: ["ignore", "pipe", "pipe"],
-    shell: false,
-    timeout: params.timeoutMs
+    env: buildLatexProcessEnv(params.cwd),
+    detached: true,
+    shell: false
   });
 
   let log = "";
+  let timedOut = false;
   child.stdout.on("data", (chunk) => {
-    log += chunk.toString();
+    log = appendBoundedLog(log, chunk.toString());
   });
   child.stderr.on("data", (chunk) => {
-    log += chunk.toString();
+    log = appendBoundedLog(log, chunk.toString());
   });
 
   const exitCode = await new Promise<number>((resolveExit) => {
+    let settled = false;
+    const finish = (code: number): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      resolveExit(code);
+    };
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      log = appendBoundedLog(log, `\n[timeout] ${params.label} exceeded ${params.timeoutMs}ms`);
+      if (typeof child.pid === "number") {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          try {
+            process.kill(child.pid, "SIGKILL");
+          } catch {
+            // The process may already have exited after the timeout fired.
+          }
+        }
+      }
+      finish(-1);
+    }, params.timeoutMs);
+
     child.on("error", (error) => {
-      log += `\n[spawn-error] ${(error as Error).message}`;
-      resolveExit(-1);
+      log = appendBoundedLog(log, `\n[spawn-error] ${(error as Error).message}`);
+      finish(-1);
     });
-    child.on("close", (code) => resolveExit(code ?? -1));
+    child.on("close", (code) => finish(code ?? -1));
   });
 
-  const formattedLog = `\n[${params.label}] ${params.command} ${params.args.join(" ")}\n${log}`;
+  const formattedLog = appendBoundedLog("", `\n[${params.label}] ${params.command} ${params.args.join(" ")}\n${log}`);
   if (exitCode === 0) {
     return {
       status: CompileStatus.SUCCEEDED,
@@ -64,7 +158,7 @@ const runCommand = async (params: {
     };
   }
 
-  if (log.includes("timed out") || log.includes("ETIMEDOUT")) {
+  if (timedOut || log.includes("timed out") || log.includes("ETIMEDOUT")) {
     return {
       status: CompileStatus.TIMEOUT,
       log: formattedLog,
@@ -80,16 +174,17 @@ const runCommand = async (params: {
 };
 
 const compileLatex = async (workingDir: string, entryFile: string): Promise<{ status: CompileStatus; log: string; pdfPath?: string }> => {
-  const sanitizedEntry = entryFile.replace(/\\/g, "/").replace(/\.\./g, "").replace(/^\/+/, "");
+  const sanitizedEntry = normalizeLatexEntryFile(entryFile);
   const outputPdf = sanitizedEntry.replace(/\.tex$/i, ".pdf");
   const jobBase = sanitizedEntry.replace(/\.tex$/i, "");
-  const auxPath = join(workingDir, `${jobBase}.aux`);
-  const bcfPath = join(workingDir, `${jobBase}.bcf`);
-  const pdfPath = join(workingDir, outputPdf);
+  const auxPath = resolveContainedPath(workingDir, `${jobBase}.aux`, "Invalid LaTeX output path");
+  const bcfPath = resolveContainedPath(workingDir, `${jobBase}.bcf`, "Invalid LaTeX output path");
+  const pdfPath = resolveContainedPath(workingDir, outputPdf, "Invalid LaTeX output path");
   const latexArgs = [
     "-interaction=nonstopmode",
     "-halt-on-error",
     "-file-line-error",
+    "-no-shell-escape",
     sanitizedEntry
   ];
 
@@ -102,7 +197,7 @@ const compileLatex = async (workingDir: string, entryFile: string): Promise<{ st
       timeoutMs: env.LATEX_TIMEOUT_MS,
       label: `pdflatex pass ${pass}`
     });
-    combinedLog += result.log;
+    combinedLog = appendBoundedLog(combinedLog, result.log);
     return result.status;
   };
 
@@ -124,7 +219,7 @@ const compileLatex = async (workingDir: string, entryFile: string): Promise<{ st
       timeoutMs: env.LATEX_TIMEOUT_MS,
       label: "biber"
     });
-    combinedLog += biberResult.log;
+    combinedLog = appendBoundedLog(combinedLog, biberResult.log);
     if (biberResult.status !== CompileStatus.SUCCEEDED) {
       return {
         status: biberResult.status,
@@ -141,7 +236,7 @@ const compileLatex = async (workingDir: string, entryFile: string): Promise<{ st
         timeoutMs: env.LATEX_TIMEOUT_MS,
         label: "bibtex"
       });
-      combinedLog += bibtexResult.log;
+      combinedLog = appendBoundedLog(combinedLog, bibtexResult.log);
       if (bibtexResult.status !== CompileStatus.SUCCEEDED) {
         return {
           status: bibtexResult.status,
@@ -244,84 +339,89 @@ export const processLatexCompileJob = async (
     return;
   }
 
-  let workDir: string;
-  if (version.latexWorkspacePath) {
-    workDir = resolve(env.STORAGE_ROOT, version.latexWorkspacePath);
-    await mkdir(workDir, { recursive: true });
-  } else {
-    workDir = resolve(tmpdir(), `latex-${documentVersionId}-${randomUUID()}`);
-    await mkdir(workDir, { recursive: true });
+  const workDir = await mkdtemp(join(tmpdir(), "atlasium-latex-"));
 
-    const zipPath = join(env.STORAGE_ROOT, version.latexBundleFile!.storagePath);
-    const zipBuffer = await readFile(zipPath);
-    const zip = new AdmZip(zipBuffer);
-    zip.extractAllTo(workDir, true);
-  }
+  try {
+    if (version.latexWorkspacePath) {
+      const sourceWorkDir = resolveContainedPath(env.STORAGE_ROOT, version.latexWorkspacePath, "Invalid LaTeX workspace path");
+      await copyWorkspaceSafely(sourceWorkDir, workDir);
+    } else {
+      const zipPath = resolveContainedPath(env.STORAGE_ROOT, version.latexBundleFile!.storagePath, "Invalid LaTeX bundle path");
+      const zipBuffer = await readFile(zipPath);
+      const zip = new AdmZip(zipBuffer);
+      await extractZipSafely(zip, workDir);
+    }
 
-  const compileResult = await compileLatex(workDir, version.latexEntryFile ?? "main.tex");
-  const activeVersionAfterCompile = await loadActiveVersion();
+    const compileResult = await compileLatex(workDir, version.latexEntryFile ?? "main.tex");
+    const activeVersionAfterCompile = await loadActiveVersion();
 
-  if (!activeVersionAfterCompile) {
+    if (!activeVersionAfterCompile) {
+      await prisma.documentCompileJob.update({
+        where: { id: compileJobId },
+        data: {
+          status: CompileStatus.FAILED,
+          finishedAt: new Date(),
+          errorMessage: "Document was deleted during compilation"
+        }
+      });
+      return;
+    }
+
+    let compiledPdfFileId: string | null = null;
+    if (compileResult.status === CompileStatus.SUCCEEDED && compileResult.pdfPath) {
+      const pdfBuffer = await readFile(compileResult.pdfPath);
+      const compiledDate = new Date().toISOString().slice(0, 10);
+      const compiledDir = resolveContainedPath(env.STORAGE_ROOT, `compiled/${compiledDate}`, "Invalid compiled output path");
+      const relativePath = `compiled/${compiledDate}/${randomUUID()}-${activeVersionAfterCompile.id}.pdf`;
+      const outputPath = resolveContainedPath(env.STORAGE_ROOT, relativePath, "Invalid compiled output path");
+      await mkdir(compiledDir, { recursive: true });
+      await writeFile(outputPath, pdfBuffer);
+
+      const fileObject = await prisma.fileObject.create({
+        data: {
+          storagePath: relativePath,
+          originalName: `${activeVersionAfterCompile.id}.pdf`,
+          mimeType: "application/pdf",
+          sizeBytes: BigInt(pdfBuffer.byteLength),
+          uploadedById: activeVersionAfterCompile.createdById
+        },
+        select: { id: true }
+      });
+
+      compiledPdfFileId = fileObject.id;
+    }
+
+    await prisma.documentVersion.update({
+      where: { id: activeVersionAfterCompile.id },
+      data: {
+        compileStatus: compileResult.status,
+        compileLog: compileResult.log,
+        compiledPdfFileId: compiledPdfFileId ?? undefined
+      }
+    });
+
     await prisma.documentCompileJob.update({
       where: { id: compileJobId },
       data: {
-        status: CompileStatus.FAILED,
+        status: compileResult.status,
         finishedAt: new Date(),
-        errorMessage: "Document was deleted during compilation"
+        errorMessage:
+          compileResult.status === CompileStatus.SUCCEEDED ? null : "LaTeX compilation failed"
       }
     });
-    return;
-  }
 
-  let compiledPdfFileId: string | null = null;
-  if (compileResult.status === CompileStatus.SUCCEEDED && compileResult.pdfPath) {
-    const pdfBuffer = await readFile(compileResult.pdfPath);
-    const relativePath = `compiled/${new Date().toISOString().slice(0, 10)}/${randomUUID()}-${activeVersionAfterCompile.id}.pdf`;
-    await mkdir(join(env.STORAGE_ROOT, "compiled", new Date().toISOString().slice(0, 10)), { recursive: true });
-    await writeFile(join(env.STORAGE_ROOT, relativePath), pdfBuffer);
-
-    const fileObject = await prisma.fileObject.create({
+    await prisma.notificationEvent.create({
       data: {
-        storagePath: relativePath,
-        originalName: `${activeVersionAfterCompile.id}.pdf`,
-        mimeType: "application/pdf",
-        sizeBytes: BigInt(pdfBuffer.byteLength),
-        uploadedById: activeVersionAfterCompile.createdById
-      },
-      select: { id: true }
-    });
-
-    compiledPdfFileId = fileObject.id;
-  }
-
-  await prisma.documentVersion.update({
-    where: { id: activeVersionAfterCompile.id },
-    data: {
-      compileStatus: compileResult.status,
-      compileLog: compileResult.log,
-      compiledPdfFileId: compiledPdfFileId ?? undefined
-    }
-  });
-
-  await prisma.documentCompileJob.update({
-    where: { id: compileJobId },
-    data: {
-      status: compileResult.status,
-      finishedAt: new Date(),
-      errorMessage:
-        compileResult.status === CompileStatus.SUCCEEDED ? null : "LaTeX compilation failed"
-    }
-  });
-
-  await prisma.notificationEvent.create({
-    data: {
-      userId: activeVersionAfterCompile.createdById,
-      type: NotificationEventType.DOC_COMPILED,
-      status: NotificationStatus.PENDING,
-      payload: {
-        documentVersionId,
-        compileStatus: compileResult.status
+        userId: activeVersionAfterCompile.createdById,
+        type: NotificationEventType.DOC_COMPILED,
+        status: NotificationStatus.PENDING,
+        payload: {
+          documentVersionId,
+          compileStatus: compileResult.status
+        }
       }
-    }
-  });
+    });
+  } finally {
+    await rm(workDir, { recursive: true, force: true });
+  }
 };

@@ -1,58 +1,19 @@
+import type {
+  CreateTaskInput,
+  TaskListItem,
+  UpdateTaskInput
+} from "@doctoral/shared";
+
 import { authFetch } from "./client-api";
 
-export type TaskStatus = "todo" | "in_progress" | "blocked" | "done";
-export type TaskPriority = "low" | "medium" | "high" | "critical";
-
-export type TaskAssignee = {
-  id: string;
-  name: string;
-  email: string;
-};
-
-export type TaskListItem = {
-  id: string;
-  projectId: string;
-  title: string;
-  description: string | null;
-  status: TaskStatus;
-  priority: TaskPriority;
-  assigneeId: string | null;
-  assignee: TaskAssignee | null;
-  startDate: string | null;
-  dueDate: string | null;
-  parentTaskId: string | null;
-  completedAt: string | null;
-  sourceMeeting: {
-    meetingId: string;
-    meetingTitle: string;
-    scheduledDate: string;
-    actionId: string;
-    actionTitle: string;
-  } | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type CreateTaskInput = {
-  title: string;
-  description?: string;
-  status?: TaskStatus;
-  priority?: TaskPriority;
-  assigneeId?: string;
-  startDate?: string;
-  dueDate?: string;
-  parentTaskId?: string;
-};
-
-export type UpdateTaskInput = {
-  title?: string;
-  description?: string;
-  status?: TaskStatus;
-  priority?: TaskPriority;
-  assigneeId?: string | null;
-  startDate?: string;
-  dueDate?: string;
-};
+export type {
+  CreateTaskInput,
+  TaskAssignee,
+  TaskListItem,
+  TaskPriority,
+  TaskStatus,
+  UpdateTaskInput
+} from "@doctoral/shared";
 
 export type ProjectMember = {
   userId: string;

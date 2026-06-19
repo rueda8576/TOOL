@@ -123,4 +123,14 @@ describe("StorageService", () => {
       message: "Stored file is unavailable"
     });
   });
+
+  it("rejects storage object traversal before reading from disk", async () => {
+    const { service, fsMocks } = await loadService();
+
+    await expect(service.readObject("../secret.env")).rejects.toMatchObject({
+      name: "BadRequestException",
+      message: "Invalid storage path"
+    });
+    expect(fsMocks.readFile).not.toHaveBeenCalled();
+  });
 });

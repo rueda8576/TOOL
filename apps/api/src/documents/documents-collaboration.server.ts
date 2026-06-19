@@ -82,23 +82,23 @@ type RoomConnectionContext = {
 type RoomQuery =
   | {
       kind: "presence";
-      token: string;
+      token?: string;
       documentId: string;
     }
   | {
       kind: "file";
-      token: string;
+      token?: string;
       documentVersionId: string;
       path: string;
     }
   | {
       kind: "wiki-presence";
-      token: string;
+      token?: string;
       wikiPageId: string;
     }
   | {
       kind: "wiki-page";
-      token: string;
+      token?: string;
       wikiPageId: string;
     };
 
@@ -150,10 +150,6 @@ function parseRoomQuery(request: IncomingMessage): RoomQuery {
   }
 
   const token = parsedUrl.searchParams.get("token")?.trim();
-  if (!token) {
-    throw new UnauthorizedException("Missing collaboration token");
-  }
-
   const kind = parsedUrl.searchParams.get("kind")?.trim();
   if (kind === "presence") {
     const documentId = parsedUrl.searchParams.get("documentId")?.trim();
@@ -181,6 +177,21 @@ function parseRoomQuery(request: IncomingMessage): RoomQuery {
   }
 
   throw new ForbiddenException("Unsupported collaboration room kind");
+}
+
+function readCookie(cookieHeader: string | undefined, name: string): string | null {
+  if (!cookieHeader) {
+    return null;
+  }
+
+  for (const cookiePart of cookieHeader.split(";")) {
+    const [rawName, ...rawValue] = cookiePart.trim().split("=");
+    if (rawName === name) {
+      return decodeURIComponent(rawValue.join("="));
+    }
+  }
+
+  return null;
 }
 
 export class DocumentsCollaborationServer {
@@ -222,7 +233,7 @@ export class DocumentsCollaborationServer {
 
     try {
       const query = parseRoomQuery(request);
-      const user = await this.authenticate(query.token);
+      const user = await this.authenticate(request, query.token);
       roomContext = await this.joinRoom(query, user, connection);
       this.sendInitialSync(roomContext.room, connection);
 
@@ -247,7 +258,14 @@ export class DocumentsCollaborationServer {
     }
   }
 
-  private async authenticate(token: string): Promise<AuthenticatedCollabUser> {
+  private async authenticate(request: IncomingMessage, queryToken?: string): Promise<AuthenticatedCollabUser> {
+    const env = getEnv();
+    const cookieToken = readCookie(request.headers.cookie, env.ATLASIUM_SESSION_COOKIE_NAME);
+    const token = cookieToken ?? (env.COLLAB_ALLOW_QUERY_TOKEN ? queryToken : undefined);
+    if (!token) {
+      throw new UnauthorizedException("Missing collaboration token");
+    }
+
     return this.sessionAuthService.authenticateToken(token, {
       invalidToken: "Invalid collaboration token",
       expiredSession: "Session expired"

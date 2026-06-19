@@ -1,10 +1,11 @@
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 ENV PNPM_NODE_LINKER=hoisted
-COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps/web/package.json apps/web/package.json
+COPY packages/shared/package.json packages/shared/package.json
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
-RUN pnpm install --filter @doctoral/web... --frozen-lockfile=false
+RUN pnpm install --filter @doctoral/web... --frozen-lockfile
 
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
@@ -14,7 +15,7 @@ ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
-RUN pnpm install --filter @doctoral/web... --frozen-lockfile=false
+RUN pnpm install --filter @doctoral/web... --frozen-lockfile
 RUN pnpm --filter @doctoral/web build
 
 FROM node:22-bookworm-slim AS runtime

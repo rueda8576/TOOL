@@ -152,6 +152,7 @@
 - Add runtime smoke checks for critical worker binaries in CI image validation so missing compilers fail `build-and-push` before deployment.
 - For production container entrypoints, ensure TypeScript build output path is deterministic from clean checkout builds (avoid relying on stale local `dist` artifacts). Align `tsconfig` `rootDir/include` with intended runtime file path.
 - In `docker-compose` command strings, escape shell variables as `$$VAR`; otherwise Compose interpolates `$VAR` at parse-time and can silently pass empty values to runtime commands.
+- Compose services must not inherit local-dev `DATABASE_URL`/`REDIS_URL` values that point to `localhost` inside containers. Override them in `environment` with service host defaults and separate Docker-specific escape hatches for external services.
 - If migration history is incomplete (no initial migration in repo), `migrate deploy` on a fresh DB can hard-fail; deploy pipelines need a one-time bootstrap path that initializes schema (`db push`) and baselines `_prisma_migrations` (`migrate resolve`) before normal migrations.
 - Treat `_prisma_migrations` rows with `finished_at IS NULL AND rolled_back_at IS NULL` as failed state, not valid baseline; resolve them (`migrate resolve --rolled-back`) before running `migrate deploy` or bootstrap logic.
 - Baseline detection must require at least one successful migration row (`finished_at IS NOT NULL`), not just table existence or row count, otherwise `P3009` can recur forever on fresh environments.

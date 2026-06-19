@@ -11,6 +11,12 @@ node_modules/
 dist/
 coverage/
 .next/
+apps/web/test-results/
+apps/web/playwright-report/
+*.tsbuildinfo
+apps/api/test/api-smoke.e2e-spec.d.ts
+apps/api/test/api-smoke.e2e-spec.js
+apps/api/test/api-smoke.e2e-spec.js.map
 
 # logs
 *.log
