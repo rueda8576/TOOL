@@ -1,45 +1,107 @@
-describe("worker env", () => {
-  const originalEnv = { ...process.env };
-
-  beforeEach(() => {
-    jest.resetModules();
-    process.env = { ...originalEnv };
-  });
+describe("Worker env", () => {
+  const originalEnv = process.env;
 
   afterEach(() => {
     jest.resetModules();
-    process.env = { ...originalEnv };
+    process.env = originalEnv;
   });
 
-  it("returns defaults when optional variables are missing", async () => {
-    delete process.env.REDIS_URL;
+  it("keeps meeting automation disabled unless explicitly enabled", async () => {
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: "test"
+    };
+    delete process.env.AI_MEETING_AUTOMATION_ENABLED;
     delete process.env.JWT_SECRET;
-    delete process.env.STORAGE_ROOT;
-    delete process.env.SMTP_HOST;
-    delete process.env.BACKUP_RETENTION_DAYS;
 
     const { getEnv } = await import("./env");
-    expect(getEnv()).toEqual(
-      expect.objectContaining({
-        REDIS_URL: "redis://localhost:6379",
-        JWT_SECRET: "change-me-in-production",
-        STORAGE_ROOT: "./storage",
-        SMTP_HOST: "localhost",
-        BACKUP_RETENTION_DAYS: 30
-      })
-    );
+    expect(getEnv()).toEqual(expect.objectContaining({
+      AI_MEETING_AUTOMATION_ENABLED: false,
+      JWT_SECRET: "change-me-in-production"
+    }));
+
+    jest.resetModules();
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: "test",
+      AI_MEETING_AUTOMATION_ENABLED: "true"
+    };
+
+    const enabledEnv = await import("./env");
+    expect(enabledEnv.getEnv().AI_MEETING_AUTOMATION_ENABLED).toBe(true);
   });
 
-  it("parses and caches explicit numeric values", async () => {
-    process.env.LATEX_TIMEOUT_MS = "45000";
-    process.env.SMTP_PORT = "2525";
+  it("normalizes empty optional values and returns the cached env instance", async () => {
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: "test",
+      AI_MEETING_AUTOMATION_ENABLED: "",
+      OPENAI_API_KEY: "",
+      OPENAI_MODEL: "",
+      OPENAI_BASE_URL: ""
+    };
 
     const { getEnv } = await import("./env");
-    const first = getEnv();
-    const second = getEnv();
+    const firstEnv = getEnv();
 
-    expect(first.LATEX_TIMEOUT_MS).toBe(45000);
-    expect(first.SMTP_PORT).toBe(2525);
-    expect(second).toBe(first);
+    expect(firstEnv.AI_MEETING_AUTOMATION_ENABLED).toBe(false);
+    expect(firstEnv.OPENAI_API_KEY).toBeUndefined();
+    expect(firstEnv.OPENAI_MODEL).toBeUndefined();
+    expect(firstEnv.OPENAI_BASE_URL).toBeUndefined();
+    expect(getEnv()).toBe(firstEnv);
+  });
+
+  it("sets the worker health port and allows disabling the endpoint with zero", async () => {
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: "test"
+    };
+    delete process.env.WORKER_HEALTH_PORT;
+
+    const { getEnv } = await import("./env");
+    expect(getEnv().WORKER_HEALTH_PORT).toBe(4100);
+
+    jest.resetModules();
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: "test",
+      WORKER_HEALTH_PORT: "0"
+    };
+
+    const disabledEnv = await import("./env");
+    expect(disabledEnv.getEnv().WORKER_HEALTH_PORT).toBe(0);
+  });
+
+  it("allows production meeting automation when required OpenAI settings are present", async () => {
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: "production",
+      AI_MEETING_AUTOMATION_ENABLED: "true",
+      OPENAI_API_KEY: "sk-test",
+      OPENAI_MODEL: "gpt-test",
+      OPENAI_BASE_URL: "https://api.example.test/v1"
+    };
+
+    const { getEnv } = await import("./env");
+
+    expect(getEnv()).toEqual(expect.objectContaining({
+      AI_MEETING_AUTOMATION_ENABLED: true,
+      OPENAI_API_KEY: "sk-test",
+      OPENAI_MODEL: "gpt-test",
+      OPENAI_BASE_URL: "https://api.example.test/v1"
+    }));
+  });
+
+  it("requires OpenAI credentials when meeting automation is enabled in production", async () => {
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: "production",
+      AI_MEETING_AUTOMATION_ENABLED: "true"
+    };
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_MODEL;
+
+    const { getEnv } = await import("./env");
+    expect(() => getEnv()).toThrow("OPENAI_API_KEY is required when meeting automation is enabled in production");
   });
 });

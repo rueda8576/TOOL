@@ -5,7 +5,10 @@
 - [x] Remove clear password reset tokens from persisted BullMQ email payloads.
 - [x] Prevent active reset tokens from remaining when password reset email enqueue fails.
 - [x] Add focused API/worker regression coverage for the corrected reset-email contract.
-- [ ] Force-push PR #4, restack PRs #5-#15, repeat exact-SHA review and CI before merge.
+- [x] Force-push PR #4, restack PRs #5-#15, repeat exact-SHA review and CI before merge.
+
+### Review
+- PR #4 merged as squash `7f48ca8` after exact-SHA review approved `1f9c4c44d29741ea6b36897aef2888dd57ce814d`; `main` CI and `Deploy Atlasium` both completed successfully for the squash SHA.
 
 ## Autonomous Merge Train Deploy Fix-Forward: Worker Image Size (2026-06-20)
 - [x] Confirm the merge train is stopped because `main` deploy is not green after PR #17.
@@ -16,7 +19,7 @@
 - [x] Open fix-forward PR #18, request exact-SHA agent review, wait required CI, merge only with `--squash --match-head-commit`.
 - [x] Wait `main` CI for the #18 squash SHA and confirm `Deploy Atlasium` reached the VPS and deployed the new containers.
 - [x] Stop the train again because #18 deploy failed in final retention: `df -h` reported `12G` free, but the script required 12 GiB.
-- [ ] Open fix-forward PR #19 to align retention `GB` thresholds with decimal gigabytes, then wait CI and deploy before resuming PR stack #3-#15.
+- [x] Open fix-forward PR #19 to align retention `GB` thresholds with decimal gigabytes, then wait CI and deploy before resuming PR stack #3-#15.
 
 ## Git Access Persistent HTTPS Credentials (2026-06-07)
 - [x] Register the approved implementation plan before edits.

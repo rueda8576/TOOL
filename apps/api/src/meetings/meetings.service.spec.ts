@@ -3,6 +3,17 @@ import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { MeetingsService } from "./meetings.service";
 
 describe("MeetingsService", () => {
+  const originalAiAutomationEnabled = process.env.AI_MEETING_AUTOMATION_ENABLED;
+
+  afterAll(() => {
+    if (originalAiAutomationEnabled === undefined) {
+      delete process.env.AI_MEETING_AUTOMATION_ENABLED;
+      return;
+    }
+
+    process.env.AI_MEETING_AUTOMATION_ENABLED = originalAiAutomationEnabled;
+  });
+
   const makeService = (): {
     service: MeetingsService;
     prisma: any;
@@ -92,6 +103,7 @@ describe("MeetingsService", () => {
   });
 
   it("normalizes day-only scheduledAt and returns scheduledDate on create", async () => {
+    process.env.AI_MEETING_AUTOMATION_ENABLED = "true";
     const { service, prisma, queueService } = makeService();
     const createdAt = new Date("2026-02-22T09:00:00.000Z");
     const updatedAt = new Date("2026-02-22T09:00:00.000Z");
@@ -346,6 +358,7 @@ describe("MeetingsService", () => {
   });
 
   it("queues a new automation run when retrying a failed run", async () => {
+    process.env.AI_MEETING_AUTOMATION_ENABLED = "true";
     const { service, prisma, queueService, auditService } = makeService();
     const createdAt = new Date("2026-02-20T08:00:00.000Z");
     const updatedAt = new Date("2026-02-23T11:00:00.000Z");

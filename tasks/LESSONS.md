@@ -211,6 +211,7 @@
 
 ## Backend testing
 - When a config spec asserts default env values, unset every CI-provided variable it expects to default. GitHub Actions can inject values such as `JWT_SECRET`, so default-value tests must isolate their env explicitly.
+- After adding worker branches under a package-level coverage gate, run `pnpm --filter @doctoral/worker test:coverage:gate` and inspect branch coverage before pushing. Passing every Jest suite is not enough if new branches drop the aggregate below 95%.
 - When production code starts reading additional `Response` fields, update low-level fetch mocks to satisfy the expanded response contract; otherwise tests can fail with mock-shape `TypeError`s before the intended error mapping is exercised.
 - When expanding internal service return shapes that feed required Prisma fields, update integration mocks in the same change and add defensive normalization before database writes so stale partial mocks cannot create invalid required values.
 - In PNPM workspace scripts, avoid relying on `pnpm run <script> -- --coverage ...` for Jest in CI; forwarded args can be treated as test patterns and produce `No tests found`. Prefer dedicated coverage scripts or `pnpm exec jest ...`.

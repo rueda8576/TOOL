@@ -141,6 +141,9 @@ async function extractTasksWithOpenAi(toDoMarkdown: string, projectMembers: Arra
   if (!env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is required for meeting automation");
   }
+  if (!env.OPENAI_MODEL) {
+    throw new Error("OPENAI_MODEL is required for meeting automation");
+  }
 
   const client = new OpenAI({
     apiKey: env.OPENAI_API_KEY,
