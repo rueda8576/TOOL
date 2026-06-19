@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -102,6 +103,10 @@ export default function LoginPage(): JSX.Element {
             <button className="button" disabled={loading} type="submit">
               {loading ? "Signing in..." : "Sign in"}
             </button>
+
+            <p className="projects-toolbar-helper">
+              Password unavailable? <Link href="/forgot-password">Reset access</Link>.
+            </p>
           </form>
         </div>
       </section>

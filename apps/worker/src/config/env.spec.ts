@@ -13,6 +13,7 @@ describe("worker env", () => {
 
   it("returns defaults when optional variables are missing", async () => {
     delete process.env.REDIS_URL;
+    delete process.env.JWT_SECRET;
     delete process.env.STORAGE_ROOT;
     delete process.env.SMTP_HOST;
     delete process.env.BACKUP_RETENTION_DAYS;
@@ -21,6 +22,7 @@ describe("worker env", () => {
     expect(getEnv()).toEqual(
       expect.objectContaining({
         REDIS_URL: "redis://localhost:6379",
+        JWT_SECRET: "change-me-in-production",
         STORAGE_ROOT: "./storage",
         SMTP_HOST: "localhost",
         BACKUP_RETENTION_DAYS: 30

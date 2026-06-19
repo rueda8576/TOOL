@@ -6,6 +6,7 @@ const EnvSchema = z.object({
     .min(1)
     .default("postgresql://postgres:postgres@localhost:5432/doctoral_platform?schema=public"),
   REDIS_URL: z.string().default("redis://localhost:6379"),
+  JWT_SECRET: z.string().min(16).default("change-me-in-production"),
   STORAGE_ROOT: z.string().default("./storage"),
   LATEX_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   SMTP_HOST: z.string().default("localhost"),

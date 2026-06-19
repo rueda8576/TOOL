@@ -55,7 +55,7 @@ describe("QueueService", () => {
     const { service } = await loadService();
 
     await expect(service.enqueueEmail({} as never)).rejects.toThrow(
-      "enqueueEmail requires notificationEventId or directEmail payload"
+      "enqueueEmail requires notificationEventId, directEmail, or encryptedDirectEmail payload"
     );
   });
 

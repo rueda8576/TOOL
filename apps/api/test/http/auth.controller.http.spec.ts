@@ -16,6 +16,7 @@ describe("AuthController HTTP", () => {
       invite: jest.fn(),
       acceptInvite: jest.fn(),
       requestPasswordReset: jest.fn(),
+      confirmPasswordReset: jest.fn(),
       getCurrentUserProfile: jest.fn(),
       updateUsername: jest.fn(),
       changePassword: jest.fn(),
@@ -143,6 +144,36 @@ describe("AuthController HTTP", () => {
     expect(authService.requestPasswordReset).toHaveBeenCalledWith({
       email: "user@example.com"
     });
+  });
+
+  it("confirms password reset requests", async () => {
+    authService.confirmPasswordReset.mockResolvedValue({ reset: true });
+
+    await request(app.getHttpServer())
+      .post("/auth/password/reset/confirm")
+      .send({
+        token: "reset-token",
+        newPassword: "new-password-123",
+        confirmPassword: "new-password-123"
+      })
+      .expect(201);
+
+    expect(authService.confirmPasswordReset).toHaveBeenCalledWith({
+      token: "reset-token",
+      newPassword: "new-password-123",
+      confirmPassword: "new-password-123"
+    });
+  });
+
+  it("returns 400 for malformed password reset confirmations", async () => {
+    await request(app.getHttpServer())
+      .post("/auth/password/reset/confirm")
+      .send({
+        token: "reset-token",
+        newPassword: "short",
+        confirmPassword: "short"
+      })
+      .expect(400);
   });
 
   it("returns 401 for authenticated profile without a bearer token", async () => {

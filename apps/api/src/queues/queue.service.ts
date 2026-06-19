@@ -11,6 +11,7 @@ type EmailJobPayload = {
     text: string;
     html?: string;
   };
+  encryptedDirectEmail?: string;
 };
 
 export type MeetingAutomationJobPayload = {
@@ -41,8 +42,8 @@ export class QueueService implements OnModuleDestroy {
   }
 
   async enqueueEmail(payload: EmailJobPayload, opts?: JobsOptions): Promise<string> {
-    if (!payload.notificationEventId && !payload.directEmail) {
-      throw new Error("enqueueEmail requires notificationEventId or directEmail payload");
+    if (!payload.notificationEventId && !payload.directEmail && !payload.encryptedDirectEmail) {
+      throw new Error("enqueueEmail requires notificationEventId, directEmail, or encryptedDirectEmail payload");
     }
 
     const job = await this.emailQueue.add("send-email", payload, {

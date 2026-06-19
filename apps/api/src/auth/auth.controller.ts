@@ -10,6 +10,7 @@ import { AuthenticatedUser } from "../common/authenticated-user";
 import { buildSessionCookie } from "../common/session-cookie";
 import { AcceptInviteDto } from "./dto/accept-invite.dto";
 import { ChangePasswordDto } from "./dto/change-password.dto";
+import { ConfirmPasswordResetDto } from "./dto/confirm-password-reset.dto";
 import { CreateGitlabSshKeyDto } from "./dto/create-gitlab-ssh-key.dto";
 import { InviteDto } from "./dto/invite.dto";
 import { LoginDto } from "./dto/login.dto";
@@ -60,6 +61,11 @@ export class AuthController {
   @Post("password/reset")
   passwordReset(@Body() dto: PasswordResetDto): Promise<{ accepted: true }> {
     return this.authService.requestPasswordReset(dto);
+  }
+
+  @Post("password/reset/confirm")
+  confirmPasswordReset(@Body() dto: ConfirmPasswordResetDto): Promise<{ reset: true }> {
+    return this.authService.confirmPasswordReset(dto);
   }
 
   @Get("me")

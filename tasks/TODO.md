@@ -1,5 +1,12 @@
 # Implementation TODO (v1 bootstrap)
 
+## PR04 Password Reset Queue Token Blocker (2026-06-20)
+- [x] Stop the merge train after the exact-SHA reviewer blocked PR #4.
+- [x] Remove clear password reset tokens from persisted BullMQ email payloads.
+- [x] Prevent active reset tokens from remaining when password reset email enqueue fails.
+- [x] Add focused API/worker regression coverage for the corrected reset-email contract.
+- [ ] Force-push PR #4, restack PRs #5-#15, repeat exact-SHA review and CI before merge.
+
 ## Autonomous Merge Train Deploy Fix-Forward: Worker Image Size (2026-06-20)
 - [x] Confirm the merge train is stopped because `main` deploy is not green after PR #17.
 - [x] Identify the production blocker: VPS Docker root dir remains below the 12GB preflight threshold after retention cleanup.
