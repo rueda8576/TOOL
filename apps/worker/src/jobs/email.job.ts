@@ -1,8 +1,9 @@
 import type { Job } from "bullmq";
-import { NotificationStatus, PrismaClient } from "@prisma/client";
+import { NotificationEventType, NotificationStatus, PrismaClient } from "@prisma/client";
 import nodemailer from "nodemailer";
 
 import { getEnv } from "../config/env";
+import { decryptValue } from "../utils/crypto";
 
 const env = getEnv();
 
@@ -14,7 +15,10 @@ type EmailJobPayload = {
     text: string;
     html?: string;
   };
+  encryptedDirectEmail?: string;
 };
+
+type DirectEmailPayload = NonNullable<EmailJobPayload["directEmail"]>;
 
 const transporter = nodemailer.createTransport({
   host: env.SMTP_HOST,
@@ -28,18 +32,198 @@ const transporter = nodemailer.createTransport({
     : undefined
 });
 
+type NotificationPreferenceSnapshot = {
+  emailEnabled: boolean;
+  taskAssigned: boolean;
+  taskDue: boolean;
+  mentionInTaskComments: boolean;
+} | null;
+
+type NotificationEventWithRecipient = {
+  id: string;
+  type: NotificationEventType;
+  payload: unknown;
+  user: {
+    email: string;
+    notificationPreference: NotificationPreferenceSnapshot;
+  };
+};
+
+const transactionalEventTypes = new Set<NotificationEventType>([
+  NotificationEventType.PASSWORD_RESET,
+  NotificationEventType.PROJECT_INVITE
+]);
+
+const getPayloadText = (payload: unknown, key: string): string | undefined => {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+
+  const value = (payload as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value : undefined;
+};
+
+const renderNotificationEmail = (
+  event: Pick<NotificationEventWithRecipient, "type" | "payload">
+): { subject: string; text: string } => {
+  switch (event.type) {
+    case NotificationEventType.TASK_ASSIGNED: {
+      const taskTitle = getPayloadText(event.payload, "taskTitle") ?? "A task";
+      return {
+        subject: "Atlasium task assigned",
+        text: `${taskTitle} was assigned to you in Atlasium.\nOpen the workspace to review the task.`
+      };
+    }
+    case NotificationEventType.TASK_DUE: {
+      const taskTitle = getPayloadText(event.payload, "taskTitle") ?? "A task";
+      const dueDate = getPayloadText(event.payload, "dueDate");
+      return {
+        subject: "Atlasium task due reminder",
+        text: dueDate
+          ? `${taskTitle} is approaching its due date: ${dueDate}.\nOpen the workspace to review the task.`
+          : `${taskTitle} is approaching its due date.\nOpen the workspace to review the task.`
+      };
+    }
+    case NotificationEventType.TASK_MENTION:
+      return {
+        subject: "Atlasium task mention",
+        text: "You were mentioned in a task discussion in Atlasium.\nOpen the workspace to review the mention."
+      };
+    case NotificationEventType.DOC_COMPILED: {
+      const status = getPayloadText(event.payload, "status") ?? getPayloadText(event.payload, "compileStatus") ?? "updated";
+      return {
+        subject: "Atlasium document compile status",
+        text: `A document compile finished with status: ${status}.\nOpen the workspace to review the document.`
+      };
+    }
+    case NotificationEventType.PROJECT_INVITE:
+      return {
+        subject: "Atlasium project invitation",
+        text: "You have been invited to an Atlasium workspace.\nOpen the invitation link to continue."
+      };
+    case NotificationEventType.PASSWORD_RESET:
+      throw new Error("Password reset email is missing its transactional delivery payload");
+    default:
+      return {
+        subject: "Atlasium notification",
+        text: "A workspace notification is available in Atlasium."
+      };
+  }
+};
+
+const shouldDeliverNotificationEmail = (event: NotificationEventWithRecipient): boolean => {
+  if (transactionalEventTypes.has(event.type)) {
+    return true;
+  }
+
+  const prefs = event.user.notificationPreference;
+  if (!prefs?.emailEnabled) {
+    return false;
+  }
+
+  switch (event.type) {
+    case NotificationEventType.TASK_ASSIGNED:
+      return prefs.taskAssigned;
+    case NotificationEventType.TASK_DUE:
+      return prefs.taskDue;
+    case NotificationEventType.TASK_MENTION:
+      return prefs.mentionInTaskComments;
+    default:
+      return true;
+  }
+};
+
+const markNotificationSent = async (prisma: PrismaClient, notificationEventId?: string): Promise<void> => {
+  if (!notificationEventId) {
+    return;
+  }
+
+  await prisma.notificationEvent.update({
+    where: { id: notificationEventId },
+    data: {
+      status: NotificationStatus.SENT,
+      sentAt: new Date(),
+      errorMessage: null
+    }
+  });
+};
+
+const markNotificationFailed = async (
+  prisma: PrismaClient,
+  notificationEventId: string | undefined,
+  error: unknown
+): Promise<void> => {
+  if (!notificationEventId) {
+    return;
+  }
+
+  await prisma.notificationEvent.update({
+    where: { id: notificationEventId },
+    data: {
+      status: NotificationStatus.FAILED,
+      errorMessage: (error as Error).message
+    }
+  });
+};
+
+const parseDirectEmail = (value: unknown): DirectEmailPayload => {
+  if (!value || typeof value !== "object") {
+    throw new Error("Encrypted direct email payload is invalid");
+  }
+
+  const payload = value as Record<string, unknown>;
+  if (
+    typeof payload.to !== "string" ||
+    typeof payload.subject !== "string" ||
+    typeof payload.text !== "string" ||
+    (payload.html !== undefined && typeof payload.html !== "string")
+  ) {
+    throw new Error("Encrypted direct email payload is invalid");
+  }
+
+  return {
+    to: payload.to,
+    subject: payload.subject,
+    text: payload.text,
+    html: typeof payload.html === "string" ? payload.html : undefined
+  };
+};
+
+const getDirectEmail = (payload: EmailJobPayload): DirectEmailPayload | null => {
+  if (payload.directEmail) {
+    return payload.directEmail;
+  }
+
+  if (!payload.encryptedDirectEmail) {
+    return null;
+  }
+
+  return parseDirectEmail(JSON.parse(decryptValue(payload.encryptedDirectEmail, env.JWT_SECRET)));
+};
+
 export const processEmailJob = async (
   prisma: PrismaClient,
   job: Job<EmailJobPayload>
 ): Promise<void> => {
-  if (job.data.directEmail) {
-    await transporter.sendMail({
-      from: env.SMTP_FROM,
-      to: job.data.directEmail.to,
-      subject: job.data.directEmail.subject,
-      text: job.data.directEmail.text,
-      html: job.data.directEmail.html
-    });
+  if (job.data.directEmail || job.data.encryptedDirectEmail) {
+    try {
+      const directEmail = getDirectEmail(job.data);
+      if (!directEmail) {
+        return;
+      }
+
+      await transporter.sendMail({
+        from: env.SMTP_FROM,
+        to: directEmail.to,
+        subject: directEmail.subject,
+        text: directEmail.text,
+        html: directEmail.html
+      });
+      await markNotificationSent(prisma, job.data.notificationEventId);
+    } catch (error) {
+      await markNotificationFailed(prisma, job.data.notificationEventId, error);
+      throw error;
+    }
     return;
   }
 
@@ -64,7 +248,7 @@ export const processEmailJob = async (
     return;
   }
 
-  if (!event.user.notificationPreference?.emailEnabled) {
+  if (!shouldDeliverNotificationEmail(event)) {
     await prisma.notificationEvent.update({
       where: { id: event.id },
       data: {
@@ -75,36 +259,19 @@ export const processEmailJob = async (
     return;
   }
 
-  const payload = event.payload as Record<string, unknown>;
-
-  const subject = `Doctoral Platform notification: ${event.type}`;
-  const text = `Type: ${event.type}\nPayload: ${JSON.stringify(payload, null, 2)}`;
+  const email = renderNotificationEmail(event);
 
   try {
     await transporter.sendMail({
       from: env.SMTP_FROM,
       to: event.user.email,
-      subject,
-      text
+      subject: email.subject,
+      text: email.text
     });
 
-    await prisma.notificationEvent.update({
-      where: { id: event.id },
-      data: {
-        status: NotificationStatus.SENT,
-        sentAt: new Date(),
-        errorMessage: null
-      }
-    });
+    await markNotificationSent(prisma, event.id);
   } catch (error) {
-    await prisma.notificationEvent.update({
-      where: { id: event.id },
-      data: {
-        status: NotificationStatus.FAILED,
-        errorMessage: (error as Error).message
-      }
-    });
-
+    await markNotificationFailed(prisma, event.id, error);
     throw error;
   }
 };

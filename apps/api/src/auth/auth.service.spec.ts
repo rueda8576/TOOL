@@ -1,7 +1,9 @@
 import { BadRequestException } from "@nestjs/common";
-import { GlobalRole, InviteAccessMode, InviteStatus, ProjectRole } from "@prisma/client";
+import { GlobalRole, InviteAccessMode, InviteStatus, NotificationStatus, ProjectRole } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 
+import { decryptValue } from "../common/crypto";
+import { getEnv } from "../config/env";
 import { AuthService } from "./auth.service";
 
 describe("AuthService", () => {
@@ -28,6 +30,16 @@ describe("AuthService", () => {
         create: jest.fn(),
         update: jest.fn()
       },
+      passwordResetToken: {
+        create: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn()
+      },
+      notificationEvent: {
+        create: jest.fn(),
+        update: jest.fn()
+      },
       notificationPreference: {
         create: jest.fn()
       },
@@ -38,7 +50,13 @@ describe("AuthService", () => {
         create: jest.fn(),
         deleteMany: jest.fn()
       },
-      $transaction: jest.fn(async (operations: Array<Promise<unknown>>) => Promise.all(operations))
+      $transaction: jest.fn(async (operations: Array<Promise<unknown>> | ((tx: any) => Promise<unknown>)) => {
+        if (typeof operations === "function") {
+          return operations(prisma);
+        }
+
+        return Promise.all(operations);
+      })
     };
 
     const jwtService: any = {
@@ -65,7 +83,7 @@ describe("AuthService", () => {
       deleteUserSshKey: jest.fn(),
       syncProjectRepositoryAccess: jest.fn(),
       syncManagedUserIdentity: jest.fn(),
-      syncUserHttpsPassword: jest.fn()
+      syncUserHttpsPassword: jest.fn().mockResolvedValue({ username: "user" })
     };
 
     return {
@@ -128,15 +146,15 @@ describe("AuthService", () => {
     );
     expect(queueService.enqueueEmail).toHaveBeenCalledWith(
       expect.objectContaining({
-        directEmail: expect.objectContaining({
-          text: expect.stringContaining("/accept-invite?token="),
-          html: expect.stringContaining("Accept invite")
-        })
+        encryptedDirectEmail: expect.stringMatching(/^v1:/)
       })
     );
     const emailPayload = queueService.enqueueEmail.mock.calls[0][0];
-    const inviteText = emailPayload.directEmail.text as string;
-    const inviteHtml = emailPayload.directEmail.html as string;
+    expect(emailPayload.directEmail).toBeUndefined();
+    expect(JSON.stringify(emailPayload)).not.toContain("/accept-invite?token=");
+    const inviteEmail = JSON.parse(decryptValue(emailPayload.encryptedDirectEmail, getEnv().JWT_SECRET));
+    const inviteText = inviteEmail.text as string;
+    const inviteHtml = inviteEmail.html as string;
     expect(inviteText).toContain("Sign in: ");
     expect(inviteText).toContain("/login");
     expect(inviteText).toContain("Security note: Your password is never stored in plain text.");
@@ -260,18 +278,36 @@ describe("AuthService", () => {
 
   it("returns accepted=true for password reset without leaking whether the user exists", async () => {
     const { service, prisma, queueService, auditService } = makeService();
-    prisma.user.findUnique.mockResolvedValue({ id: "user-1" });
-    prisma.notificationEvent = {
-      create: jest.fn().mockResolvedValue({ id: "event-1" })
-    };
+    prisma.user.findFirst.mockResolvedValue({ id: "user-1", email: "user@example.com" });
+    prisma.passwordResetToken.findFirst.mockResolvedValue(null);
+    prisma.passwordResetToken.updateMany.mockResolvedValue({ count: 0 });
+    prisma.passwordResetToken.create.mockResolvedValue({
+      id: "reset-1",
+      expiresAt: new Date("2026-06-18T12:30:00.000Z")
+    });
+    prisma.notificationEvent.create.mockResolvedValue({ id: "event-1" });
 
     const result = await service.requestPasswordReset({
       email: "USER@example.com"
     });
 
-    expect(prisma.user.findUnique).toHaveBeenCalledWith({
-      where: { email: "user@example.com" },
-      select: { id: true }
+    expect(prisma.user.findFirst).toHaveBeenCalledWith({
+      where: {
+        email: "user@example.com",
+        deletedAt: null,
+        isActive: true
+      },
+      select: {
+        id: true,
+        email: true
+      }
+    });
+    expect(prisma.passwordResetToken.create).toHaveBeenCalledWith({
+      data: {
+        userId: "user-1",
+        tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        expiresAt: expect.any(Date)
+      }
     });
     expect(prisma.notificationEvent.create).toHaveBeenCalledWith({
       data: {
@@ -280,11 +316,27 @@ describe("AuthService", () => {
         status: "PENDING",
         payload: {
           template: "password-reset",
-          resetToken: expect.any(String)
+          passwordResetTokenId: "reset-1",
+          expiresAt: expect.any(String)
         }
       }
     });
-    expect(queueService.enqueueEmail).toHaveBeenCalledWith({ notificationEventId: "event-1" });
+    expect(queueService.enqueueEmail).toHaveBeenCalledWith({
+      notificationEventId: "event-1",
+      encryptedDirectEmail: expect.stringMatching(/^v1:/)
+    });
+    const emailPayload = queueService.enqueueEmail.mock.calls[0][0];
+    expect(emailPayload.directEmail).toBeUndefined();
+    expect(JSON.stringify(emailPayload)).not.toContain("/reset-password?token=");
+    const resetEmail = JSON.parse(decryptValue(emailPayload.encryptedDirectEmail, getEnv().JWT_SECRET));
+    expect(resetEmail).toEqual(
+      expect.objectContaining({
+        to: "user@example.com",
+        subject: "Atlasium password reset",
+        text: expect.stringContaining("/reset-password?token="),
+        html: expect.stringContaining("Reset password")
+      })
+    );
     expect(auditService.log).toHaveBeenCalledWith({
       userId: "user-1",
       entityType: "user",
@@ -296,14 +348,189 @@ describe("AuthService", () => {
 
   it("returns accepted=true for password reset when the email is unknown and does not enqueue anything", async () => {
     const { service, prisma, queueService } = makeService();
-    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.findFirst.mockResolvedValue(null);
 
     const result = await service.requestPasswordReset({
       email: "missing@example.com"
     });
 
+    expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
     expect(queueService.enqueueEmail).not.toHaveBeenCalled();
     expect(result).toEqual({ accepted: true });
+  });
+
+  it("consumes a newly created password reset token when email enqueue fails", async () => {
+    const { service, prisma, queueService, auditService } = makeService();
+    prisma.user.findFirst.mockResolvedValue({ id: "user-1", email: "user@example.com" });
+    prisma.passwordResetToken.findFirst.mockResolvedValue(null);
+    prisma.passwordResetToken.updateMany.mockResolvedValue({ count: 0 });
+    prisma.passwordResetToken.create.mockResolvedValue({
+      id: "reset-1",
+      expiresAt: new Date("2026-06-18T12:30:00.000Z")
+    });
+    prisma.passwordResetToken.update.mockResolvedValue({});
+    prisma.notificationEvent.create.mockResolvedValue({ id: "event-1" });
+    prisma.notificationEvent.update.mockResolvedValue({});
+    queueService.enqueueEmail.mockRejectedValue(new Error("redis offline"));
+
+    await expect(service.requestPasswordReset({ email: "user@example.com" })).resolves.toEqual({ accepted: true });
+
+    expect(prisma.passwordResetToken.update).toHaveBeenCalledWith({
+      where: { id: "reset-1" },
+      data: { consumedAt: expect.any(Date) }
+    });
+    expect(prisma.notificationEvent.update).toHaveBeenCalledWith({
+      where: { id: "event-1" },
+      data: {
+        status: NotificationStatus.FAILED,
+        errorMessage: "Password reset delivery could not be queued"
+      }
+    });
+    expect(auditService.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "auth.password.reset_requested"
+      })
+    );
+  });
+
+  it("applies password reset cooldown without issuing a second token", async () => {
+    const { service, prisma, queueService } = makeService();
+    prisma.user.findFirst.mockResolvedValue({ id: "user-1", email: "user@example.com" });
+    prisma.passwordResetToken.findFirst.mockResolvedValue({
+      id: "reset-1",
+      createdAt: new Date()
+    });
+
+    await expect(service.requestPasswordReset({ email: "user@example.com" })).resolves.toEqual({ accepted: true });
+
+    expect(prisma.passwordResetToken.updateMany).not.toHaveBeenCalled();
+    expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
+    expect(queueService.enqueueEmail).not.toHaveBeenCalled();
+  });
+
+  it("confirms password reset once, revokes sessions, and does not create a login session", async () => {
+    const { service, prisma, auditService, gitlabService } = makeService();
+    const passwordHash = await bcrypt.hash("old-password-123", 10);
+    prisma.passwordResetToken.findFirst.mockResolvedValue({
+      id: "reset-1",
+      userId: "user-1",
+      user: {
+        id: "user-1",
+        email: "user@example.com",
+        username: "user",
+        name: "User",
+        passwordHash
+      }
+    });
+    prisma.passwordResetToken.updateMany.mockResolvedValue({ count: 1 });
+    prisma.user.update.mockResolvedValue({});
+    prisma.session.deleteMany.mockResolvedValue({ count: 2 });
+
+    await expect(
+      service.confirmPasswordReset({
+        token: "reset-token",
+        newPassword: "new-password-123",
+        confirmPassword: "new-password-123"
+      })
+    ).resolves.toEqual({ reset: true });
+
+    expect(prisma.passwordResetToken.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          consumedAt: null,
+          expiresAt: {
+            gt: expect.any(Date)
+          },
+          user: {
+            deletedAt: null,
+            isActive: true
+          }
+        })
+      })
+    );
+    expect(prisma.passwordResetToken.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "reset-1",
+        tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        consumedAt: null,
+        expiresAt: {
+          gt: expect.any(Date)
+        },
+        user: {
+          deletedAt: null,
+          isActive: true
+        }
+      },
+      data: { consumedAt: expect.any(Date) }
+    });
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: {
+        passwordHash: expect.any(String),
+        gitlabHttpsPasswordSyncedAt: null
+      }
+    });
+    expect(prisma.session.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "user-1" }
+    });
+    expect(prisma.session.create).not.toHaveBeenCalled();
+    expect(auditService.log).toHaveBeenCalledWith({
+      userId: "user-1",
+      entityType: "user",
+      entityId: "user-1",
+      action: "auth.password.reset_completed"
+    });
+    expect(gitlabService.syncUserHttpsPassword).toHaveBeenCalledWith(
+      {
+        id: "user-1",
+        email: "user@example.com",
+        username: "user",
+        name: "User"
+      },
+      "new-password-123"
+    );
+  });
+
+  it("rejects invalid or consumed password reset tokens", async () => {
+    const { service, prisma } = makeService();
+    prisma.passwordResetToken.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.confirmPasswordReset({
+        token: "missing-token",
+        newPassword: "new-password-123",
+        confirmPassword: "new-password-123"
+      })
+    ).rejects.toThrow("Password reset link is invalid or expired");
+  });
+
+  it("rejects concurrently consumed password reset tokens", async () => {
+    const { service, prisma } = makeService();
+    const passwordHash = await bcrypt.hash("old-password-123", 10);
+    prisma.passwordResetToken.findFirst.mockResolvedValue({
+      id: "reset-1",
+      userId: "user-1",
+      user: {
+        id: "user-1",
+        email: "user@example.com",
+        username: "user",
+        name: "User",
+        passwordHash
+      }
+    });
+    prisma.passwordResetToken.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.confirmPasswordReset({
+        token: "reset-token",
+        newPassword: "new-password-123",
+        confirmPassword: "new-password-123"
+      })
+    ).rejects.toThrow("Password reset link is invalid or expired");
+
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.session.deleteMany).not.toHaveBeenCalled();
   });
 
   it("returns the current authenticated user's profile from the database", async () => {

@@ -5,7 +5,7 @@ import { JwtService } from "@nestjs/jwt";
 
 import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
-import { generateSecureToken, hashValue } from "../common/crypto";
+import { encryptValue, generateSecureToken, hashValue } from "../common/crypto";
 import { apiRoleToPrismaRole, pickHigherRole, prismaRoleToApiRole } from "../common/role-map";
 import { deriveUsernameFromEmail, validateAtlasiumUsername } from "../common/username";
 import { getEnv } from "../config/env";
@@ -14,6 +14,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { QueueService } from "../queues/queue.service";
 import { AcceptInviteDto } from "./dto/accept-invite.dto";
 import { ChangePasswordDto } from "./dto/change-password.dto";
+import { ConfirmPasswordResetDto } from "./dto/confirm-password-reset.dto";
 import { CreateGitlabSshKeyDto } from "./dto/create-gitlab-ssh-key.dto";
 import { InviteDto } from "./dto/invite.dto";
 import { LoginDto } from "./dto/login.dto";
@@ -29,14 +30,26 @@ const escapeHtml = (value: string): string =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 
+const PASSWORD_RESET_TOKEN_BYTES = 32;
+const PASSWORD_RESET_EXPIRY_MS = 30 * 60 * 1000;
+const PASSWORD_RESET_COOLDOWN_MS = 10 * 60 * 1000;
+
 type GitlabOauthStatePayload = {
   sub?: string;
   purpose?: string;
 };
 
+type DirectEmailPayload = {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+};
+
 @Injectable()
 export class AuthService {
   private readonly appBaseUrl = getEnv().APP_BASE_URL.replace(/\/+$/, "");
+  private readonly emailPayloadSecret = getEnv().JWT_SECRET;
   private readonly inviteExpiryFormatter = new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -55,6 +68,10 @@ export class AuthService {
     private readonly auditService: AuditService,
     private readonly gitlabService: GitlabService
   ) {}
+
+  private encryptDirectEmail(email: DirectEmailPayload): string {
+    return encryptValue(JSON.stringify(email), this.emailPayloadSecret);
+  }
 
   private createSessionToken(params: { userId: string; email: string; globalRole: GlobalRole }): string {
     return this.jwtService.sign({
@@ -182,12 +199,12 @@ export class AuthService {
     ].join("");
 
     await this.queueService.enqueueEmail({
-      directEmail: {
+      encryptedDirectEmail: this.encryptDirectEmail({
         to: invite.email,
         subject: "Atlasium invitation",
         text: inviteEmailText,
         html: inviteEmailHtml
-      }
+      })
     });
 
     await this.auditService.log({
@@ -354,30 +371,123 @@ export class AuthService {
   }
 
   async requestPasswordReset(dto: PasswordResetDto): Promise<{ accepted: true }> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
-      select: { id: true }
+    const now = new Date();
+    const user = await this.prisma.user.findFirst({
+      where: {
+        email: dto.email.toLowerCase(),
+        deletedAt: null,
+        isActive: true
+      },
+      select: {
+        id: true,
+        email: true
+      }
     });
 
     if (!user) {
       return { accepted: true };
     }
 
-    const resetToken = generateSecureToken(20);
-
-    const event = await this.prisma.notificationEvent.create({
-      data: {
+    const activeReset = await this.prisma.passwordResetToken.findFirst({
+      where: {
         userId: user.id,
-        type: NotificationEventType.PASSWORD_RESET,
-        status: NotificationStatus.PENDING,
-        payload: {
-          template: "password-reset",
-          resetToken
+        consumedAt: null,
+        expiresAt: {
+          gt: now
         }
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      select: {
+        id: true,
+        createdAt: true
       }
     });
 
-    await this.queueService.enqueueEmail({ notificationEventId: event.id });
+    if (activeReset && now.getTime() - activeReset.createdAt.getTime() < PASSWORD_RESET_COOLDOWN_MS) {
+      return { accepted: true };
+    }
+
+    await this.prisma.passwordResetToken.updateMany({
+      where: {
+        userId: user.id,
+        consumedAt: null
+      },
+      data: {
+        consumedAt: now
+      }
+    });
+
+    const token = generateSecureToken(PASSWORD_RESET_TOKEN_BYTES);
+    const expiresAt = new Date(now.getTime() + PASSWORD_RESET_EXPIRY_MS);
+    const { reset, event } = await this.prisma.$transaction(async (tx) => {
+      const createdReset = await tx.passwordResetToken.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashValue(token),
+          expiresAt
+        }
+      });
+      const createdEvent = await tx.notificationEvent.create({
+        data: {
+          userId: user.id,
+          type: NotificationEventType.PASSWORD_RESET,
+          status: NotificationStatus.PENDING,
+          payload: {
+            template: "password-reset",
+            passwordResetTokenId: createdReset.id,
+            expiresAt: expiresAt.toISOString()
+          }
+        }
+      });
+
+      return {
+        reset: createdReset,
+        event: createdEvent
+      };
+    });
+    const resetUrl = `${this.appBaseUrl}/reset-password?token=${encodeURIComponent(token)}`;
+    const emailText = [
+      "Atlasium password reset requested.",
+      "",
+      `Reset password: ${resetUrl}`,
+      "",
+      "This link expires in 30 minutes. If you did not request it, no action is required."
+    ].join("\n");
+    const emailHtml = [
+      "<p>Atlasium password reset requested.</p>",
+      `<p><a href="${escapeHtml(resetUrl)}">Reset password</a></p>`,
+      "<p>This link expires in 30 minutes. If you did not request it, no action is required.</p>"
+    ].join("");
+
+    try {
+      await this.queueService.enqueueEmail({
+        notificationEventId: event.id,
+        encryptedDirectEmail: this.encryptDirectEmail({
+          to: user.email,
+          subject: "Atlasium password reset",
+          text: emailText,
+          html: emailHtml
+        })
+      });
+    } catch {
+      await this.prisma.$transaction([
+        this.prisma.passwordResetToken.update({
+          where: { id: reset.id },
+          data: { consumedAt: new Date() }
+        }),
+        this.prisma.notificationEvent.update({
+          where: { id: event.id },
+          data: {
+            status: NotificationStatus.FAILED,
+            errorMessage: "Password reset delivery could not be queued"
+          }
+        })
+      ]);
+
+      return { accepted: true };
+    }
 
     await this.auditService.log({
       userId: user.id,
@@ -387,6 +497,159 @@ export class AuthService {
     });
 
     return { accepted: true };
+  }
+
+  async confirmPasswordReset(dto: ConfirmPasswordResetDto): Promise<{ reset: true }> {
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException("New password confirmation does not match");
+    }
+
+    const token = dto.token.trim();
+    if (!token) {
+      throw new BadRequestException("Password reset link is invalid or expired");
+    }
+
+    const now = new Date();
+    const reset = await this.prisma.passwordResetToken.findFirst({
+      where: {
+        tokenHash: hashValue(token),
+        consumedAt: null,
+        expiresAt: {
+          gt: now
+        },
+        user: {
+          deletedAt: null,
+          isActive: true
+        }
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            name: true,
+            passwordHash: true
+          }
+        }
+      }
+    });
+
+    if (!reset) {
+      throw new BadRequestException("Password reset link is invalid or expired");
+    }
+
+    const reusesCurrentPassword = await bcrypt.compare(dto.newPassword, reset.user.passwordHash);
+    if (reusesCurrentPassword) {
+      throw new BadRequestException("New password must be different from the current password");
+    }
+
+    const consumedAt = new Date();
+    const passwordHash = await bcrypt.hash(dto.newPassword, 10);
+    const consumed = await this.prisma.$transaction(async (tx) => {
+      const updateResult = await tx.passwordResetToken.updateMany({
+        where: {
+          id: reset.id,
+          tokenHash: hashValue(token),
+          consumedAt: null,
+          expiresAt: {
+            gt: now
+          },
+          user: {
+            deletedAt: null,
+            isActive: true
+          }
+        },
+        data: {
+          consumedAt
+        }
+      });
+
+      if (updateResult.count !== 1) {
+        return false;
+      }
+
+      await tx.user.update({
+        where: {
+          id: reset.user.id
+        },
+        data: {
+          passwordHash,
+          gitlabHttpsPasswordSyncedAt: null
+        }
+      });
+      await tx.session.deleteMany({
+        where: {
+          userId: reset.user.id
+        }
+      });
+
+      return true;
+    });
+
+    if (!consumed) {
+      throw new BadRequestException("Password reset link is invalid or expired");
+    }
+
+    await this.auditService.log({
+      userId: reset.user.id,
+      entityType: "user",
+      entityId: reset.user.id,
+      action: "auth.password.reset_completed"
+    });
+
+    void this.bestEffortSyncGitlabHttpsPasswordAfterReset(
+      {
+        id: reset.user.id,
+        email: reset.user.email,
+        username: reset.user.username,
+        name: reset.user.name
+      },
+      dto.newPassword
+    );
+
+    return { reset: true };
+  }
+
+  private async bestEffortSyncGitlabHttpsPasswordAfterReset(
+    user: {
+      id: string;
+      email: string;
+      username: string;
+      name: string;
+    },
+    password: string
+  ): Promise<void> {
+    try {
+      const result = await this.gitlabService.syncUserHttpsPassword(user, password);
+      await this.prisma.user.update({
+        where: {
+          id: user.id
+        },
+        data: {
+          gitlabHttpsPasswordSyncedAt: new Date()
+        }
+      });
+      await this.auditService.log({
+        userId: user.id,
+        entityType: "gitlab_https_password",
+        entityId: user.id,
+        action: "auth.gitlab.https_password.reset_sync",
+        metadata: {
+          username: result.username
+        }
+      });
+    } catch {
+      await this.auditService.log({
+        userId: user.id,
+        entityType: "gitlab_https_password",
+        entityId: user.id,
+        action: "auth.gitlab.https_password.reset_sync_failed",
+        metadata: {
+          reason: "sync_failed"
+        }
+      }).catch(() => undefined);
+    }
   }
 
   async getCurrentUserProfile(user: AuthenticatedUser): Promise<{

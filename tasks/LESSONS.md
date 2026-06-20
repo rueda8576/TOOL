@@ -189,6 +189,8 @@
 
 ## Account security
 - For authenticated password changes that must preserve the current session, have `JwtAuthGuard` persist the validated bearer token onto the request and revoke all other sessions by comparing against that exact token hash; deleting sessions only by `userId` will accidentally sign out the user who initiated the password change.
+- Password reset and invitation links are bearer secrets even when their DB records store only hashes. Do not place clear reset/invite URLs or tokens in persisted BullMQ payloads; encrypt transactional direct-email payloads before enqueueing them and decrypt only in the worker at send time.
+- If a password reset token is created but the email job cannot be enqueued, immediately consume the token and mark the notification event failed. Returning `accepted` avoids user enumeration while preventing unreachable active reset tokens.
 
 ## Admin destructive actions
 - In systems with authored history and Prisma `onDelete: Restrict` relations, do not offer blind hard delete. Add a preflight endpoint that counts blockers and let the UI explain exactly why permanent deletion is blocked before the operator clicks.
@@ -208,6 +210,7 @@
   - read-access tests must mock whatever the current access helper now needs (`currentRevisionId`, `getProjectAccess`, etc.), not the previous helper contract
 
 ## Backend testing
+- When a config spec asserts default env values, unset every CI-provided variable it expects to default. GitHub Actions can inject values such as `JWT_SECRET`, so default-value tests must isolate their env explicitly.
 - When production code starts reading additional `Response` fields, update low-level fetch mocks to satisfy the expanded response contract; otherwise tests can fail with mock-shape `TypeError`s before the intended error mapping is exercised.
 - When expanding internal service return shapes that feed required Prisma fields, update integration mocks in the same change and add defensive normalization before database writes so stale partial mocks cannot create invalid required values.
 - In PNPM workspace scripts, avoid relying on `pnpm run <script> -- --coverage ...` for Jest in CI; forwarded args can be treated as test patterns and produce `No tests found`. Prefer dedicated coverage scripts or `pnpm exec jest ...`.
