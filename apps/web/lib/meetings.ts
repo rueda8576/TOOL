@@ -1,52 +1,20 @@
+import type {
+  CreateMeetingInput,
+  MeetingListItem,
+  MeetingRecord,
+  UpdateMeetingInput
+} from "@doctoral/shared";
+
 import { authFetch } from "./client-api";
 
-export type MeetingAutomationStatus = "queued" | "running" | "completed" | "failed" | "stale";
-
-export type MeetingAutomationSummary = {
-  id: string;
-  status: MeetingAutomationStatus;
-  createdTaskCount: number;
-  createdActionCount: number;
-  errorMessage: string | null;
-  completedAt: string | null;
-  updatedAt: string;
-};
-
-export type MeetingListItem = {
-  id: string;
-  projectId: string;
-  title: string;
-  scheduledAt: string;
-  scheduledDate: string;
-  location: string | null;
-  doneMarkdown: string | null;
-  toDiscussMarkdown: string | null;
-  toDoMarkdown: string | null;
-  actionsCount: number;
-  automation: MeetingAutomationSummary | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type MeetingRecord = Omit<MeetingListItem, "actionsCount">;
-
-export type CreateMeetingInput = {
-  title: string;
-  scheduledAt: string;
-  location?: string;
-  doneMarkdown?: string;
-  toDiscussMarkdown?: string;
-  toDoMarkdown?: string;
-};
-
-export type UpdateMeetingInput = {
-  title?: string;
-  scheduledAt?: string;
-  location?: string;
-  doneMarkdown?: string | null;
-  toDiscussMarkdown?: string | null;
-  toDoMarkdown?: string | null;
-};
+export type {
+  CreateMeetingInput,
+  MeetingAutomationStatus,
+  MeetingAutomationSummary,
+  MeetingListItem,
+  MeetingRecord,
+  UpdateMeetingInput
+} from "@doctoral/shared";
 
 export type MeetingsViewMode = "list" | "calendar";
 

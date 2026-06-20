@@ -1,51 +1,25 @@
+import type {
+  CompileStatusValue,
+  CreateDocumentInput,
+  DocumentDetail,
+  DocumentListItem,
+  DocumentVersionCompileLog,
+  DocumentVersionSummary
+} from "@doctoral/shared";
+
 import { API_BASE_URL, authFetch } from "./client-api";
 
-export type DocumentTypeValue = "paper" | "manual" | "model" | "draft" | "minutes" | "other";
-export type CompileStatusValue = "pending" | "running" | "succeeded" | "failed" | "timeout";
+export type {
+  CompileStatusValue,
+  CreateDocumentInput,
+  DocumentDetail,
+  DocumentListItem,
+  DocumentTypeValue,
+  DocumentVersionCompileLog,
+  DocumentVersionSummary
+} from "@doctoral/shared";
+
 export const DOCUMENTS_FLASH_SUCCESS_KEY = "documents_flash_success";
-
-export type DocumentVersionSummary = {
-  id: string;
-  versionNumber: number;
-  compileStatus: CompileStatusValue;
-  hasPdf: boolean;
-  hasLatex: boolean;
-  latexEntryFile: string | null;
-  createdAt: string;
-};
-
-export type DocumentListItem = {
-  id: string;
-  projectId: string;
-  title: string;
-  type: DocumentTypeValue;
-  authors: string[];
-  tags: string[];
-  publishedAt: string | null;
-  updatedAt: string;
-  latestMainVersion: DocumentVersionSummary | null;
-};
-
-export type DocumentDetail = {
-  id: string;
-  projectId: string;
-  title: string;
-  type: DocumentTypeValue;
-  authors: string[];
-  tags: string[];
-  publishedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  latestMainVersion: DocumentVersionSummary | null;
-};
-
-export type CreateDocumentInput = {
-  title: string;
-  type?: DocumentTypeValue;
-  authors?: string[];
-  tags?: string[];
-  publishedAt?: string;
-};
 
 export type CreateDocumentVersionUploadInput = {
   pdf?: File;
@@ -56,12 +30,6 @@ export type CreateDocumentVersionUploadInput = {
   branchName?: string;
 };
 
-export type DocumentVersionCompileLog = {
-  documentVersionId: string;
-  compileStatus: CompileStatusValue;
-  compileLog: string | null;
-  compiledPdfFileId: string | null;
-};
 
 function normalizeCompileStatus(status: string): CompileStatusValue {
   const normalized = status.toLowerCase();

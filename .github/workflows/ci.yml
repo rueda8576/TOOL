@@ -42,6 +42,8 @@ jobs:
         run: pnpm install --frozen-lockfile --prod=false
       - name: Generate Prisma client
         run: pnpm db:generate
+      - name: Build shared contracts
+        run: pnpm --filter @doctoral/shared build
       - name: Lint
         run: pnpm lint
       - name: Repo hygiene
