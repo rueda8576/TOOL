@@ -854,7 +854,7 @@ textarea {
   flex-wrap: wrap;
   gap: 0.28rem 0.7rem;
   min-width: 0;
-  color: var(--text-subtle);
+  color: var(--text-muted);
   font-size: 0.82rem;
 }
 
@@ -870,7 +870,7 @@ textarea {
 .metadata-strip-item + .metadata-strip-item::before {
   content: "/";
   margin-right: 0.7rem;
-  color: color-mix(in srgb, var(--text-subtle) 52%, transparent);
+  color: var(--text-muted);
 }
 
 .workspace-header-actions {
@@ -920,6 +920,10 @@ textarea {
 
 .archive-index-header {
   border-bottom: 1px solid var(--line);
+}
+
+.archive-index-header .eyebrow {
+  color: var(--brand-strong);
 }
 
 .archive-index-footer {

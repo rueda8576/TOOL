@@ -26,6 +26,7 @@
 - Long account/settings drawers should separate fixed header chrome from a local scroll body. Avoid making the entire drawer scroll under a sticky header because content can bleed above the header.
 - Git access surfaces should lead with the actual default clone method and keep secondary credential details collapsed; avoid long explanatory copy that makes settings feel like documentation.
 - For HTTPS Git access, separate server-side password sync from local credential persistence. Show short credential-helper instructions and never ask users to paste passwords into commands.
+- Focusable resizable splitters with `role="separator"` must expose numeric ARIA state (`aria-valuenow`, and preferably min/max/text) so axe does not treat the control as an incomplete range widget.
 
 ## Design canon
 - Durable Atlasium brand, digital design, UI/UX, copy, metadata, navigation, visual assets, and visual verification rules live in `DESIGN.md`.
@@ -218,6 +219,10 @@
 - In PNPM workspace scripts, avoid relying on `pnpm run <script> -- --coverage ...` for Jest in CI; forwarded args can be treated as test patterns and produce `No tests found`. Prefer dedicated coverage scripts or `pnpm exec jest ...`.
 - For Nest HTTP/controller tests that should exercise real auth/role wiring, keep the real `JwtAuthGuard` and `RolesGuard` in the module and mock `SessionAuthService.authenticateToken`; replacing the guard itself hides route metadata and role regressions.
 - If Prisma migration history does not contain an initial baseline, backend integration CI on a fresh Postgres DB must bootstrap schema (`db push` + `migrate resolve`) before `migrate deploy`; otherwise e2e validation fails before the app even boots.
+
+## Frontend QA gates
+- A `test:visual` script must include real deterministic Playwright screenshot assertions (`toHaveScreenshot`) with committed baselines. DOM visibility, overflow checks, and brand-copy audits are useful responsive QA, but they are not visual snapshot coverage.
+- Playwright route loops should wait for route-specific mocked content before running visual, overflow, or axe checks; `domcontentloaded` plus a visible `body` can validate loading shells instead of the intended Atlasium surface.
 - When unit-testing worker jobs in a Prisma process, mock `child_process` partially with `jest.requireActual(...)` and override only `spawn`; replacing the whole module can break unrelated runtime imports that expect other `child_process` exports.
 - Worker jobs must revalidate persisted database paths before filesystem or compiler access. API-side DTO validation is not enough for stale/imported/corrupted records; use path-confinement helpers at the worker boundary too.
 - When session JWTs are persisted via a unique `tokenHash`, include a per-session nonce such as `jti` in the signed payload; otherwise two logins within the same second can generate identical tokens and violate the unique constraint.

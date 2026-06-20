@@ -1,5 +1,17 @@
 # Implementation TODO (v1 bootstrap)
 
+## PR09 Visual QA Gate Blocker (2026-06-20)
+- [x] Stop PR #9 merge after exact-SHA reviewer blocked `c18dfacf001a60ca4b653aa1946bd2633b9fdf48`.
+- [x] Add route-ready waits so responsive/visual/a11y QA asserts loaded mocked surfaces instead of partial loading states.
+- [x] Add deterministic Playwright visual snapshots for stable Atlasium surfaces, keeping Monaco/PDF/realtime-heavy views out of pixel baselines or masked.
+- [x] Generate and commit the baseline snapshots required by `pnpm test:visual`.
+- [x] Run focused frontend QA, type/build where applicable, diff hygiene, force-push PR #9, restack PRs #10-#15, and repeat exact-SHA review/CI before merge.
+
+### Review
+- PR #9 was blocked because `test:visual` performed only DOM/overflow checks and route waits could pass before mocked module content had loaded. The correction adds route-specific readiness checks, 26 deterministic Playwright screenshot baselines for stable Atlasium surfaces across desktop/mobile, and keeps the responsive overflow/brand drift checks across the broader route matrix.
+- The stronger a11y gate exposed a real Wiki splitter violation: focusable `role="separator"` controls need numeric ARIA state. Wiki and Documents splitters now expose min/max/current pixel values.
+- Verification passed locally: `pnpm --filter @doctoral/web exec playwright test --project=chromium --grep @visual --update-snapshots`; `pnpm --filter @doctoral/web test:visual`; `pnpm --filter @doctoral/web test:e2e`; `pnpm --filter @doctoral/web test:a11y`; `pnpm --filter @doctoral/web exec tsc -p tsconfig.json --noEmit`; `pnpm --filter @doctoral/web lint` (existing warning only in Code page); `pnpm --filter @doctoral/web build`; `pnpm --filter @doctoral/web test:qa`; `git diff --check`.
+
 ## PR06 Security Review Blocker (2026-06-20)
 - [x] Stop PR #6 merge after exact-SHA reviewer blocked `254501870716f56a73519847055a3a4bfdcd51f3`.
 - [x] Reject cross-origin `/collab` WebSocket upgrades before `handleUpgrade` when browser `Origin` is not an allowed Atlasium origin.
