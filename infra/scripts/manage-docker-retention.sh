@@ -112,8 +112,17 @@ docker_root_dir() {
   docker info --format '{{ .DockerRootDir }}'
 }
 
+docker_df_path() {
+  root_dir="$(docker_root_dir)"
+  if [ -e "${root_dir}" ]; then
+    printf '%s\n' "${root_dir}"
+  else
+    printf '%s\n' /
+  fi
+}
+
 available_kb() {
-  df -Pk "$(docker_root_dir)" | awk 'NR == 2 { print $4 }'
+  df -Pk "$(docker_df_path)" | awk 'NR == 2 { print $4 }'
 }
 
 required_kb() {
@@ -121,7 +130,7 @@ required_kb() {
 }
 
 human_available() {
-  df -h "$(docker_root_dir)" | awk 'NR == 2 { print $4 " free of " $2 " on " $6 }'
+  df -h "$(docker_df_path)" | awk 'NR == 2 { print $4 " free of " $2 " on " $6 }'
 }
 
 log_free_space() {
@@ -258,6 +267,29 @@ check_min_free_space() {
   log "Docker root dir free space after cleanup: $(human_available)"
 }
 
+has_min_free_space() {
+  free_kb="$(available_kb)"
+  needed_kb="$(required_kb)"
+  [ "${free_kb}" -ge "${needed_kb}" ]
+}
+
+emergency_prune_unused_docker_resources() {
+  log "Standard retention cleanup did not reach ${MIN_FREE_GB}GB free."
+  log "Running emergency Docker cleanup for unused containers, images and builder cache; volumes are not pruned."
+
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "[dry-run] docker container prune -f"
+    log "[dry-run] docker image prune -af"
+    log "[dry-run] docker builder prune -af"
+    return 0
+  fi
+
+  docker container prune -f >/dev/null
+  docker image prune -af >/dev/null
+  docker builder prune -af >/dev/null
+  log_free_space "Docker root dir free space after emergency cleanup"
+}
+
 diagnose() {
   populate_preserve_tags
   log "Docker root dir: $(docker_root_dir)"
@@ -276,6 +308,9 @@ pre_deploy() {
   log "Running Docker retention cleanup before deploy..."
   log_free_space "Docker root dir free space before cleanup"
   prune_atlasium_images
+  if ! has_min_free_space; then
+    emergency_prune_unused_docker_resources
+  fi
   check_min_free_space
 }
 

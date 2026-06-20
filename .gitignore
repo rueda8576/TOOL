@@ -34,3 +34,5 @@ Thumbs.db
 /apps/api/storage/
 /apps/worker/storage/
 /tmp/
+/.deploy-image-state.env
+/backups/
