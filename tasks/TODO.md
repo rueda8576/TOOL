@@ -1,5 +1,14 @@
 # Implementation TODO (v1 bootstrap)
 
+## Autonomous Merge Train Deploy Fix-Forward: Worker Image Size (2026-06-20)
+- [x] Confirm the merge train is stopped because `main` deploy is not green after PR #17.
+- [x] Identify the production blocker: VPS Docker root dir remains below the 12GB preflight threshold after retention cleanup.
+- [x] Replace the worker runtime `texlive-full` install with the narrower LaTeX package set required for `pdflatex`, `biber`, and `bibtex`.
+- [x] Verify worker Docker build, runtime binary smokes, minimal PDF compile, diff hygiene, and image-size reduction.
+- [x] Add transitional deploy retention gates: allow pre-pull deploy with 6GB free, then enforce 12GB after successful healthcheck and final cleanup.
+- [ ] Open fix-forward PR #18, request exact-SHA agent review, wait required CI, merge only with `--squash --match-head-commit`.
+- [ ] Wait `main` CI and `Deploy Atlasium` for the #18 squash SHA before resuming PR stack #3-#15.
+
 ## Git Access Persistent HTTPS Credentials (2026-06-07)
 - [x] Register the approved implementation plan before edits.
 - [x] Update `DESIGN.md` and `tasks/LESSONS.md` with concise persistent credential guidance.

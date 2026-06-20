@@ -174,7 +174,7 @@ jobs:
             sh ./infra/scripts/manage-docker-retention.sh pre-deploy \
               --state-file /opt/atlasium/.deploy-image-state.env \
               --target-tag "${IMAGE_TAG}" \
-              --min-free-gb 12
+              --min-free-gb 6
 
             echo "${GHCR_READ_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
@@ -234,7 +234,8 @@ jobs:
 
             sh ./infra/scripts/manage-docker-retention.sh finalize-success \
               --state-file /opt/atlasium/.deploy-image-state.env \
-              --target-tag "${IMAGE_TAG}"
+              --target-tag "${IMAGE_TAG}" \
+              --min-free-gb 12
 
             if curl -fsS https://atlasium.info/api/health >/dev/null; then
               echo "Public HTTPS healthcheck OK"
@@ -288,7 +289,7 @@ jobs:
             sh ./infra/scripts/manage-docker-retention.sh pre-deploy \
               --state-file /opt/atlasium/.deploy-image-state.env \
               --target-tag "${IMAGE_TAG}" \
-              --min-free-gb 12
+              --min-free-gb 6
 
             echo "${GHCR_READ_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
@@ -348,7 +349,8 @@ jobs:
 
             sh ./infra/scripts/manage-docker-retention.sh finalize-success \
               --state-file /opt/atlasium/.deploy-image-state.env \
-              --target-tag "${IMAGE_TAG}"
+              --target-tag "${IMAGE_TAG}" \
+              --min-free-gb 12
 
             if curl -fsS https://atlasium.info/api/health >/dev/null; then
               echo "Public HTTPS healthcheck OK"
