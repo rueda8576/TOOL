@@ -42,6 +42,12 @@ services:
       - "4000:4000"
     volumes:
       - ${ATLASIUM_STORAGE_HOST_PATH:-/var/lib/atlasium/storage}:/var/lib/atlasium/storage
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 1g
 
   migrate:
     image: ghcr.io/rueda8576/atlasium-api:${IMAGE_TAG:-main}
@@ -61,6 +67,12 @@ services:
         test -n "$$PRISMA_CLI";
         node "$$PRISMA_CLI" migrate deploy --schema packages/db/prisma/schema.prisma
     restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 1g
 
   web:
     image: ghcr.io/rueda8576/atlasium-web:${IMAGE_TAG:-main}
@@ -74,6 +86,12 @@ services:
       - api
     ports:
       - "3000:3000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 1g
 
   worker:
     image: ghcr.io/rueda8576/atlasium-worker:${IMAGE_TAG:-main}

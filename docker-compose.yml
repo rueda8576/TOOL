@@ -38,6 +38,12 @@ services:
       - "4000:4000"
     volumes:
       - ${ATLASIUM_STORAGE_HOST_PATH:-./storage}:/var/lib/atlasium/storage
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 1g
 
   web:
     build:
@@ -54,6 +60,12 @@ services:
       - api
     ports:
       - "3000:3000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 1g
 
   worker:
     build:

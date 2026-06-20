@@ -24,7 +24,7 @@ corepack enable
 corepack prepare pnpm@9.15.4 --activate
 
 mkdir -p /opt/atlasium
-mkdir -p /var/lib/atlasium/storage
+ATLASIUM_STORAGE_HOST_PATH=/var/lib/atlasium/storage sh "$(dirname "$0")/ensure-storage-permissions.sh" --path /var/lib/atlasium/storage
 
 ufw allow OpenSSH
 ufw allow 80/tcp

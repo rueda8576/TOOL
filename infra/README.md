@@ -20,7 +20,7 @@
 
 ## Suggested directories
 - App root: `/opt/atlasium`
-- Runtime storage: `/var/lib/atlasium/storage`
+- Runtime storage: `/var/lib/atlasium/storage` owned by runtime UID/GID `10001:10001`
 - Backups: `/var/lib/atlasium/storage/backups`
 
 ## CI/CD deployment model
@@ -28,6 +28,7 @@
 - CD publishes images to GHCR and deploys to VPS (`.github/workflows/deploy.yml`).
 - VPS deploy command shape:
   - `IMAGE_TAG=sha-<commit> docker compose -f docker-compose.prod.yml pull`
+  - `sh infra/scripts/ensure-storage-permissions.sh --env-file .env --image ghcr.io/rueda8576/atlasium-api:sha-<commit>`
   - `IMAGE_TAG=sha-<commit> docker compose -f docker-compose.prod.yml up -d --no-build`
 
 ## Atlasium go-live defaults

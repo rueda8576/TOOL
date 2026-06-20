@@ -70,6 +70,9 @@ PREVIOUS_IMAGE_TAG=""
 
 log "Validating production env file..."
 sh ./infra/scripts/validate-prod-env.sh "${ENV_FILE}"
+sh ./infra/scripts/ensure-storage-permissions.sh \
+  --env-file "${ENV_FILE}" \
+  --image "ghcr.io/rueda8576/atlasium-api:${CURRENT_IMAGE_TAG}"
 
 log "Recovering Atlasium stack with IMAGE_TAG=${CURRENT_IMAGE_TAG}"
 IMAGE_TAG="${CURRENT_IMAGE_TAG}" docker compose -f "${COMPOSE_FILE}" up -d --wait postgres redis

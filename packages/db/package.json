@@ -10,7 +10,7 @@
     "db:migrate": "prisma migrate dev --name init",
     "db:push": "prisma db push",
     "db:test:prepare": "node scripts/prepare-test-db.cjs",
-    "lint": "echo 'No lint configured for @doctoral/db'",
+    "lint": "eslint .",
     "test": "echo 'No tests configured for @doctoral/db'"
   },
   "dependencies": {

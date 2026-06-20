@@ -16,6 +16,7 @@
 - When fixing a user-facing label issue in one project tab, apply the same fix across equivalent tabs to avoid inconsistent UX.
 - Prefer shared UI components for repeated project-context text (e.g., project header subtitle) to prevent drift.
 - Keep action button labels concise; do not append keyboard shortcut hints in the visible label unless explicitly requested.
+- When rendering user- or data-driven collaborator colors, compute foreground color from the actual background contrast. Do not assume white text is readable on every presence color.
 - Do not split a dense technical settings workflow into competing nested cards inside a narrow secondary column. If a section combines long labels, action buttons, and optional detail, merge the related controls into one coherent panel and collapse heavy forms by default.
 - When adding shared visual accent classes, audit later page-specific shorthand rules like `border-color`; they can silently override one side of the shared accent through CSS cascade.
 - In narrow navigation sidebars, avoid dropping global cockpit/toolbars into the header when they create oversized boxed controls; use scoped compact action rows and keep the action result in one nearby place.
@@ -48,10 +49,13 @@
 - If a newly added endpoint returns `Cannot <METHOD> /...` but code contains the route, first check for stale Node processes occupying the API port (`ss -ltnp | rg :4000`) before changing backend code.
 - Always verify route registration in Nest startup logs and confirm behavior with a direct `curl` call (`401` without token is expected for guarded routes; `404` indicates route missing or wrong process).
 - When using Windows Chrome headless from WSL for visual QA snapshots, verify `window.innerWidth` before diagnosing mobile clipping. A `--window-size=390,...` bitmap can still lay out at a wider CSS viewport, producing cropped screenshots that are not real page overflow.
+- Do not run `next build` and Playwright's `next dev` web server against the same app directory at the same time. Both write `.next`; concurrent runs can produce missing webpack chunks and false `Cannot find module` failures. Run web build and Playwright QA sequentially, and clean generated `.next` before retesting if a race happened.
+- Browser-only editor bindings such as `y-monaco` must be loaded from client-side effects or dynamic imports. Static top-level imports can execute during Next SSR/build routes and crash with `window is not defined`.
 
 ## Design system rollout
 - For full visual redesigns, start by centralizing tokens and component primitives in `globals.css`; then migrate pages to those primitives and remove inline styles to keep consistency.
 - Keep behavior untouched while redesigning: visual changes should not alter API contracts or business flows, and validation must include a production build after refactor.
+- Refactor-only PRs must stay behavior-preserving. Do not hide security headers, accessible copy changes, visual styling changes, or media policy changes inside extraction commits; move them to their owning feature/security/UI PR with targeted tests.
 
 ## API boundary normalization
 - When backend endpoints may return enum values with different casing (e.g. Prisma enums vs API-friendly lowercase), normalize values in frontend API helpers before UI state logic consumes them.
@@ -133,6 +137,8 @@
 ## Monorepo Docker builds
 - In multi-stage Dockerfiles for PNPM workspaces, do not assume copying only root `node_modules` is enough for build scripts; ensure filtered dependencies are installed in the build stage before running `pnpm --filter <pkg> build` to avoid missing local binaries like `tsc`.
 - If a workspace package executes another workspace script at build time (e.g., `@doctoral/api` or `@doctoral/worker` calling `@doctoral/db db:generate`), include both filters in install steps (`--filter <service>... --filter @doctoral/db...`) so CLI binaries like `prisma` are available.
+- Runtime module-resolution smokes should execute from the same package cwd as the container entrypoint, not only from `/app`; PNPM workspace dependencies can be package-local even when the shared store is copied correctly.
+- In PNPM runtime images, copying only `node_modules/.pnpm` is not enough; Node also needs the generated `node_modules` symlink tree. Runtime smoke should run `require.resolve(...)` for representative dependencies before accepting an image.
 
 ## CI/CD deployment model
 - Prefer registry-based deploys (GHCR images + immutable `sha-*` tags) over SCP-ing source code and rebuilding on VPS; it is more deterministic and avoids server-specific build drift.
@@ -164,6 +170,14 @@
 - Retention/cleanup scripts must not suppress `docker image rm` stderr entirely; surface Docker's real conflict message or deploy diagnostics become misleading.
 - When a deploy script reports thresholds as `GB`, calculate them as decimal gigabytes or label them explicitly as `GiB`. Mixing `df -h` rounded output with hidden binary GiB thresholds can make a successful deploy fail even when logs show the requested `12G` free.
 - Treat post-deploy rollback retention as a target, not the same hard gate as pre-deploy pull capacity. If local health passed and cleanup has already dropped the previous rollback tag, warn below the rollback target but only fail when free space is below the smaller operational floor needed for the next pull.
+- If a PNPM workspace package exposes `main`/`types` from `dist`, clean Docker builds must build that package before consumers and runtime images must copy the workspace package path that `node_modules` symlinks resolve to. Copying only `node_modules` is not enough when workspace symlinks point at `packages/<name>`.
+- Docker image validation for monorepos should include `require.resolve()` smokes for internal workspace packages, not only third-party dependencies; this catches missing `packages/<name>/dist` in runtime images.
+- When non-root runtime containers use host bind mounts, image-layer `chown` is not enough. Prepare the host path ownership/permissions during bootstrap/deploy/recovery and smoke a bind-mounted write as the runtime UID/GID.
+
+## Backup and restore safety
+- Destructive restore scripts must compare canonical physical database identities, not raw `DATABASE_URL` strings. Normalize protocol, host, port, and database before allowing restore/drill operations.
+- Ignore Prisma/search parameters such as `schema=public` when refusing primary database restore targets; schema/query differences do not make a separate physical PostgreSQL database.
+- Restore/drill commands should require the primary `DATABASE_URL` to be present before comparing targets; failing open when the primary URL is absent can make an unsafe restore look valid.
 
 ## Realtime collaboration resilience
 - In browser code, never call `new URL()` with potentially relative API bases (`/api`) unless you pass `window.location.origin` as the base; otherwise client render can crash with `TypeError: Invalid URL`.
@@ -217,6 +231,7 @@
 - After adding worker branches under a package-level coverage gate, run `pnpm --filter @doctoral/worker test:coverage:gate` and inspect branch coverage before pushing. Passing every Jest suite is not enough if new branches drop the aggregate below 95%.
 - When production code starts reading additional `Response` fields, update low-level fetch mocks to satisfy the expanded response contract; otherwise tests can fail with mock-shape `TypeError`s before the intended error mapping is exercised.
 - When expanding internal service return shapes that feed required Prisma fields, update integration mocks in the same change and add defensive normalization before database writes so stale partial mocks cannot create invalid required values.
+- When a backend flow materializes or validates user-controlled archives before worker execution, the database record that makes the artifact compileable must be created/updated in the same failure boundary. A rejected archive must not leave a version that later workers can pick up through a legacy path.
 - In PNPM workspace scripts, avoid relying on `pnpm run <script> -- --coverage ...` for Jest in CI; forwarded args can be treated as test patterns and produce `No tests found`. Prefer dedicated coverage scripts or `pnpm exec jest ...`.
 - For Nest HTTP/controller tests that should exercise real auth/role wiring, keep the real `JwtAuthGuard` and `RolesGuard` in the module and mock `SessionAuthService.authenticateToken`; replacing the guard itself hides route metadata and role regressions.
 - If Prisma migration history does not contain an initial baseline, backend integration CI on a fresh Postgres DB must bootstrap schema (`db push` + `migrate resolve`) before `migrate deploy`; otherwise e2e validation fails before the app even boots.
@@ -237,3 +252,11 @@
 - In websocket/Yjs-heavy collaboration tests, it is acceptable to hit private helpers through `as any` for protocol-shape branches such as query parsing, payload normalization, and queued persist states; re-implementing the full wire protocol often adds noise without increasing confidence.
 - When GitHub Actions starts deprecating a JavaScript-action runtime, do not wait for every third-party action to publish a new major. Prefer replacing simple setup actions with first-party/runtime primitives (`corepack` for pnpm, shell setup, etc.) if that removes the runtime dependency cleanly.
 - `actions/setup-node` with `cache: pnpm` assumes `pnpm` is already executable during that step. If pnpm is being bootstrapped later via Corepack, disable that built-in cache or move caching to a later step; otherwise CI fails before install with `Unable to locate executable file: pnpm`.
+
+## Stacked PR review
+- Do not hide security or product-policy behavior changes inside extraction/refactor PRs. Move the behavior change to the domain PR that owns the policy, add the test there, then restack refactors on top.
+- Single-use tokens must be consumed atomically. A read-then-unconditional-update flow is race-prone; use a conditional update inside the transaction and treat `count !== 1` as an invalid/expired token.
+- Worker jobs that mark DB state as `RUNNING` must catch preparation and validation failures and persist a terminal state. Throwing before status cleanup creates stuck operations and unreliable ledgers.
+- For TeX/LaTeX processing of user-controlled workspaces, `-no-shell-escape` is necessary but not sufficient. Add explicit TeX open policies such as `openin_any=p` and `openout_any=p`, run from scratch space, keep env minimal, kill process groups on timeout, and persist sanitized logs.
+- Atlasium QA gates must include every public auth surface in responsive checks, not only smoke/a11y. Brand drift assertions should block historical product names and visible decorative vocabulary, not just the most recent stale name.
+- When Playwright/axe gates expose production contrast or SSR defects, keep the fix in the QA/UI-owning tranche or move it to the proper domain tranche with tests. Do not dismiss fixture failures when they point to real user-facing accessibility or render issues.

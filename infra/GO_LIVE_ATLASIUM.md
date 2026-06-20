@@ -39,7 +39,7 @@ Create runtime directories:
 
 ```bash
 mkdir -p /opt/atlasium
-mkdir -p /var/lib/atlasium/storage
+install -d -m 775 -o 10001 -g 10001 /var/lib/atlasium/storage
 mkdir -p /var/lib/atlasium/gitlab/{config,logs,data}
 ```
 
@@ -153,6 +153,7 @@ cd /opt/atlasium
 docker login ghcr.io -u <GHCR_USERNAME>
 sh ./infra/scripts/validate-prod-env.sh .env
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml pull
+sh ./infra/scripts/ensure-storage-permissions.sh --env-file .env --image ghcr.io/rueda8576/atlasium-api:main
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --wait postgres redis
 # Runs one-time bootstrap automatically on fresh DBs, auto-recovers failed migration records, then executes migrate deploy.
 sh ./infra/scripts/deploy-prisma-bootstrap.sh main
