@@ -244,11 +244,13 @@ function renderAutomationStatus(meeting: MeetingListItem): JSX.Element | null {
   }
 
   const statusLabel: Record<typeof meeting.automation.status, string> = {
-    queued: "AI queued",
-    running: "AI running",
-    completed: `AI created ${meeting.automation.createdTaskCount}`,
-    failed: "AI failed",
-    stale: "AI stale"
+    queued: "Task extraction queued",
+    running: "Extracting tasks",
+    completed: meeting.automation.createdTaskCount > 0
+      ? `Tasks created (${meeting.automation.createdTaskCount})`
+      : "Tasks created",
+    failed: "Needs review",
+    stale: "Outdated"
   };
 
   return (
@@ -771,7 +773,7 @@ export default function ProjectMeetingsPage({
 
     try {
       await retryMeetingAutomation(meetingId, token);
-      setSuccess("AI task extraction queued.");
+      setSuccess("Task extraction queued.");
       await loadMeetings(token);
     } catch (retryError) {
       setError((retryError as Error).message);
