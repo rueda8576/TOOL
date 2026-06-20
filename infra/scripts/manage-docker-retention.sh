@@ -330,6 +330,17 @@ finalize_success() {
   log_free_space "Docker root dir free space before final retention cleanup"
   prune_atlasium_images
   log_free_space "Docker root dir free space after final retention cleanup"
+
+  if ! has_min_free_space && [ -n "${PREVIOUS_IMAGE_TAG}" ]; then
+    log "Final retention cleanup is still below ${MIN_FREE_GB}GB free."
+    log "Dropping previous deploy tag from local rollback retention to recover Docker space."
+    PREVIOUS_IMAGE_TAG=""
+    write_state_file
+    prune_atlasium_images
+    log_free_space "Docker root dir free space after previous-tag cleanup"
+  fi
+
+  check_min_free_space
 }
 
 case "${MODE}" in
