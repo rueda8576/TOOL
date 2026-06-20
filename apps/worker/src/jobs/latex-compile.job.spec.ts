@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import { mkdtemp, mkdir, rm, writeFile } from "fs/promises";
+import { access, mkdtemp, mkdir, rm, symlink, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -9,16 +9,19 @@ describe("processLatexCompileJob", () => {
   const loadJob = async (params: {
     storageRoot: string;
     spawnImpl: jest.Mock;
+    timeoutMs?: number;
     readFileOverride?: (actualReadFile: typeof import("fs/promises").readFile) => typeof import("fs/promises").readFile;
+    readdirOverride?: (actualReaddir: typeof import("fs/promises").readdir) => typeof import("fs/promises").readdir;
   }) => {
     jest.resetModules();
+    jest.dontMock("fs/promises");
     process.env.STORAGE_ROOT = params.storageRoot;
-    process.env.LATEX_TIMEOUT_MS = "1000";
+    process.env.LATEX_TIMEOUT_MS = String(params.timeoutMs ?? 1000);
 
     jest.doMock("../config/env", () => ({
       getEnv: () => ({
         STORAGE_ROOT: params.storageRoot,
-        LATEX_TIMEOUT_MS: 1000,
+        LATEX_TIMEOUT_MS: params.timeoutMs ?? 1000,
         DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/doctoral_platform_test?schema=public",
         REDIS_URL: "redis://localhost:6379",
         SMTP_HOST: "localhost",
@@ -31,12 +34,13 @@ describe("processLatexCompileJob", () => {
       ...jest.requireActual("child_process"),
       spawn: params.spawnImpl
     }));
-    if (params.readFileOverride) {
+    if (params.readFileOverride || params.readdirOverride) {
       jest.doMock("fs/promises", () => {
         const actual = jest.requireActual("fs/promises");
         return {
           ...actual,
-          readFile: params.readFileOverride!(actual.readFile)
+          ...(params.readFileOverride ? { readFile: params.readFileOverride(actual.readFile) } : {}),
+          ...(params.readdirOverride ? { readdir: params.readdirOverride(actual.readdir) } : {})
         };
       });
     }
@@ -55,9 +59,15 @@ describe("processLatexCompileJob", () => {
     return child;
   };
 
+  const expectScratchCwd = (cwd: string, storageRoot: string): void => {
+    expect(cwd.startsWith(join(tmpdir(), "atlasium-latex-"))).toBe(true);
+    expect(cwd.startsWith(storageRoot)).toBe(false);
+  };
+
   afterEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
+    jest.restoreAllMocks();
   });
 
   it("fails early when the document version has no latex source", async () => {
@@ -225,6 +235,20 @@ describe("processLatexCompileJob", () => {
 
     await processLatexCompileJob(prisma, { data: { documentVersionId: "version-3", compileJobId: "job-3" } } as any);
 
+    const firstLatexCall = spawnImpl.mock.calls.find(([command]) => command === "pdflatex");
+    expect(firstLatexCall).toBeDefined();
+    const latexArgs = firstLatexCall![1] as string[];
+    const latexOptions = firstLatexCall![2] as { cwd: string; detached: boolean; env: Record<string, string | undefined> };
+    expect(latexArgs).toContain("-no-shell-escape");
+    expectScratchCwd(latexOptions.cwd, storageRoot);
+    expect(latexOptions.detached).toBe(true);
+    expect(latexOptions.env.DATABASE_URL).toBeUndefined();
+    expect(latexOptions.env.PATH).toBe("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+    expect(latexOptions.env.openin_any).toBe("p");
+    expect(latexOptions.env.openout_any).toBe("p");
+    expect(latexOptions.env.shell_escape).toBe("0");
+    await expect(access(join(workspaceAbsolute, "main.pdf"))).rejects.toBeDefined();
+
     expect(prisma.fileObject.create).toHaveBeenCalledWith({
       data: {
         storagePath: expect.stringContaining("compiled/"),
@@ -327,6 +351,65 @@ describe("processLatexCompileJob", () => {
           documentVersionId: "version-4",
           compileStatus: CompileStatus.TIMEOUT
         }
+      }
+    });
+  });
+
+  it("kills the LaTeX process group when the compiler exceeds the timeout", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-latex-kill-timeout-"));
+    const workspacePath = "latex-workspaces/version-kill-timeout";
+    const workspaceAbsolute = join(storageRoot, workspacePath);
+    await mkdir(workspaceAbsolute, { recursive: true });
+    await writeFile(join(workspaceAbsolute, "main.tex"), "\\documentclass{article}", "utf8");
+
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+      pid: number;
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.pid = 12345;
+    const killSpy = jest.spyOn(process, "kill").mockImplementation((pid) => {
+      if (pid === -12345) {
+        throw new Error("group unavailable");
+      }
+      return true;
+    });
+    const spawnImpl = jest.fn(() => child);
+    const { processLatexCompileJob } = await loadJob({ storageRoot, spawnImpl, timeoutMs: 5 });
+    const prisma = {
+      documentCompileJob: {
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      documentVersion: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "version-kill-timeout",
+          latexBundleFile: null,
+          latexWorkspacePath: workspacePath,
+          latexEntryFile: "main.tex",
+          createdById: "user-timeout"
+        }),
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      fileObject: {
+        create: jest.fn()
+      },
+      notificationEvent: {
+        create: jest.fn().mockResolvedValue(undefined)
+      }
+    } as any;
+
+    await processLatexCompileJob(prisma, { data: { documentVersionId: "version-kill-timeout", compileJobId: "job-kill-timeout" } } as any);
+
+    expect(killSpy).toHaveBeenCalledWith(-12345, "SIGKILL");
+    expect(killSpy).toHaveBeenCalledWith(12345, "SIGKILL");
+    expect(prisma.documentVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-kill-timeout" },
+      data: {
+        compileStatus: CompileStatus.TIMEOUT,
+        compileLog: expect.stringContaining("[timeout] pdflatex pass 1 exceeded 5ms"),
+        compiledPdfFileId: undefined
       }
     });
   });
@@ -443,7 +526,66 @@ describe("processLatexCompileJob", () => {
     });
   });
 
-  it("fails a bundled workspace before compilation when ZIP entries escape the work directory", async () => {
+  it("copies nested persisted workspace files into the scratch directory", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-latex-nested-"));
+    const workspacePath = "latex-workspaces/version-nested";
+    const workspaceAbsolute = join(storageRoot, workspacePath);
+    await mkdir(join(workspaceAbsolute, "src"), { recursive: true });
+    await writeFile(join(workspaceAbsolute, "src", "main.tex"), "\\documentclass{article}", "utf8");
+
+    let pdflatexRuns = 0;
+    const spawnImpl = jest.fn((command: string, args: string[], options: { cwd: string }) =>
+      makeChild(async (child) => {
+        if (command === "pdflatex") {
+          pdflatexRuns += 1;
+          expect(args.at(-1)).toBe("src/main.tex");
+          if (pdflatexRuns === 3) {
+            await writeFile(join(options.cwd, "src", "main.pdf"), "nested-pdf", "utf8");
+          }
+        }
+        child.emit("close", 0);
+      })
+    );
+    const { processLatexCompileJob } = await loadJob({ storageRoot, spawnImpl });
+    const prisma = {
+      documentCompileJob: {
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      documentVersion: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "version-nested",
+          latexBundleFile: null,
+          latexWorkspacePath: workspacePath,
+          latexEntryFile: "src/main.tex",
+          createdById: "user-nested"
+        }),
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      fileObject: {
+        create: jest.fn().mockResolvedValue({ id: "compiled-nested" })
+      },
+      notificationEvent: {
+        create: jest.fn().mockResolvedValue(undefined)
+      }
+    } as any;
+
+    await processLatexCompileJob(
+      prisma,
+      { data: { documentVersionId: "version-nested", compileJobId: "job-nested" } } as any
+    );
+
+    expect(spawnImpl).toHaveBeenCalledTimes(3);
+    expect(prisma.documentVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-nested" },
+      data: {
+        compileStatus: CompileStatus.SUCCEEDED,
+        compileLog: expect.stringContaining("pdflatex pass 3"),
+        compiledPdfFileId: "compiled-nested"
+      }
+    });
+  });
+
+  it("rejects bundled workspaces that try to escape the compile directory", async () => {
     const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-latex-zip-slip-"));
     const bundlePath = join(storageRoot, "uploads", "bundle.zip");
     await mkdir(join(storageRoot, "uploads"), { recursive: true });
@@ -461,45 +603,195 @@ describe("processLatexCompileJob", () => {
       },
       documentVersion: {
         findFirst: jest.fn().mockResolvedValue({
-          id: "version-zip-slip",
+          id: "version-slip",
           latexBundleFile: { storagePath: "uploads/bundle.zip" },
           latexWorkspacePath: null,
           latexEntryFile: "main.tex",
-          createdById: "user-zip"
+          createdById: "user-slip"
         }),
         update: jest.fn().mockResolvedValue(undefined)
-      },
-      fileObject: {
-        create: jest.fn()
-      },
-      notificationEvent: {
-        create: jest.fn()
       }
     } as any;
 
     await processLatexCompileJob(
       prisma,
-      { data: { documentVersionId: "version-zip-slip", compileJobId: "job-zip-slip" } } as any
+      { data: { documentVersionId: "version-slip", compileJobId: "job-slip" } } as any
     );
 
-    expect(spawnImpl).not.toHaveBeenCalled();
     expect(prisma.documentVersion.update).toHaveBeenCalledWith({
-      where: { id: "version-zip-slip" },
+      where: { id: "version-slip" },
       data: {
         compileStatus: CompileStatus.FAILED,
-        compileLog: "Invalid ZIP entry path"
+        compileLog: "Invalid ZIP entry path",
+        compiledPdfFileId: undefined
       }
     });
     expect(prisma.documentCompileJob.update).toHaveBeenLastCalledWith({
-      where: { id: "job-zip-slip" },
+      where: { id: "job-slip" },
       data: {
         status: CompileStatus.FAILED,
         finishedAt: expect.any(Date),
         errorMessage: "Invalid ZIP entry path"
       }
     });
-    expect(prisma.fileObject.create).not.toHaveBeenCalled();
-    expect(prisma.notificationEvent.create).not.toHaveBeenCalled();
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid LaTeX entry files before spawning compiler commands", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-latex-entry-"));
+    const workspacePath = "latex-workspaces/version-entry";
+    await mkdir(join(storageRoot, workspacePath), { recursive: true });
+
+    const spawnImpl = jest.fn();
+    const { processLatexCompileJob } = await loadJob({ storageRoot, spawnImpl });
+
+    for (const latexEntryFile of ["../escape.tex", "main.txt", "-output/main.tex"]) {
+      const prisma = {
+        documentCompileJob: {
+          update: jest.fn().mockResolvedValue(undefined)
+        },
+        documentVersion: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: "version-entry",
+            latexBundleFile: null,
+            latexWorkspacePath: workspacePath,
+            latexEntryFile,
+            createdById: "user-entry"
+          }),
+          update: jest.fn().mockResolvedValue(undefined)
+        }
+      } as any;
+
+      const expectedMessage = "Invalid LaTeX entry file";
+
+      await processLatexCompileJob(
+        prisma,
+        { data: { documentVersionId: "version-entry", compileJobId: `job-entry-${latexEntryFile}` } } as any
+      );
+
+      expect(prisma.documentVersion.update).toHaveBeenCalledWith({
+        where: { id: "version-entry" },
+        data: {
+          compileStatus: CompileStatus.FAILED,
+          compileLog: expectedMessage,
+          compiledPdfFileId: undefined
+        }
+      });
+      expect(prisma.documentCompileJob.update).toHaveBeenLastCalledWith({
+        where: { id: `job-entry-${latexEntryFile}` },
+        data: {
+          status: CompileStatus.FAILED,
+          finishedAt: expect.any(Date),
+          errorMessage: expectedMessage
+        }
+      });
+    }
+
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects persisted workspaces that contain symlinks before compilation", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-latex-symlink-"));
+    const workspacePath = "latex-workspaces/version-symlink";
+    const workspaceAbsolute = join(storageRoot, workspacePath);
+    await mkdir(workspaceAbsolute, { recursive: true });
+    await writeFile(join(workspaceAbsolute, "main.tex"), "\\documentclass{article}", "utf8");
+    await symlink(join(workspaceAbsolute, "main.tex"), join(workspaceAbsolute, "linked-main.tex"));
+
+    const spawnImpl = jest.fn();
+    const { processLatexCompileJob } = await loadJob({ storageRoot, spawnImpl });
+    const prisma = {
+      documentCompileJob: {
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      documentVersion: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "version-symlink",
+          latexBundleFile: null,
+          latexWorkspacePath: workspacePath,
+          latexEntryFile: "main.tex",
+          createdById: "user-symlink"
+        }),
+        update: jest.fn().mockResolvedValue(undefined)
+      }
+    } as any;
+
+    await processLatexCompileJob(
+      prisma,
+      { data: { documentVersionId: "version-symlink", compileJobId: "job-symlink" } } as any
+    );
+
+    expect(prisma.documentVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-symlink" },
+      data: {
+        compileStatus: CompileStatus.FAILED,
+        compileLog: "LaTeX workspace cannot contain symlinks",
+        compiledPdfFileId: undefined
+      }
+    });
+    expect(prisma.documentCompileJob.update).toHaveBeenLastCalledWith({
+      where: { id: "job-symlink" },
+      data: {
+        status: CompileStatus.FAILED,
+        finishedAt: expect.any(Date),
+        errorMessage: "LaTeX workspace cannot contain symlinks"
+      }
+    });
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it("uses the generic failure message when workspace preparation throws a non-error value", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-latex-non-error-"));
+    const workspacePath = "latex-workspaces/version-non-error";
+    const workspaceAbsolute = join(storageRoot, workspacePath);
+    await mkdir(workspaceAbsolute, { recursive: true });
+    await writeFile(join(workspaceAbsolute, "main.tex"), "\\documentclass{article}", "utf8");
+
+    const spawnImpl = jest.fn();
+    const { processLatexCompileJob } = await loadJob({
+      storageRoot,
+      spawnImpl,
+      readdirOverride: () =>
+        ((() => Promise.reject("non-error failure")) as unknown as typeof import("fs/promises").readdir)
+    });
+    const prisma = {
+      documentCompileJob: {
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      documentVersion: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "version-non-error",
+          latexBundleFile: null,
+          latexWorkspacePath: workspacePath,
+          latexEntryFile: "main.tex",
+          createdById: "user-non-error"
+        }),
+        update: jest.fn().mockResolvedValue(undefined)
+      }
+    } as any;
+
+    await processLatexCompileJob(
+      prisma,
+      { data: { documentVersionId: "version-non-error", compileJobId: "job-non-error" } } as any
+    );
+
+    expect(prisma.documentVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-non-error" },
+      data: {
+        compileStatus: CompileStatus.FAILED,
+        compileLog: "LaTeX compilation failed",
+        compiledPdfFileId: undefined
+      }
+    });
+    expect(prisma.documentCompileJob.update).toHaveBeenLastCalledWith({
+      where: { id: "job-non-error" },
+      data: {
+        status: CompileStatus.FAILED,
+        finishedAt: expect.any(Date),
+        errorMessage: "LaTeX compilation failed"
+      }
+    });
+    expect(spawnImpl).not.toHaveBeenCalled();
   });
 
   it("fails before compilation when a persisted LaTeX entry file is option-like", async () => {
@@ -761,11 +1053,10 @@ describe("processLatexCompileJob", () => {
       { data: { documentVersionId: "version-biber", compileJobId: "job-biber" } } as any
     );
 
-    expect(spawnImpl).toHaveBeenCalledWith(
-      "biber",
-      ["main"],
-      expect.objectContaining({ cwd: workspaceAbsolute })
-    );
+    const biberCall = (spawnImpl.mock.calls as unknown as Array<[string, string[], { cwd: string }]>).find(([command]) => command === "biber");
+    expect(biberCall).toBeDefined();
+    expect(biberCall![1]).toEqual(["main"]);
+    expectScratchCwd((biberCall![2] as { cwd: string }).cwd, storageRoot);
     expect(prisma.documentVersion.update).toHaveBeenCalledWith({
       where: { id: "version-biber" },
       data: {
@@ -823,11 +1114,10 @@ describe("processLatexCompileJob", () => {
       { data: { documentVersionId: "version-bibtex", compileJobId: "job-bibtex" } } as any
     );
 
-    expect(spawnImpl).toHaveBeenCalledWith(
-      "bibtex",
-      ["main"],
-      expect.objectContaining({ cwd: workspaceAbsolute })
-    );
+    const bibtexCall = (spawnImpl.mock.calls as unknown as Array<[string, string[], { cwd: string }]>).find(([command]) => command === "bibtex");
+    expect(bibtexCall).toBeDefined();
+    expect(bibtexCall![1]).toEqual(["main"]);
+    expectScratchCwd((bibtexCall![2] as { cwd: string }).cwd, storageRoot);
     expect(prisma.documentVersion.update).toHaveBeenCalledWith({
       where: { id: "version-bibtex" },
       data: {
