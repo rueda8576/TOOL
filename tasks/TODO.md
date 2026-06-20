@@ -6,8 +6,10 @@
 - [x] Replace the worker runtime `texlive-full` install with the narrower LaTeX package set required for `pdflatex`, `biber`, and `bibtex`.
 - [x] Verify worker Docker build, runtime binary smokes, minimal PDF compile, diff hygiene, and image-size reduction.
 - [x] Add transitional deploy retention gates: allow pre-pull deploy with 6GB free, then enforce 12GB after successful healthcheck and final cleanup.
-- [ ] Open fix-forward PR #18, request exact-SHA agent review, wait required CI, merge only with `--squash --match-head-commit`.
-- [ ] Wait `main` CI and `Deploy Atlasium` for the #18 squash SHA before resuming PR stack #3-#15.
+- [x] Open fix-forward PR #18, request exact-SHA agent review, wait required CI, merge only with `--squash --match-head-commit`.
+- [x] Wait `main` CI for the #18 squash SHA and confirm `Deploy Atlasium` reached the VPS and deployed the new containers.
+- [x] Stop the train again because #18 deploy failed in final retention: `df -h` reported `12G` free, but the script required 12 GiB.
+- [ ] Open fix-forward PR #19 to align retention `GB` thresholds with decimal gigabytes, then wait CI and deploy before resuming PR stack #3-#15.
 
 ## Git Access Persistent HTTPS Credentials (2026-06-07)
 - [x] Register the approved implementation plan before edits.

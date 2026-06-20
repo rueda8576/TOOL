@@ -126,7 +126,7 @@ available_kb() {
 }
 
 required_kb() {
-  awk "BEGIN { print int(${MIN_FREE_GB} * 1024 * 1024) }"
+  awk "BEGIN { print int((${MIN_FREE_GB} * 1000 * 1000 * 1000 + 1023) / 1024) }"
 }
 
 human_available() {
