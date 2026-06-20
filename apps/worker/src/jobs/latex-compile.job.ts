@@ -9,6 +9,8 @@ import AdmZip from "adm-zip";
 import type { Job } from "bullmq";
 
 import { getEnv } from "../config/env";
+import { extractZipSafely } from "../utils/safe-zip";
+import { normalizeContainedRelativePath, resolveContainedPath } from "../utils/path-confinement";
 
 const env = getEnv();
 
@@ -19,6 +21,17 @@ const fileExists = async (targetPath: string): Promise<boolean> => {
   } catch {
     return false;
   }
+};
+
+const normalizeLatexEntryFile = (entryFile: string): string => {
+  const normalized = normalizeContainedRelativePath(entryFile, "Invalid LaTeX entry file");
+  if (!normalized.toLowerCase().endsWith(".tex")) {
+    throw new Error("Invalid LaTeX entry file");
+  }
+  if (normalized.split("/").some((segment) => segment.startsWith("-"))) {
+    throw new Error("Invalid LaTeX entry file");
+  }
+  return normalized;
 };
 
 const runCommand = async (params: {
@@ -80,9 +93,9 @@ const runCommand = async (params: {
 };
 
 const compileLatex = async (workingDir: string, entryFile: string): Promise<{ status: CompileStatus; log: string; pdfPath?: string }> => {
-  const sanitizedEntry = entryFile.replace(/\\/g, "/").replace(/\.\./g, "").replace(/^\/+/, "");
-  const outputPdf = sanitizedEntry.replace(/\.tex$/i, ".pdf");
-  const jobBase = sanitizedEntry.replace(/\.tex$/i, "");
+  const normalizedEntry = normalizeLatexEntryFile(entryFile);
+  const outputPdf = normalizedEntry.replace(/\.tex$/i, ".pdf");
+  const jobBase = normalizedEntry.replace(/\.tex$/i, "");
   const auxPath = join(workingDir, `${jobBase}.aux`);
   const bcfPath = join(workingDir, `${jobBase}.bcf`);
   const pdfPath = join(workingDir, outputPdf);
@@ -90,7 +103,7 @@ const compileLatex = async (workingDir: string, entryFile: string): Promise<{ st
     "-interaction=nonstopmode",
     "-halt-on-error",
     "-file-line-error",
-    sanitizedEntry
+    normalizedEntry
   ];
 
   let combinedLog = "";
@@ -245,20 +258,43 @@ export const processLatexCompileJob = async (
   }
 
   let workDir: string;
-  if (version.latexWorkspacePath) {
-    workDir = resolve(env.STORAGE_ROOT, version.latexWorkspacePath);
-    await mkdir(workDir, { recursive: true });
-  } else {
-    workDir = resolve(tmpdir(), `latex-${documentVersionId}-${randomUUID()}`);
-    await mkdir(workDir, { recursive: true });
+  let entryFile: string;
+  try {
+    entryFile = normalizeLatexEntryFile(version.latexEntryFile ?? "main.tex");
 
-    const zipPath = join(env.STORAGE_ROOT, version.latexBundleFile!.storagePath);
-    const zipBuffer = await readFile(zipPath);
-    const zip = new AdmZip(zipBuffer);
-    zip.extractAllTo(workDir, true);
+    if (version.latexWorkspacePath) {
+      workDir = resolveContainedPath(env.STORAGE_ROOT, version.latexWorkspacePath, "Invalid workspace path");
+      await mkdir(workDir, { recursive: true });
+    } else {
+      workDir = resolve(tmpdir(), `latex-${documentVersionId}-${randomUUID()}`);
+      await mkdir(workDir, { recursive: true });
+
+      const zipPath = resolveContainedPath(env.STORAGE_ROOT, version.latexBundleFile!.storagePath, "Invalid latex bundle path");
+      const zipBuffer = await readFile(zipPath);
+      const zip = new AdmZip(zipBuffer);
+      await extractZipSafely(zip, workDir);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to prepare LaTeX workspace";
+    await prisma.documentVersion.update({
+      where: { id: version.id },
+      data: {
+        compileStatus: CompileStatus.FAILED,
+        compileLog: message
+      }
+    });
+    await prisma.documentCompileJob.update({
+      where: { id: compileJobId },
+      data: {
+        status: CompileStatus.FAILED,
+        finishedAt: new Date(),
+        errorMessage: message
+      }
+    });
+    return;
   }
 
-  const compileResult = await compileLatex(workDir, version.latexEntryFile ?? "main.tex");
+  const compileResult = await compileLatex(workDir, entryFile);
   const activeVersionAfterCompile = await loadActiveVersion();
 
   if (!activeVersionAfterCompile) {
@@ -276,9 +312,12 @@ export const processLatexCompileJob = async (
   let compiledPdfFileId: string | null = null;
   if (compileResult.status === CompileStatus.SUCCEEDED && compileResult.pdfPath) {
     const pdfBuffer = await readFile(compileResult.pdfPath);
-    const relativePath = `compiled/${new Date().toISOString().slice(0, 10)}/${randomUUID()}-${activeVersionAfterCompile.id}.pdf`;
-    await mkdir(join(env.STORAGE_ROOT, "compiled", new Date().toISOString().slice(0, 10)), { recursive: true });
-    await writeFile(join(env.STORAGE_ROOT, relativePath), pdfBuffer);
+    const compileDate = new Date().toISOString().slice(0, 10);
+    const relativePath = `compiled/${compileDate}/${randomUUID()}-${activeVersionAfterCompile.id}.pdf`;
+    const outputDirectory = resolveContainedPath(env.STORAGE_ROOT, `compiled/${compileDate}`, "Invalid compiled output path");
+    const outputPath = resolveContainedPath(env.STORAGE_ROOT, relativePath, "Invalid compiled output path");
+    await mkdir(outputDirectory, { recursive: true });
+    await writeFile(outputPath, pdfBuffer);
 
     const fileObject = await prisma.fileObject.create({
       data: {

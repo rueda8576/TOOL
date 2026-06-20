@@ -3212,6 +3212,28 @@ describe("WikiService", () => {
     expect(storageService.saveUpload).not.toHaveBeenCalled();
   });
 
+  it("rejects SVG wiki assets until sanitization exists", async () => {
+    const { service, storageService } = makeService();
+
+    await expect(
+      service.uploadWikiAsset(
+        "project-1",
+        {
+          mimetype: ["image/svg", "xml"].join("+"),
+          size: 128,
+          originalname: "diagram.svg"
+        } as Express.Multer.File,
+        {
+          userId: "user-1",
+          email: "user-1@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(storageService.saveUpload).not.toHaveBeenCalled();
+  });
+
   it("rejects missing and oversized wiki uploads", async () => {
     const { service, storageService } = makeService();
 

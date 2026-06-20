@@ -82,23 +82,23 @@ type RoomConnectionContext = {
 type RoomQuery =
   | {
       kind: "presence";
-      token: string;
+      token?: string;
       documentId: string;
     }
   | {
       kind: "file";
-      token: string;
+      token?: string;
       documentVersionId: string;
       path: string;
     }
   | {
       kind: "wiki-presence";
-      token: string;
+      token?: string;
       wikiPageId: string;
     }
   | {
       kind: "wiki-page";
-      token: string;
+      token?: string;
       wikiPageId: string;
     };
 
@@ -112,9 +112,28 @@ const WIKI_YDOC_TITLE_KEY = "title";
 const WIKI_YDOC_CONTENT_KEY = "content";
 const INITIAL_LOAD_ORIGIN = Symbol("initial-load");
 
+function normalizeOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function allowedCollaborationOrigins(): Set<string> {
+  const env = getEnv();
+  const origins = [
+    env.APP_BASE_URL,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+  ];
+
+  return new Set(origins.map((origin) => normalizeOrigin(origin)).filter((origin): origin is string => Boolean(origin)));
+}
+
 function normalizeLatexPath(filePath: string): string {
   const normalized = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
-  if (!normalized || normalized.includes("..")) {
+  if (!normalized || normalized.split("/").some((segment) => segment === ".." || segment.startsWith("-"))) {
     throw new ForbiddenException("Invalid LaTeX file path");
   }
   return normalized;
@@ -150,10 +169,6 @@ function parseRoomQuery(request: IncomingMessage): RoomQuery {
   }
 
   const token = parsedUrl.searchParams.get("token")?.trim();
-  if (!token) {
-    throw new UnauthorizedException("Missing collaboration token");
-  }
-
   const kind = parsedUrl.searchParams.get("kind")?.trim();
   if (kind === "presence") {
     const documentId = parsedUrl.searchParams.get("documentId")?.trim();
@@ -183,6 +198,21 @@ function parseRoomQuery(request: IncomingMessage): RoomQuery {
   throw new ForbiddenException("Unsupported collaboration room kind");
 }
 
+function readCookie(cookieHeader: string | undefined, name: string): string | null {
+  if (!cookieHeader) {
+    return null;
+  }
+
+  for (const cookiePart of cookieHeader.split(";")) {
+    const [rawName, ...rawValue] = cookiePart.trim().split("=");
+    if (rawName === name) {
+      return decodeURIComponent(rawValue.join("="));
+    }
+  }
+
+  return null;
+}
+
 export class DocumentsCollaborationServer {
   private readonly logger = new Logger(DocumentsCollaborationServer.name);
   private readonly wsServer = new WebSocketServer({
@@ -207,6 +237,12 @@ export class DocumentsCollaborationServer {
         return;
       }
 
+      if (!this.isAllowedUpgradeOrigin(request)) {
+        socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+
       this.wsServer.handleUpgrade(request, socket, head, (socketConnection) => {
         this.wsServer.emit("connection", socketConnection, request);
       });
@@ -217,12 +253,25 @@ export class DocumentsCollaborationServer {
     });
   }
 
+  private isAllowedUpgradeOrigin(request: IncomingMessage): boolean {
+    const originHeader = request.headers.origin;
+    if (!originHeader) {
+      return true;
+    }
+    if (Array.isArray(originHeader)) {
+      return false;
+    }
+
+    const origin = normalizeOrigin(originHeader);
+    return Boolean(origin && allowedCollaborationOrigins().has(origin));
+  }
+
   private async handleConnection(connection: WebSocket, request: IncomingMessage): Promise<void> {
     let roomContext: RoomConnectionContext | null = null;
 
     try {
       const query = parseRoomQuery(request);
-      const user = await this.authenticate(query.token);
+      const user = await this.authenticate(request, query.token);
       roomContext = await this.joinRoom(query, user, connection);
       this.sendInitialSync(roomContext.room, connection);
 
@@ -247,7 +296,14 @@ export class DocumentsCollaborationServer {
     }
   }
 
-  private async authenticate(token: string): Promise<AuthenticatedCollabUser> {
+  private async authenticate(request: IncomingMessage, queryToken?: string): Promise<AuthenticatedCollabUser> {
+    const env = getEnv();
+    const cookieToken = readCookie(request.headers.cookie, env.ATLASIUM_SESSION_COOKIE_NAME);
+    const token = cookieToken ?? (env.COLLAB_ALLOW_QUERY_TOKEN ? queryToken : undefined);
+    if (!token) {
+      throw new UnauthorizedException("Missing collaboration token");
+    }
+
     return this.sessionAuthService.authenticateToken(token, {
       invalidToken: "Invalid collaboration token",
       expiredSession: "Session expired"

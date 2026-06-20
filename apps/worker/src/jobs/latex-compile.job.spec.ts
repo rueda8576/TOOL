@@ -443,6 +443,277 @@ describe("processLatexCompileJob", () => {
     });
   });
 
+  it("fails a bundled workspace before compilation when ZIP entries escape the work directory", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-latex-zip-slip-"));
+    const bundlePath = join(storageRoot, "uploads", "bundle.zip");
+    await mkdir(join(storageRoot, "uploads"), { recursive: true });
+
+    const AdmZip = (await import("adm-zip")).default;
+    const zip = new AdmZip();
+    zip.addFile("C:/escape.tex", Buffer.from("escape", "utf8"));
+    await writeFile(bundlePath, zip.toBuffer());
+
+    const spawnImpl = jest.fn();
+    const { processLatexCompileJob } = await loadJob({ storageRoot, spawnImpl });
+    const prisma = {
+      documentCompileJob: {
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      documentVersion: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "version-zip-slip",
+          latexBundleFile: { storagePath: "uploads/bundle.zip" },
+          latexWorkspacePath: null,
+          latexEntryFile: "main.tex",
+          createdById: "user-zip"
+        }),
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      fileObject: {
+        create: jest.fn()
+      },
+      notificationEvent: {
+        create: jest.fn()
+      }
+    } as any;
+
+    await processLatexCompileJob(
+      prisma,
+      { data: { documentVersionId: "version-zip-slip", compileJobId: "job-zip-slip" } } as any
+    );
+
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(prisma.documentVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-zip-slip" },
+      data: {
+        compileStatus: CompileStatus.FAILED,
+        compileLog: "Invalid ZIP entry path"
+      }
+    });
+    expect(prisma.documentCompileJob.update).toHaveBeenLastCalledWith({
+      where: { id: "job-zip-slip" },
+      data: {
+        status: CompileStatus.FAILED,
+        finishedAt: expect.any(Date),
+        errorMessage: "Invalid ZIP entry path"
+      }
+    });
+    expect(prisma.fileObject.create).not.toHaveBeenCalled();
+    expect(prisma.notificationEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("fails before compilation when a persisted LaTeX entry file is option-like", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-latex-invalid-entry-"));
+    const workspacePath = "latex-workspaces/version-invalid-entry";
+    await mkdir(join(storageRoot, workspacePath), { recursive: true });
+
+    const spawnImpl = jest.fn();
+    const { processLatexCompileJob } = await loadJob({ storageRoot, spawnImpl });
+    const prisma = {
+      documentCompileJob: {
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      documentVersion: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "version-invalid-entry",
+          latexBundleFile: null,
+          latexWorkspacePath: workspacePath,
+          latexEntryFile: "-output-directory=escape.tex",
+          createdById: "user-invalid-entry"
+        }),
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      fileObject: {
+        create: jest.fn()
+      },
+      notificationEvent: {
+        create: jest.fn()
+      }
+    } as any;
+
+    await processLatexCompileJob(
+      prisma,
+      { data: { documentVersionId: "version-invalid-entry", compileJobId: "job-invalid-entry" } } as any
+    );
+
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(prisma.documentVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-invalid-entry" },
+      data: {
+        compileStatus: CompileStatus.FAILED,
+        compileLog: "Invalid LaTeX entry file"
+      }
+    });
+    expect(prisma.documentCompileJob.update).toHaveBeenLastCalledWith({
+      where: { id: "job-invalid-entry" },
+      data: {
+        status: CompileStatus.FAILED,
+        finishedAt: expect.any(Date),
+        errorMessage: "Invalid LaTeX entry file"
+      }
+    });
+    expect(prisma.fileObject.create).not.toHaveBeenCalled();
+    expect(prisma.notificationEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("fails before compilation when a persisted LaTeX entry file is not a tex file", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-latex-invalid-entry-ext-"));
+    const workspacePath = "latex-workspaces/version-invalid-entry-ext";
+    await mkdir(join(storageRoot, workspacePath), { recursive: true });
+
+    const spawnImpl = jest.fn();
+    const { processLatexCompileJob } = await loadJob({ storageRoot, spawnImpl });
+    const prisma = {
+      documentCompileJob: {
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      documentVersion: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "version-invalid-entry-ext",
+          latexBundleFile: null,
+          latexWorkspacePath: workspacePath,
+          latexEntryFile: "main.pdf",
+          createdById: "user-invalid-entry-ext"
+        }),
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      fileObject: {
+        create: jest.fn()
+      },
+      notificationEvent: {
+        create: jest.fn()
+      }
+    } as any;
+
+    await processLatexCompileJob(
+      prisma,
+      { data: { documentVersionId: "version-invalid-entry-ext", compileJobId: "job-invalid-entry-ext" } } as any
+    );
+
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(prisma.documentVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-invalid-entry-ext" },
+      data: {
+        compileStatus: CompileStatus.FAILED,
+        compileLog: "Invalid LaTeX entry file"
+      }
+    });
+    expect(prisma.documentCompileJob.update).toHaveBeenLastCalledWith({
+      where: { id: "job-invalid-entry-ext" },
+      data: {
+        status: CompileStatus.FAILED,
+        finishedAt: expect.any(Date),
+        errorMessage: "Invalid LaTeX entry file"
+      }
+    });
+    expect(prisma.fileObject.create).not.toHaveBeenCalled();
+    expect(prisma.notificationEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("fails before compilation when a persisted workspace path escapes storage root", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-latex-invalid-workspace-"));
+
+    const spawnImpl = jest.fn();
+    const { processLatexCompileJob } = await loadJob({ storageRoot, spawnImpl });
+    const prisma = {
+      documentCompileJob: {
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      documentVersion: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "version-invalid-workspace",
+          latexBundleFile: null,
+          latexWorkspacePath: "../outside-workspace",
+          latexEntryFile: "main.tex",
+          createdById: "user-invalid-workspace"
+        }),
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      fileObject: {
+        create: jest.fn()
+      },
+      notificationEvent: {
+        create: jest.fn()
+      }
+    } as any;
+
+    await processLatexCompileJob(
+      prisma,
+      { data: { documentVersionId: "version-invalid-workspace", compileJobId: "job-invalid-workspace" } } as any
+    );
+
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(prisma.documentVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-invalid-workspace" },
+      data: {
+        compileStatus: CompileStatus.FAILED,
+        compileLog: "Invalid workspace path"
+      }
+    });
+    expect(prisma.documentCompileJob.update).toHaveBeenLastCalledWith({
+      where: { id: "job-invalid-workspace" },
+      data: {
+        status: CompileStatus.FAILED,
+        finishedAt: expect.any(Date),
+        errorMessage: "Invalid workspace path"
+      }
+    });
+    expect(prisma.fileObject.create).not.toHaveBeenCalled();
+    expect(prisma.notificationEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("fails before ZIP extraction when a persisted bundle path escapes storage root", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-latex-invalid-bundle-"));
+
+    const spawnImpl = jest.fn();
+    const { processLatexCompileJob } = await loadJob({ storageRoot, spawnImpl });
+    const prisma = {
+      documentCompileJob: {
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      documentVersion: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: "version-invalid-bundle",
+          latexBundleFile: { storagePath: "../bundle.zip" },
+          latexWorkspacePath: null,
+          latexEntryFile: "main.tex",
+          createdById: "user-invalid-bundle"
+        }),
+        update: jest.fn().mockResolvedValue(undefined)
+      },
+      fileObject: {
+        create: jest.fn()
+      },
+      notificationEvent: {
+        create: jest.fn()
+      }
+    } as any;
+
+    await processLatexCompileJob(
+      prisma,
+      { data: { documentVersionId: "version-invalid-bundle", compileJobId: "job-invalid-bundle" } } as any
+    );
+
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(prisma.documentVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-invalid-bundle" },
+      data: {
+        compileStatus: CompileStatus.FAILED,
+        compileLog: "Invalid latex bundle path"
+      }
+    });
+    expect(prisma.documentCompileJob.update).toHaveBeenLastCalledWith({
+      where: { id: "job-invalid-bundle" },
+      data: {
+        status: CompileStatus.FAILED,
+        finishedAt: expect.any(Date),
+        errorMessage: "Invalid latex bundle path"
+      }
+    });
+    expect(prisma.fileObject.create).not.toHaveBeenCalled();
+    expect(prisma.notificationEvent.create).not.toHaveBeenCalled();
+  });
+
   it("fails with the biber result when bibliography processing via .bcf does not succeed", async () => {
     const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-latex-biber-"));
     const workspacePath = "latex-workspaces/version-biber";

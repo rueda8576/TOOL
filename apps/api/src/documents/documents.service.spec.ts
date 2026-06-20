@@ -436,6 +436,9 @@ describe("DocumentsService", () => {
     expect((service as any).normalizeLatexPath("\\chapters\\intro.tex")).toBe("chapters/intro.tex");
     expect(() => (service as any).normalizeLatexPath("")).toThrow(BadRequestException);
     expect(() => (service as any).normalizeLatexPath("../outside.tex")).toThrow(BadRequestException);
+    expect(() => (service as any).normalizeLatexPath("-output-directory/main.tex")).toThrow(BadRequestException);
+    expect((service as any).normalizeLatexEntryFile("chapters/intro.tex")).toBe("chapters/intro.tex");
+    expect(() => (service as any).normalizeLatexEntryFile("main.pdf")).toThrow(BadRequestException);
     expect(() => (service as any).workspaceAbsolutePath("../outside")).toThrow(BadRequestException);
     expect((service as any).parseLatexPaths(undefined)).toBeNull();
     expect(() => (service as any).parseLatexPaths("{")).toThrow(BadRequestException);
@@ -443,6 +446,84 @@ describe("DocumentsService", () => {
     expect(() => (service as any).parseLatexPaths(JSON.stringify(["main.tex", 3]))).toThrow(BadRequestException);
     expect(() => (service as any).validateLatexFolderPaths(["main.tex", "main.tex"])).toThrow(BadRequestException);
     expect(() => (service as any).validateLatexFolderPaths(["../escape.tex"])).toThrow(BadRequestException);
+  });
+
+  it("rejects ZIP bundles that try to escape the LaTeX workspace", async () => {
+    const { service, storageService } = createService();
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-docs-zip-"));
+    (service as any).storageRoot = storageRoot;
+
+    const AdmZip = (await import("adm-zip")).default;
+    const zip = new AdmZip();
+    zip.addFile("C:/escape.tex", Buffer.from("escape"));
+    storageService.readObject.mockResolvedValue(zip.toBuffer());
+
+    await expect(
+      (service as any).materializeLatexWorkspace({
+        documentVersionId: "version-1",
+        latexBundleStoragePath: "uploads/bundle.zip"
+      })
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rolls back version creation when an uploaded ZIP bundle cannot be materialized", async () => {
+    const { service, prisma, storageService, auditService } = createService();
+    const storageRoot = await mkdtemp(join(tmpdir(), "atlasium-docs-version-zip-"));
+    (service as any).storageRoot = storageRoot;
+
+    const AdmZip = (await import("adm-zip")).default;
+    const zip = new AdmZip();
+    zip.addFile("C:/escape.tex", Buffer.from("escape"));
+    storageService.saveUpload.mockResolvedValue({
+      id: "bundle-file",
+      storagePath: "uploads/bundle.zip"
+    });
+    storageService.readObject.mockResolvedValue(zip.toBuffer());
+
+    const txDocumentVersion = {
+      ...prisma.documentVersion,
+      create: jest.fn().mockResolvedValue({
+        id: "v-bad-zip",
+        documentId: "d1",
+        branchId: "b1",
+        versionNumber: 2,
+        compileStatus: CompileStatus.PENDING
+      }),
+      update: jest.fn()
+    };
+    prisma.$transaction.mockImplementationOnce(async (callback: (tx: any) => Promise<unknown>) =>
+      callback({
+        ...prisma,
+        documentVersion: txDocumentVersion
+      })
+    );
+
+    await expect(
+      service.createVersion(
+        "d1",
+        {},
+        {
+          latexBundle: [{ path: "/tmp/archive.zip" } as Express.Multer.File]
+        },
+        {
+          userId: "u1",
+          email: "u1@example.com",
+          globalRole: "editor"
+        }
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(txDocumentVersion.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          latexBundleFileId: "bundle-file",
+          compileStatus: CompileStatus.PENDING
+        })
+      })
+    );
+    expect(txDocumentVersion.update).not.toHaveBeenCalled();
+    expect(prisma.documentVersion.create).not.toHaveBeenCalled();
+    expect(auditService.log).not.toHaveBeenCalled();
   });
 
   it("rejects invalid createVersion source combinations before any upload persistence", async () => {

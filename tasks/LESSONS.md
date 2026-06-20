@@ -166,6 +166,7 @@
 ## Realtime collaboration resilience
 - In browser code, never call `new URL()` with potentially relative API bases (`/api`) unless you pass `window.location.origin` as the base; otherwise client render can crash with `TypeError: Invalid URL`.
 - Collaboration features must degrade safely: if realtime URL resolution or websocket setup fails, keep local editor/file loading/save/compile paths operational and surface a non-blocking status message.
+- HTTP CORS settings do not protect WebSocket upgrades. When collaboration sockets authenticate with cookies, validate the browser `Origin` before `handleUpgrade` and reject non-Atlasium origins before any room/auth side effects.
 
 ## Docker disk diagnostics
 - When diagnosing Docker disk pressure on a VPS, do not rely on `df --total` because overlay mounts inflate the apparent total usage; inspect `docker info` for `Docker Root Dir` and use `docker system df -v` to identify reclaimable images and build cache before proposing storage expansion.
@@ -218,6 +219,7 @@
 - For Nest HTTP/controller tests that should exercise real auth/role wiring, keep the real `JwtAuthGuard` and `RolesGuard` in the module and mock `SessionAuthService.authenticateToken`; replacing the guard itself hides route metadata and role regressions.
 - If Prisma migration history does not contain an initial baseline, backend integration CI on a fresh Postgres DB must bootstrap schema (`db push` + `migrate resolve`) before `migrate deploy`; otherwise e2e validation fails before the app even boots.
 - When unit-testing worker jobs in a Prisma process, mock `child_process` partially with `jest.requireActual(...)` and override only `spawn`; replacing the whole module can break unrelated runtime imports that expect other `child_process` exports.
+- Worker jobs must revalidate persisted database paths before filesystem or compiler access. API-side DTO validation is not enough for stale/imported/corrupted records; use path-confinement helpers at the worker boundary too.
 - When session JWTs are persisted via a unique `tokenHash`, include a per-session nonce such as `jti` in the signed payload; otherwise two logins within the same second can generate identical tokens and violate the unique constraint.
 - Do not enable a global coverage threshold from a unit-only baseline. First measure merged unit + HTTP + integration coverage against the exact final include/exclude scope, then wire the gate only once the real aggregate numbers clear the target.
 - If aggregated Jest coverage includes websocket/Yjs-heavy suites that leave open handles, make the coverage runner use `--forceExit` rather than letting CI hang after a green test pass. Fix cleanup where possible, but keep the pipeline deterministic.

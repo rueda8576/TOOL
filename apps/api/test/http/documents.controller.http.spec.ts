@@ -212,7 +212,7 @@ describe("DocumentsController HTTP", () => {
       status: "PENDING"
     });
     documentsService.getPdfBytes.mockResolvedValue({
-      fileName: "roadmap.pdf",
+      fileName: "roadmap\r\n\"draft\".pdf",
       buffer: Buffer.from("%PDF-1.4")
     });
 
@@ -244,7 +244,9 @@ describe("DocumentsController HTTP", () => {
     );
     expect(compileResponse.body.compileJobId).toBe("compile-1");
     expect(pdfResponse.headers["content-type"]).toContain("application/pdf");
-    expect(pdfResponse.headers["content-disposition"]).toBe("inline; filename=\"roadmap.pdf\"");
+    expect(pdfResponse.headers["cache-control"]).toBe("private, no-store");
+    expect(pdfResponse.headers["x-content-type-options"]).toBe("nosniff");
+    expect(pdfResponse.headers["content-disposition"]).toBe('inline; filename="roadmap___draft_.pdf"');
   });
 
   it("returns compile logs and LaTeX tree data with bound params", async () => {

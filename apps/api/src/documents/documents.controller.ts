@@ -149,8 +149,11 @@ export class DocumentsController {
     @Res() res: Response
   ): Promise<void> {
     const result = await this.documentsService.getPdfBytes(documentVersionId, user);
+    const fileName = result.fileName.replace(/["\r\n]/g, "_");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename=\"${result.fileName}\"`);
+    res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
     res.send(result.buffer);
   }
 
