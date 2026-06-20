@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { Queue, Worker } from "bullmq";
 
 import { getEnv } from "./config/env";
+import { startWorkerHealthServer } from "./health";
 import { processBackupJob } from "./jobs/backup.job";
 import { processDueReminderJob } from "./jobs/due-reminder.job";
 import { processEmailJob } from "./jobs/email.job";
@@ -20,6 +21,7 @@ const logger = {
 };
 
 const prisma = new PrismaClient();
+const startedAt = new Date();
 const queueConnection = { url: env.REDIS_URL };
 const emailQueue = new Queue("email-notifications", { connection: queueConnection });
 const backupQueue = new Queue("backups", { connection: queueConnection });
@@ -96,8 +98,40 @@ for (const [name, worker] of [
   });
 }
 
+const healthServer = env.WORKER_HEALTH_PORT > 0
+  ? startWorkerHealthServer({
+      prisma,
+      queues: [
+        { name: "email-notifications", queue: emailQueue },
+        { name: "backups", queue: backupQueue },
+        { name: "task-reminders", queue: reminderQueue }
+      ],
+      workers: [
+        { name: "latex-compile", worker: compileWorker },
+        { name: "email-notifications", worker: emailWorker },
+        { name: "backups", worker: backupWorker },
+        { name: "task-reminders", worker: reminderWorker },
+        { name: "ai-meeting", worker: meetingAiWorker }
+      ],
+      startedAt,
+      port: env.WORKER_HEALTH_PORT
+    })
+  : null;
+
+healthServer?.on("listening", () => {
+  logger.log(`Health endpoint listening on port ${env.WORKER_HEALTH_PORT}`);
+});
+healthServer?.on("error", (error: Error) => {
+  logger.error(`Health endpoint failed: ${error.message}`);
+});
+
 const shutdown = async (): Promise<void> => {
   logger.log("Shutting down workers...");
+  if (healthServer) {
+    await new Promise<void>((resolve) => {
+      healthServer.close(() => resolve());
+    });
+  }
   await Promise.all([
     compileWorker.close(),
     emailWorker.close(),

@@ -1,11 +1,12 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { CompileStatus, MeetingActionStatus, Prisma, ProjectRole, TaskPriority, TaskStatus } from "@prisma/client";
+import { BackupStatus, CompileStatus, MeetingActionStatus, Prisma, ProjectRole, TaskPriority, TaskStatus } from "@prisma/client";
 
 import { AuditService } from "../audit/audit.service";
 import { AuthenticatedUser } from "../common/authenticated-user";
 import { ProjectAccessService } from "../common/project-access.service";
 import { GitlabService } from "../gitlab/gitlab.service";
 import { PrismaService } from "../prisma/prisma.service";
+import { QueueService } from "../queues/queue.service";
 import { AddProjectMemberDto } from "./dto/add-project-member.dto";
 import { CreateProjectDto } from "./dto/create-project.dto";
 import { UpdateProjectDto } from "./dto/update-project.dto";
@@ -91,8 +92,37 @@ export type ProjectOverview = {
   activity: ProjectOverviewActivityItem[];
 };
 
+export type BackupOperationLedgerItem = {
+  id: string;
+  status: "running" | "succeeded" | "failed";
+  startedAt: string;
+  completedAt: string | null;
+  retentionUntil: string | null;
+  durationMs: number | null;
+  dbDumpBytes: number | null;
+  storageArchiveBytes: number | null;
+  dbDumpSha256: string | null;
+  storageArchiveSha256: string | null;
+  toolVersions: Record<string, string>;
+  error: string | null;
+};
+
+export type ProjectOperationsLedger = {
+  generatedAt: string;
+  backups: {
+    summary: {
+      total: number;
+      running: number;
+      succeeded: number;
+      failed: number;
+    };
+    runs: BackupOperationLedgerItem[];
+  };
+};
+
 const ATTENTION_LIMIT = 8;
 const ACTIVITY_LIMIT = 10;
+const OPERATIONS_BACKUP_LIMIT = 25;
 const SEVERITY_ORDER: Record<ProjectOverviewSeverity, number> = {
   danger: 0,
   warning: 1,
@@ -132,6 +162,41 @@ function mapCompileStatus(status: CompileStatus | null | undefined): string | nu
     return null;
   }
   return status.toLowerCase();
+}
+
+function mapBackupStatus(status: BackupStatus): BackupOperationLedgerItem["status"] {
+  return status.toLowerCase() as BackupOperationLedgerItem["status"];
+}
+
+function asJsonRecord(value: Prisma.JsonValue | null | undefined): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function jsonNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function jsonString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function nestedJsonRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function jsonStringRecord(value: unknown): Record<string, string> {
+  const record = nestedJsonRecord(value);
+  return Object.fromEntries(
+    Object.entries(record).flatMap(([key, entry]) => (typeof entry === "string" ? [[key, entry]] : []))
+  );
 }
 
 function mapTaskStatus(status: TaskStatus): string {
@@ -224,7 +289,8 @@ export class ProjectsService {
     private readonly prisma: PrismaService,
     private readonly accessService: ProjectAccessService,
     private readonly auditService: AuditService,
-    private readonly gitlabService: GitlabService
+    private readonly gitlabService: GitlabService,
+    private readonly queueService: QueueService
   ) {}
 
   async createProject(dto: CreateProjectDto, user: AuthenticatedUser): Promise<{
@@ -560,6 +626,87 @@ export class ProjectsService {
     canWrite: boolean;
   }> {
     return this.accessService.getProjectAccess(user.userId, user.globalRole, projectId);
+  }
+
+  async listOperations(user: AuthenticatedUser): Promise<ProjectOperationsLedger> {
+    if (user.globalRole !== "admin") {
+      throw new ForbiddenException("Only admins can inspect operations");
+    }
+
+    const [runs, total, running, succeeded, failed] = await Promise.all([
+      this.prisma.backupRun.findMany({
+        orderBy: {
+          startedAt: "desc"
+        },
+        take: OPERATIONS_BACKUP_LIMIT,
+        select: {
+          id: true,
+          status: true,
+          startedAt: true,
+          completedAt: true,
+          retentionUntil: true,
+          details: true
+        }
+      }),
+      this.prisma.backupRun.count(),
+      this.prisma.backupRun.count({ where: { status: BackupStatus.RUNNING } }),
+      this.prisma.backupRun.count({ where: { status: BackupStatus.SUCCEEDED } }),
+      this.prisma.backupRun.count({ where: { status: BackupStatus.FAILED } })
+    ]);
+
+    return {
+      generatedAt: new Date().toISOString(),
+      backups: {
+        summary: {
+          total,
+          running,
+          succeeded,
+          failed
+        },
+        runs: runs.map((run) => {
+          const details = asJsonRecord(run.details);
+          const dbDump = nestedJsonRecord(details.dbDump);
+          const storageArchive = nestedJsonRecord(details.storageArchive);
+
+          return {
+            id: run.id,
+            status: mapBackupStatus(run.status),
+            startedAt: run.startedAt.toISOString(),
+            completedAt: toIso(run.completedAt),
+            retentionUntil: toIso(run.retentionUntil),
+            durationMs: jsonNumber(details.durationMs),
+            dbDumpBytes: jsonNumber(dbDump.bytes),
+            storageArchiveBytes: jsonNumber(storageArchive.bytes),
+            dbDumpSha256: jsonString(dbDump.sha256),
+            storageArchiveSha256: jsonString(storageArchive.sha256),
+            toolVersions: jsonStringRecord(details.versions),
+            error: jsonString(details.error)
+          };
+        })
+      }
+    };
+  }
+
+  async enqueueBackup(user: AuthenticatedUser): Promise<{ jobId: string; queuedAt: string }> {
+    if (user.globalRole !== "admin") {
+      throw new ForbiddenException("Only admins can queue backups");
+    }
+
+    const jobId = await this.queueService.enqueueBackup({
+      requestedBy: user.userId
+    });
+
+    await this.auditService.log({
+      userId: user.userId,
+      entityType: "backup_run",
+      entityId: jobId || "pending",
+      action: "backup.enqueue"
+    });
+
+    return {
+      jobId,
+      queuedAt: new Date().toISOString()
+    };
   }
 
   async getProjectOverview(projectId: string, user: AuthenticatedUser): Promise<ProjectOverview> {

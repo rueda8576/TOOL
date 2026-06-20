@@ -8,7 +8,7 @@ import { AuthenticatedUser } from "../common/authenticated-user";
 import { AddProjectMemberDto } from "./dto/add-project-member.dto";
 import { CreateProjectDto } from "./dto/create-project.dto";
 import { UpdateProjectDto } from "./dto/update-project.dto";
-import { ProjectOverview, ProjectsService } from "./projects.service";
+import { ProjectOperationsLedger, ProjectOverview, ProjectsService } from "./projects.service";
 
 @Controller("projects")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -34,6 +34,18 @@ export class ProjectsController {
     isPinned: boolean;
   }>> {
     return this.projectsService.listProjects(user);
+  }
+
+  @Get("admin/operations")
+  @Roles("admin")
+  listOperations(@CurrentUser() user: AuthenticatedUser): Promise<ProjectOperationsLedger> {
+    return this.projectsService.listOperations(user);
+  }
+
+  @Post("admin/operations/backups")
+  @Roles("admin")
+  enqueueBackup(@CurrentUser() user: AuthenticatedUser): Promise<{ jobId: string; queuedAt: string }> {
+    return this.projectsService.enqueueBackup(user);
   }
 
   @Get(":projectId/access")
