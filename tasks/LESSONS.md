@@ -161,6 +161,7 @@
 - Add deploy preflight validation for critical env vars (at minimum `JWT_SECRET` length) before `docker compose up`; otherwise failures appear later as healthcheck flakiness while API is actually crashing on config parsing.
 - For large runtime images pulled through `appleboy/ssh-action`, set an explicit `command_timeout`; the default `10m` can kill a healthy deploy during `docker compose pull` and layer extraction.
 - Retention/cleanup scripts must not suppress `docker image rm` stderr entirely; surface Docker's real conflict message or deploy diagnostics become misleading.
+- When a deploy script reports thresholds as `GB`, calculate them as decimal gigabytes or label them explicitly as `GiB`. Mixing `df -h` rounded output with hidden binary GiB thresholds can make a successful deploy fail even when logs show the requested `12G` free.
 
 ## Realtime collaboration resilience
 - In browser code, never call `new URL()` with potentially relative API bases (`/api`) unless you pass `window.location.origin` as the base; otherwise client render can crash with `TypeError: Invalid URL`.
