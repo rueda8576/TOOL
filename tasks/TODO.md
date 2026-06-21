@@ -3,10 +3,14 @@
 ## Autonomous Merge Train Final Segment (2026-06-21)
 - [x] Confirm local tree is clean, `main` is green/deployed through PR #12, and PRs #13-#15 remain open in draft.
 - [x] Restack PRs #13-#15 on the current `origin/main` while preserving the stack order.
-- [ ] Mark PR #13 ready, run required checks and exact-SHA agent review, squash merge, then require green `main` CI and `Deploy Atlasium`.
+- [x] Mark PR #13 ready, run required checks and exact-SHA agent review, squash merge, then require green `main` CI and `Deploy Atlasium`.
 - [ ] Restack and repeat the same gated flow for PR #14.
 - [ ] Amend PR #15 with final merge-train documentation, rerun checks and exact-SHA Ops review, squash merge, then require green `main` CI and `Deploy Atlasium`.
 - [ ] Verify the stack is closed, `main` remains protected, and no PRs #13-#15 are left open.
+
+### Review
+- PR #13 merged as squash `cca502fdfac8f719b4bc42785a8c2437dff6e955` after local web QA, GitHub CI, and exact-SHA Atlasium review approved `6d0800698670033e74c175cbb37ced93f88a74d9`.
+- `main` CI run `27903865465` and `Deploy Atlasium` run `27904020328` completed successfully before PR #14 was restacked.
 
 ## PR12 Frontend Helper Extraction Typecheck Blocker (2026-06-21)
 - [x] Stop PR #12 merge after local web typecheck failed on `MIN_DOCUMENT_PANE_WIDTH_PX` missing from Documents detail.
