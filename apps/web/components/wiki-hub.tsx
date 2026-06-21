@@ -11,6 +11,7 @@ import { LoadingState, MetricPill, Modal, ModuleCockpit } from "./ui";
 import { WikiHistory } from "./wiki-history";
 import { WikiImportDraftEntry, WikiImportPanel } from "./wiki-import-panel";
 import { WikiMarkdown } from "./wiki-markdown";
+import { WikiMarkdownToolbar, WikiMarkdownAction, WikiMarkdownTool } from "./wiki-markdown-toolbar";
 import { WikiReader } from "./wiki-reader";
 import { API_BASE_URL, LoginResponse } from "../lib/client-api";
 import {
@@ -114,29 +115,6 @@ type TextTransformResult = {
   nextValue: string;
   nextSelectionStart: number;
   nextSelectionEnd: number;
-};
-
-type WikiMarkdownAction =
-  | "heading1"
-  | "heading2"
-  | "heading3"
-  | "bold"
-  | "italic"
-  | "link"
-  | "inlineCode"
-  | "codeBlock"
-  | "quote"
-  | "bullets"
-  | "numbered"
-  | "checklist"
-  | "horizontalRule"
-  | "indent"
-  | "outdent";
-
-type WikiMarkdownTool = {
-  action: WikiMarkdownAction;
-  label: string;
-  title: string;
 };
 
 type ListMarkerInfo = {
@@ -2526,24 +2504,7 @@ export function WikiHub({
 
   const renderMarkdownToolbar = useCallback(
     (): JSX.Element => (
-      <div className="wiki-markdown-toolbar" role="toolbar" aria-label="Markdown formatting toolbar">
-        {WIKI_MARKDOWN_TOOL_GROUPS.map((group, groupIndex) => (
-          <div className="wiki-markdown-toolbar-group" key={`wiki-markdown-group-${groupIndex}`}>
-            {group.map((tool) => (
-              <button
-                key={tool.action}
-                type="button"
-                className="wiki-markdown-tool"
-                title={tool.title}
-                aria-label={tool.title}
-                onClick={() => applyWikiMarkdownAction(tool.action)}
-              >
-                {tool.label}
-              </button>
-            ))}
-          </div>
-        ))}
-      </div>
+      <WikiMarkdownToolbar toolGroups={WIKI_MARKDOWN_TOOL_GROUPS} onAction={applyWikiMarkdownAction} />
     ),
     [applyWikiMarkdownAction]
   );
