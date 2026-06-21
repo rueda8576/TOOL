@@ -5,7 +5,12 @@
 - [x] Confirm production deploy reached the VPS and local API health passed before the retention failure.
 - [x] Make final retention cleanup warn, not fail, when the deploy is healthy and free space remains above the pre-deploy pull floor.
 - [x] Improve retention logs so rounded `df -h` output cannot hide the exact available GB used by the threshold.
-- [ ] Run shell syntax/static verification, open fix-forward PR, request exact-SHA Ops review, wait CI, merge, and require green deploy before resuming PR #11.
+- [x] Run shell syntax/static verification, open fix-forward PR, request exact-SHA Ops review, wait CI, merge, and require green deploy before resuming PR #11.
+
+### Review
+- Fix-forward PR #20 merged as squash `3bbea950ac4282c2ff997626ca90d4b288dab539` after exact-SHA Ops review approved `a7a778191df8c6dc51b0d1e88ab3779793383572`.
+- Verification passed: `sh -n infra/scripts/manage-docker-retention.sh`; retention `diagnose --dry-run`; `finalize-success --dry-run` with an intentionally high rollback target; `git diff --check`; PR CI; main CI run `27901710477`; `Deploy Atlasium` run `27901857718`.
+- The merge train remained stopped until the hotfix deploy was green, then PRs #11-#15 were restacked on `origin/main`.
 
 ## PR09 Visual QA Gate Blocker (2026-06-20)
 - [x] Stop PR #9 merge after exact-SHA reviewer blocked `c18dfacf001a60ca4b653aa1946bd2633b9fdf48`.
