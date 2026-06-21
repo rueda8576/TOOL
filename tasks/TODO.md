@@ -5,16 +5,20 @@
 - [x] Restack PRs #13-#15 on the current `origin/main` while preserving the stack order.
 - [x] Mark PR #13 ready, run required checks and exact-SHA agent review, squash merge, then require green `main` CI and `Deploy Atlasium`.
 - [x] Restack and repeat the same gated flow for PR #14.
-- [ ] Amend PR #15 with final merge-train documentation, rerun checks and exact-SHA Ops review, squash merge, then require green `main` CI and `Deploy Atlasium`.
-- [ ] Verify the stack is closed, `main` remains protected, and no PRs #13-#15 are left open.
+- [x] Amend PR #15 with final merge-train documentation, rerun checks and exact-SHA Ops review, squash merge, then require green `main` CI and `Deploy Atlasium`.
+- [x] Verify the stack is closed, `main` remains protected, and no PRs #13-#15 are left open.
 
 ### Review
 - PR #13 merged as squash `cca502fdfac8f719b4bc42785a8c2437dff6e955` after local web QA, GitHub CI, and exact-SHA Atlasium review approved `6d0800698670033e74c175cbb37ced93f88a74d9`.
 - `main` CI run `27903865465` and `Deploy Atlasium` run `27904020328` completed successfully before PR #14 was restacked.
 - PR #14 merged as squash `5f0fe31a85a0ee1bb3d1c468fec861e62d2179c0` after local web QA, GitHub CI, and exact-SHA Atlasium review approved `45c6d2c9f20b4eeee89cb8ac9f26690d0615869d`.
 - `main` CI run `27904411608` and `Deploy Atlasium` run `27904566003` completed successfully before PR #15 was restacked as the final PR.
-- PR #15 is the final active merge-train PR. It remains pending local repo/Docker gates, exact-SHA Ops review, PR CI, squash merge, `main` CI, `Deploy Atlasium`, and final open-PR/protection verification.
 - Ops review blocked PR #15 SHA `ccb4a390e2b7f5a0679d6e59398ed9a3b04216bf` because this section prematurely marked PR #15 and final stack closure complete. This amend corrects the task state before rerunning review and CI.
+- PR #15 was corrected to SHA `bc38e027e3e501ef505223da62e92fbb0b558c05`, then exact-SHA Ops/protocol review approved the documentation state.
+- PR #15 local gates passed before merge: `git diff --check`, `pnpm lint`, `pnpm repo:check`, `pnpm build`, dev/prod compose config, shell syntax checks, API/Web/Worker Docker image builds, API/Web shared module runtime resolution, worker runtime binary smokes, storage write smokes, and a minimal worker LaTeX compile with `-no-shell-escape`.
+- PR #15 GitHub CI `build-and-test` run `27904883870` passed, then PR #15 was squash-merged as `a6e86e17cda7bafa7209bd34197364b8029316ee`.
+- `main` CI run `27905093977` and `Deploy Atlasium` run `27905260711` completed successfully for the PR #15 squash SHA, including published image smokes, VPS deploy, and public/local healthcheck.
+- Final verification confirmed no open PRs remain in the stack, `main` protection is still strict on `build-and-test`, admin enforcement remains enabled, and force-push/deletion remain disabled.
 
 ## PR12 Frontend Helper Extraction Typecheck Blocker (2026-06-21)
 - [x] Stop PR #12 merge after local web typecheck failed on `MIN_DOCUMENT_PANE_WIDTH_PX` missing from Documents detail.
@@ -86,11 +90,11 @@
 ## Autonomous Merge Train Execution (2026-06-20)
 - [x] Re-read `DESIGN.md`, `tasks/LESSONS.md`, and `tasks/TODO.md` before merge operations.
 - [x] Confirm local tree clean, `main` protected, PRs `#2`-`#15` draft/open/chained, no auto-merge, and `build-and-test` green.
-- [ ] Merge PRs `#2` through `#15` sequentially with squash merge and `--match-head-commit`.
-- [ ] After each merge, wait for CI on `main` and `Deploy Atlasium` success before proceeding.
-- [ ] Restack remaining branches, keep child PRs draft, rerun SHA-bound checks/reviews for the active PR.
-- [ ] Before PR15 merge, update this log with final merge-train results and revalidate PR15.
-- [ ] Verify no stack PRs remain open, `main` is protected, and latest deploy is green.
+- [x] Merge PRs `#2` through `#15` sequentially with squash merge and `--match-head-commit`.
+- [x] After each merge, wait for CI on `main` and `Deploy Atlasium` success before proceeding.
+- [x] Restack remaining branches, keep child PRs draft, rerun SHA-bound checks/reviews for the active PR.
+- [x] Before PR15 merge, update this log with final merge-train results and revalidate PR15.
+- [x] Verify no stack PRs remain open, `main` is protected, and latest deploy is green.
 
 ## Stacked PR05 Safety Correction (2026-06-19)
 - [x] Register the focused correction plan before edits and re-read `DESIGN.md`, `tasks/LESSONS.md`, and `tasks/TODO.md`.
@@ -115,7 +119,7 @@
 - [x] Avoid applying stale snapshot changes that would regress verified QA fixes, including realtime color contrast.
 - [x] Push stacked branches and open draft PRs with explicit base chain.
 - [x] Attach reviewer-agent findings to the current SHA of each PR before marking it ready.
-- [ ] Merge only the lowest PR in the stack after required checks, agent reviews, and deployment gates pass.
+- [x] Merge only the lowest PR in the stack after required checks, agent reviews, and deployment gates pass.
 
 ### Review
 - Created and preserved snapshot branch `codex/snapshot-atlasium-pr-stack-20260619`.
@@ -139,8 +143,8 @@
 - Docker is available again, so the final tranche validated `docker compose -f docker-compose.yml config --quiet`, `docker compose -f docker-compose.prod.yml config --quiet`, API/Web/Worker image builds, service entrypoint module resolution, worker non-root execution, and worker runtime binaries (`pg_dump`, `pg_restore`, `psql`, `pdflatex`, `biber`, `bibtex`).
 - Runtime smoke found and fixed a real Docker issue: copying only `node_modules/.pnpm` into runtime images left Node without the generated PNPM symlink tree. Runtime stages now copy `node_modules` and Web uses the package-local `next` binary path.
 - Latest local gates after reviewer fixes passed: `pnpm lint`, `pnpm repo:check`, `git diff --check`, shell syntax checks for restore/storage/bootstrap/recovery scripts, restore self-test, compose config for dev/prod, focused auth tests, focused Wiki/assets tests, focused worker LaTeX tests, `@doctoral/shared` build, API type/build, Web type/build, Playwright `test:qa`, API/Web/Worker Docker builds, API/Web shared module runtime resolution, Web Next version smoke, worker binary smoke, and storage bind-mount write smokes as local UID/GID and as runtime UID/GID `10001:10001`.
-- GitHub CI `build-and-test` was green for PRs `#2` through `#15` before the documentation-only closeout amend; PR15 CI reruns after this doc update.
-- Merge-control state after PR #14: PRs `#2` through `#14` have been squash-merged through the guarded train, PR #15 is the only remaining stack PR, and auto-merge remains disabled. `main` is protected with strict required status check `build-and-test`, PR path required, admin enforcement enabled, and force-push/deletion disabled. The remaining bypass is intentional admin ability to change repository protection settings.
+- GitHub CI `build-and-test` was green for PRs `#2` through `#15` before merge. PR #15 final PR CI run `27904883870`, `main` CI run `27905093977`, and `Deploy Atlasium` run `27905260711` all completed successfully.
+- Final merge-control state: PRs `#2` through `#15` have been squash-merged through the guarded train, no stack PRs `#2`-`#15` remain open, and auto-merge remains disabled. `main` is protected with strict required status check `build-and-test`, PR path required, admin enforcement enabled, and force-push/deletion disabled. The remaining bypass is intentional admin ability to change repository protection settings.
 
 ## Git Access Persistent HTTPS Credentials (2026-06-07)
 - [x] Register the approved implementation plan before edits.
