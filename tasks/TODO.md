@@ -1,5 +1,12 @@
 # Implementation TODO (v1 bootstrap)
 
+## Deploy Fix-Forward: Final Docker Retention Soft Gate (2026-06-21)
+- [x] Stop the merge train after PR #10 because `Deploy Atlasium` failed on the post-deploy Docker retention threshold.
+- [x] Confirm production deploy reached the VPS and local API health passed before the retention failure.
+- [x] Make final retention cleanup warn, not fail, when the deploy is healthy and free space remains above the pre-deploy pull floor.
+- [x] Improve retention logs so rounded `df -h` output cannot hide the exact available GB used by the threshold.
+- [ ] Run shell syntax/static verification, open fix-forward PR, request exact-SHA Ops review, wait CI, merge, and require green deploy before resuming PR #11.
+
 ## PR09 Visual QA Gate Blocker (2026-06-20)
 - [x] Stop PR #9 merge after exact-SHA reviewer blocked `c18dfacf001a60ca4b653aa1946bd2633b9fdf48`.
 - [x] Add route-ready waits so responsive/visual/a11y QA asserts loaded mocked surfaces instead of partial loading states.

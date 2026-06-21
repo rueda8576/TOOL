@@ -3,6 +3,7 @@ set -eu
 
 STATE_FILE="/opt/atlasium/.deploy-image-state.env"
 MIN_FREE_GB=12
+FINAL_HARD_FLOOR_GB=6
 TARGET_TAG=""
 DRY_RUN=0
 MODE="${1:-}"
@@ -125,12 +126,20 @@ available_kb() {
   df -Pk "$(docker_df_path)" | awk 'NR == 2 { print $4 }'
 }
 
+required_kb_for_gb() {
+  min_gb="$1"
+  awk "BEGIN { print int((${min_gb} * 1000 * 1000 * 1000 + 1023) / 1024) }"
+}
+
 required_kb() {
-  awk "BEGIN { print int((${MIN_FREE_GB} * 1000 * 1000 * 1000 + 1023) / 1024) }"
+  required_kb_for_gb "${MIN_FREE_GB}"
 }
 
 human_available() {
-  df -h "$(docker_df_path)" | awk 'NR == 2 { print $4 " free of " $2 " on " $6 }'
+  path="$(docker_df_path)"
+  exact="$(df -Pk "${path}" | awk 'NR == 2 { printf "%.2fGB free of %.2fGB on %s", ($4 * 1024) / 1000000000, ($2 * 1024) / 1000000000, $6 }')"
+  rounded="$(df -h "${path}" | awk 'NR == 2 { print $4 " free of " $2 " on " $6 }')"
+  printf '%s; df -h: %s\n' "${exact}" "${rounded}"
 }
 
 log_free_space() {
@@ -273,6 +282,28 @@ has_min_free_space() {
   [ "${free_kb}" -ge "${needed_kb}" ]
 }
 
+has_free_space_for_gb() {
+  min_gb="$1"
+  free_kb="$(available_kb)"
+  needed_kb="$(required_kb_for_gb "${min_gb}")"
+  [ "${free_kb}" -ge "${needed_kb}" ]
+}
+
+check_final_free_space() {
+  if has_min_free_space; then
+    check_min_free_space
+    return 0
+  fi
+
+  if has_free_space_for_gb "${FINAL_HARD_FLOOR_GB}"; then
+    log "Final retention cleanup remains below the ${MIN_FREE_GB}GB rollback target after cleanup: $(human_available)"
+    log "Continuing because the deployment healthcheck already passed and free space remains above the ${FINAL_HARD_FLOOR_GB}GB pull floor."
+    return 0
+  fi
+
+  die "Docker root dir is below the ${FINAL_HARD_FLOOR_GB}GB hard floor after final cleanup: $(human_available)"
+}
+
 emergency_prune_unused_docker_resources() {
   log "Standard retention cleanup did not reach ${MIN_FREE_GB}GB free."
   log "Running emergency Docker cleanup for unused containers, images and builder cache; volumes are not pruned."
@@ -340,7 +371,7 @@ finalize_success() {
     log_free_space "Docker root dir free space after previous-tag cleanup"
   fi
 
-  check_min_free_space
+  check_final_free_space
 }
 
 case "${MODE}" in
