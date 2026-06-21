@@ -1,5 +1,13 @@
 # Implementation TODO (v1 bootstrap)
 
+## Autonomous Merge Train Final Segment (2026-06-21)
+- [x] Confirm local tree is clean, `main` is green/deployed through PR #12, and PRs #13-#15 remain open in draft.
+- [x] Restack PRs #13-#15 on the current `origin/main` while preserving the stack order.
+- [ ] Mark PR #13 ready, run required checks and exact-SHA agent review, squash merge, then require green `main` CI and `Deploy Atlasium`.
+- [ ] Restack and repeat the same gated flow for PR #14.
+- [ ] Amend PR #15 with final merge-train documentation, rerun checks and exact-SHA Ops review, squash merge, then require green `main` CI and `Deploy Atlasium`.
+- [ ] Verify the stack is closed, `main` remains protected, and no PRs #13-#15 are left open.
+
 ## PR12 Frontend Helper Extraction Typecheck Blocker (2026-06-21)
 - [x] Stop PR #12 merge after local web typecheck failed on `MIN_DOCUMENT_PANE_WIDTH_PX` missing from Documents detail.
 - [x] Import the extracted splitter width constant from `document-workspace-helpers`.
