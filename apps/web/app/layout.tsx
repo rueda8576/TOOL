@@ -3,6 +3,7 @@ import { Inter, Source_Serif_4 } from "next/font/google";
 import "katex/dist/katex.min.css";
 
 import "./globals.css";
+import "./code.css";
 
 const heading = Source_Serif_4({ subsets: ["latin"], variable: "--font-heading" });
 const body = Inter({ subsets: ["latin"], variable: "--font-body" });
