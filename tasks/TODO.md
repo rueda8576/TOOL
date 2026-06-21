@@ -4,13 +4,17 @@
 - [x] Confirm local tree is clean, `main` is green/deployed through PR #12, and PRs #13-#15 remain open in draft.
 - [x] Restack PRs #13-#15 on the current `origin/main` while preserving the stack order.
 - [x] Mark PR #13 ready, run required checks and exact-SHA agent review, squash merge, then require green `main` CI and `Deploy Atlasium`.
-- [ ] Restack and repeat the same gated flow for PR #14.
+- [x] Restack and repeat the same gated flow for PR #14.
 - [ ] Amend PR #15 with final merge-train documentation, rerun checks and exact-SHA Ops review, squash merge, then require green `main` CI and `Deploy Atlasium`.
 - [ ] Verify the stack is closed, `main` remains protected, and no PRs #13-#15 are left open.
 
 ### Review
 - PR #13 merged as squash `cca502fdfac8f719b4bc42785a8c2437dff6e955` after local web QA, GitHub CI, and exact-SHA Atlasium review approved `6d0800698670033e74c175cbb37ced93f88a74d9`.
 - `main` CI run `27903865465` and `Deploy Atlasium` run `27904020328` completed successfully before PR #14 was restacked.
+- PR #14 merged as squash `5f0fe31a85a0ee1bb3d1c468fec861e62d2179c0` after local web QA, GitHub CI, and exact-SHA Atlasium review approved `45c6d2c9f20b4eeee89cb8ac9f26690d0615869d`.
+- `main` CI run `27904411608` and `Deploy Atlasium` run `27904566003` completed successfully before PR #15 was restacked as the final PR.
+- PR #15 is the final active merge-train PR. It remains pending local repo/Docker gates, exact-SHA Ops review, PR CI, squash merge, `main` CI, `Deploy Atlasium`, and final open-PR/protection verification.
+- Ops review blocked PR #15 SHA `ccb4a390e2b7f5a0679d6e59398ed9a3b04216bf` because this section prematurely marked PR #15 and final stack closure complete. This amend corrects the task state before rerunning review and CI.
 
 ## PR12 Frontend Helper Extraction Typecheck Blocker (2026-06-21)
 - [x] Stop PR #12 merge after local web typecheck failed on `MIN_DOCUMENT_PANE_WIDTH_PX` missing from Documents detail.
@@ -79,13 +83,64 @@
 - [x] Restack PRs #3-#15 on `origin/main` after the green #19 deploy.
 - [x] Resume the autonomous merge train from PR #3.
 
+## Autonomous Merge Train Execution (2026-06-20)
+- [x] Re-read `DESIGN.md`, `tasks/LESSONS.md`, and `tasks/TODO.md` before merge operations.
+- [x] Confirm local tree clean, `main` protected, PRs `#2`-`#15` draft/open/chained, no auto-merge, and `build-and-test` green.
+- [ ] Merge PRs `#2` through `#15` sequentially with squash merge and `--match-head-commit`.
+- [ ] After each merge, wait for CI on `main` and `Deploy Atlasium` success before proceeding.
+- [ ] Restack remaining branches, keep child PRs draft, rerun SHA-bound checks/reviews for the active PR.
+- [ ] Before PR15 merge, update this log with final merge-train results and revalidate PR15.
+- [ ] Verify no stack PRs remain open, `main` is protected, and latest deploy is green.
+
 ## Stacked PR05 Safety Correction (2026-06-19)
 - [x] Register the focused correction plan before edits and re-read `DESIGN.md`, `tasks/LESSONS.md`, and `tasks/TODO.md`.
 - [x] Make PR05 independently safe by keeping LaTeX ZIP materialization and version persistence atomic.
 - [x] Make the PR05 worker use the safe ZIP extractor instead of `AdmZip.extractAllTo`.
 - [x] Add focused API/worker regression tests for rejected ZIP bundles and unsafe worker extraction.
-- [x] Run focused verification, restack affected PR branches, update PR metadata, and repeat agent reviews for changed SHAs.
+- [x] Run focused verification and restack affected PR branches through PR13.
+- [x] Move Wiki asset response headers/sanitized filename into PR05 with HTTP coverage.
+- [x] Move Documents PDF response headers/sanitized filename into PR05 with HTTP coverage.
+- [x] Move worker runtime `node_modules` copy fix into PR04 and verify the worker Docker image from the package cwd.
+- [x] Make restore drill database restore transactional with `pg_restore --single-transaction`.
+- [x] Harden API/Web runtime containers as non-root with compose `no-new-privileges`, dropped capabilities, pid limits, and memory limits.
+- [x] Restore PR12 refactor scope by reverting assistive copy and collaborator pill style drift.
+- [x] Update PR metadata, force-push changed branches, and repeat agent reviews for changed SHAs.
 - [x] Document final review, commands, remaining limits, and merge-control state.
+
+## Autonomous Stacked PR Flow (2026-06-19)
+- [x] Preserve the full WIP snapshot in `codex/snapshot-atlasium-pr-stack-20260619`.
+- [x] Build local stacked branch chain from `main` through `14-compose-docker-verification`.
+- [x] Keep implementation branches small and ordered: repo hygiene, shared contracts, auth/reset, worker backups, security, LaTeX/container, operations, QA gates, backend extractions, frontend extractions, CSS partitions, and Docker verification.
+- [x] Keep Atlasium UI/UX changes gated by `DESIGN.md` and repeatable Playwright/axe checks.
+- [x] Avoid applying stale snapshot changes that would regress verified QA fixes, including realtime color contrast.
+- [x] Push stacked branches and open draft PRs with explicit base chain.
+- [x] Attach reviewer-agent findings to the current SHA of each PR before marking it ready.
+- [ ] Merge only the lowest PR in the stack after required checks, agent reviews, and deployment gates pass.
+
+### Review
+- Created and preserved snapshot branch `codex/snapshot-atlasium-pr-stack-20260619`.
+- Split the prior WIP into stacked branches `01` through `14`, keeping implementation commits scoped by domain and avoiding simultaneous edits to the same module.
+- Opened draft PRs `#2` through `#15` with the expected chain: `main <- 01 <- 02 <- ... <- 14`.
+- Reviewer-agents found blocking issues before any PR was marked ready:
+  - `02-shared-contracts`: CI coverage ran before `@doctoral/shared` had a clean `dist`, causing `@doctoral/shared` resolution failures. Fixed in PR02 by building shared before API coverage in CI/local CI scripts and typing strict Wiki spec callbacks.
+  - `03-password-reset-email`: password reset confirm consumed tokens with a read-then-update race. Fixed in PR03 with atomic conditional `updateMany`, no session creation, and a regression test for concurrent consumption. The reset page now removes the token query from the visible URL and does not show the token in a text input.
+  - `05-storage-collab-zip-security`: Wiki import image policy was still broad in the frontend and later appeared inside a refactor. Moved the import accept/extensions policy into PR05 with the rest of the SVG/media hardening.
+  - `06-latex-worker-container-hardening`: LaTeX jobs could remain `RUNNING` after preparation failures and TeX lacked explicit file-open policy. Fixed in PR06 with persisted `FAILED` state on preparation errors, redacted failure messages, `openin_any=p`, `openout_any=p`, and `shell_escape=0`.
+  - `08-playwright-axe-qa-gates`: responsive QA omitted reset/invite auth surfaces and brand drift only checked the newest stale brand. Fixed in PR08 by adding reset/invite to responsive coverage and expanding visible brand/decorative drift assertions.
+  - `10-wiki-backend-extractions`: SVG rejection appeared as a refactor-side behavior change. Moved that policy to PR05, where backend tests and UI accept filters now block SVG consistently until sanitization exists.
+  - `14-compose-docker-verification`: Docker clean builds did not build/copy `@doctoral/shared`. Fixed in PR14 by building shared before API/Web and copying `packages/shared` into API/Web runtime images.
+- Follow-up security review found a PR05 independence blocker: API version creation persisted before ZIP materialization failure, while the PR05 worker still used `AdmZip.extractAllTo`. Fixed in PR05 by wrapping version create/materialization/update in a transaction, using `extractZipSafely` in the worker, failing preparation errors explicitly, and adding API/worker regression tests.
+- Backend/refactor review found PR11 and PR12 scope drift after the first restack: Wiki asset response security headers were inside a Wiki extraction PR, and frontend helper extraction changed splitter `aria-valuetext` copy plus collaborator pill text color. Fixed by moving the headers into PR05 with HTTP coverage and restoring PR12 behavior-preserving markup/copy.
+- Security/ops review found additional independence blockers: Documents PDF downloads lacked sanitized/no-store/nosniff headers, PR04 worker runtime copied only `.pnpm`, restore drill was not single-transaction, and API/Web runtime containers still ran as root without compose runtime restrictions. Fixed in their owning tranches with focused HTTP/script/Docker smokes.
+- Final Ops review found two additional blockers before closure: restore target identity still treated Prisma `schema` query params as a separate database, and non-root API/worker containers could lose write access when `/var/lib/atlasium/storage` was overlaid by a host bind mount. Fixed by ignoring query/search params in `scripts/restore-backup.sh` database identity, adding omitted/different schema self-tests, adding `infra/scripts/ensure-storage-permissions.sh`, and wiring storage ownership/write-smoke preflight into bootstrap, deploy, recovery, and the runbook.
+- Restacked the branch chain after final fixes. Current code-reviewed SHAs: `01` `0c2a1fd`, `02` `71c5345`, `03` `acdf90d`, `04` `df4db17`, `05` `93a7141`, `06` `f9a1bb0`, `07` `29616c0`, `08` `b407328`, `09` `ce42946`, `10` `d69d2f7`, `11` `549f152`, `12` `1bd01b9`, `13` `5222e92`, `14` `3f6fd11`; PR15 then received this documentation-only closeout amend.
+- Reviewer-agent reruns approved the current code SHAs before this documentation-only closeout: Ops/Docker approved PR08 `29616c0` and PR15 `3f6fd11`; Atlasium UI/UX approved PR09 `b407328`, PR12 `549f152`, PR13 `1bd01b9`, and PR14 `5222e92`; backend/refactor approved PR10 `ce42946` and PR11 `d69d2f7`; protocol approved the full PR stack and merge-control setup.
+- Verified each implemented tranche with focused tests/builds/QA appropriate to its blast radius; frontend/UI tranches used Playwright `test:qa` after `DESIGN.md`-aligned fixes.
+- Docker is available again, so the final tranche validated `docker compose -f docker-compose.yml config --quiet`, `docker compose -f docker-compose.prod.yml config --quiet`, API/Web/Worker image builds, service entrypoint module resolution, worker non-root execution, and worker runtime binaries (`pg_dump`, `pg_restore`, `psql`, `pdflatex`, `biber`, `bibtex`).
+- Runtime smoke found and fixed a real Docker issue: copying only `node_modules/.pnpm` into runtime images left Node without the generated PNPM symlink tree. Runtime stages now copy `node_modules` and Web uses the package-local `next` binary path.
+- Latest local gates after reviewer fixes passed: `pnpm lint`, `pnpm repo:check`, `git diff --check`, shell syntax checks for restore/storage/bootstrap/recovery scripts, restore self-test, compose config for dev/prod, focused auth tests, focused Wiki/assets tests, focused worker LaTeX tests, `@doctoral/shared` build, API type/build, Web type/build, Playwright `test:qa`, API/Web/Worker Docker builds, API/Web shared module runtime resolution, Web Next version smoke, worker binary smoke, and storage bind-mount write smokes as local UID/GID and as runtime UID/GID `10001:10001`.
+- GitHub CI `build-and-test` was green for PRs `#2` through `#15` before the documentation-only closeout amend; PR15 CI reruns after this doc update.
+- Merge-control state after PR #14: PRs `#2` through `#14` have been squash-merged through the guarded train, PR #15 is the only remaining stack PR, and auto-merge remains disabled. `main` is protected with strict required status check `build-and-test`, PR path required, admin enforcement enabled, and force-push/deletion disabled. The remaining bypass is intentional admin ability to change repository protection settings.
 
 ## Git Access Persistent HTTPS Credentials (2026-06-07)
 - [x] Register the approved implementation plan before edits.

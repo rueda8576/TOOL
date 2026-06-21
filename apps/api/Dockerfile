@@ -24,10 +24,17 @@ RUN pnpm --filter @doctoral/api build
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-RUN apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
-COPY --from=build /app/apps/api ./apps/api
-COPY --from=build /app/packages/db/prisma ./packages/db/prisma
-COPY --from=build /app/packages/shared ./packages/shared
-COPY --from=build /app/node_modules ./node_modules
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd --system --gid 10001 atlasium \
+  && useradd --system --uid 10001 --gid atlasium --home-dir /tmp --no-create-home atlasium \
+  && mkdir -p /var/lib/atlasium/storage \
+  && chown -R atlasium:atlasium /app /var/lib/atlasium /tmp
+COPY --from=build --chown=atlasium:atlasium /app/apps/api ./apps/api
+COPY --from=build --chown=atlasium:atlasium /app/packages/db/prisma ./packages/db/prisma
+COPY --from=build --chown=atlasium:atlasium /app/packages/shared ./packages/shared
+COPY --from=build --chown=atlasium:atlasium /app/node_modules ./node_modules
 EXPOSE 4000
+USER atlasium
 CMD ["node", "apps/api/dist/main.js"]

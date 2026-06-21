@@ -125,6 +125,8 @@ jobs:
           docker run --rm "${WORKER_IMAGE}:${IMAGE_TAG}" biber --version
           docker run --rm "${WORKER_IMAGE}:${IMAGE_TAG}" bibtex --version
           docker run --rm "${WEB_IMAGE}:${IMAGE_TAG}" node -e "require('./apps/web/node_modules/next/package.json')"
+          docker run --rm "${API_IMAGE}:${IMAGE_TAG}" node -e "console.log(require.resolve('@doctoral/shared', { paths: ['/app/apps/api'] }))"
+          docker run --rm "${WEB_IMAGE}:${IMAGE_TAG}" node -e "console.log(require.resolve('@doctoral/shared', { paths: ['/app/apps/web'] }))"
 
   deploy-auto:
     if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
@@ -179,6 +181,9 @@ jobs:
             echo "${GHCR_READ_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml pull
+            sh ./infra/scripts/ensure-storage-permissions.sh \
+              --env-file .env \
+              --image "ghcr.io/rueda8576/atlasium-api:${IMAGE_TAG}"
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --wait postgres redis
             sh ./infra/scripts/deploy-prisma-bootstrap.sh "${IMAGE_TAG}"
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --no-build api worker web
@@ -294,6 +299,9 @@ jobs:
             echo "${GHCR_READ_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml pull
+            sh ./infra/scripts/ensure-storage-permissions.sh \
+              --env-file .env \
+              --image "ghcr.io/rueda8576/atlasium-api:${IMAGE_TAG}"
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --wait postgres redis
             sh ./infra/scripts/deploy-prisma-bootstrap.sh "${IMAGE_TAG}"
             IMAGE_TAG="${IMAGE_TAG}" docker compose -f docker-compose.prod.yml up -d --no-build api worker web
