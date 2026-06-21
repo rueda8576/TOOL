@@ -12,6 +12,8 @@ import AdmZip from "adm-zip";
 
 import { encryptValue } from "../common/crypto";
 import * as envModule from "../config/env";
+import { buildRepositoryArchiveFileName } from "./gitlab-format";
+import { normalizeRepositoryPath, normalizeUserSshKeyId, resolveTokenExpiry } from "./gitlab-mappers";
 import { GitlabService } from "./gitlab.service";
 
 type FetchResponse = {
@@ -2927,19 +2929,15 @@ describe("GitlabService", () => {
   });
 
   it("validates repository paths, SSH key ids, archive names, and token expiry helpers", () => {
-    const service = makeService();
+    expect(normalizeRepositoryPath(" NAV Project ")).toBe("nav-project");
+    expect(() => normalizeRepositoryPath("!!!")).toThrow(BadRequestException);
 
-    expect((service as any).normalizeRepositoryPath(" NAV Project ")).toBe("nav-project");
-    expect(() => (service as any).normalizeRepositoryPath("!!!")).toThrow(BadRequestException);
+    expect(normalizeUserSshKeyId(" 42 ")).toBe("42");
+    expect(() => normalizeUserSshKeyId("ssh-key")).toThrow(BadRequestException);
 
-    expect((service as any).normalizeUserSshKeyId(" 42 ")).toBe("42");
-    expect(() => (service as any).normalizeUserSshKeyId("ssh-key")).toThrow(BadRequestException);
-
-    expect((service as any).buildRepositoryArchiveFileName("/atlasium/nav/", "feature/nav")).toBe(
-      "atlasium-nav-feature-nav.zip"
-    );
-    expect((service as any).resolveTokenExpiry({ expires_in: 0 })).toBeNull();
-    expect((service as any).resolveTokenExpiry({ expires_in: 3600 })).toBeInstanceOf(Date);
+    expect(buildRepositoryArchiveFileName("/atlasium/nav/", "feature/nav")).toBe("atlasium-nav-feature-nav.zip");
+    expect(resolveTokenExpiry({ expires_in: 0 })).toBeNull();
+    expect(resolveTokenExpiry({ expires_in: 3600 })).toBeInstanceOf(Date);
   });
 
   it("extracts structured and raw GitLab error messages", () => {
