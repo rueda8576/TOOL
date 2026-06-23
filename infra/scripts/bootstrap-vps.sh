@@ -8,12 +8,14 @@ fi
 
 apt update
 apt upgrade -y
-apt install -y nginx certbot python3-certbot-nginx ufw curl git
+apt install -y nginx certbot python3 python3-certbot-nginx ufw curl git
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Docker is required. Install Docker Engine before running this script."
   exit 1
 fi
+
+sh "$(dirname "$0")/ensure-docker-log-rotation.sh" apply-daemon --restart-if-changed
 
 if ! command -v node >/dev/null 2>&1; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -

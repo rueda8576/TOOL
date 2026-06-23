@@ -1,5 +1,20 @@
 # Implementation TODO (v1 bootstrap)
 
+## VPS Docker Log Rotation - GitLab json logs (2026-06-23)
+- [x] Add bounded `json-file` logging to the managed GitLab compose service.
+- [x] Add an idempotent Docker log-rotation helper for daemon config, GitLab log truncation, and GitLab container recreation when `LogConfig` is stale.
+- [x] Wire the helper into automatic and manual CD before Docker retention, and into VPS bootstrap for new hosts.
+- [x] Update runbooks and lessons with Docker log rotation, recreation, one-time cleanup, and no-prune/no-GitLab-data-delete guidance.
+- [x] Run shell/static verification, compose validation where available, repo checks, and document results.
+
+### Review
+- Added `json-file` rotation to `atlasium-gitlab` at `100m` x `5` files and added `infra/scripts/ensure-docker-log-rotation.sh` with modes for targeted log truncation, daemon config merge/restart, and stale `LogConfig` GitLab recreation.
+- Automatic and manual CD now truncate the existing GitLab Docker log by inspected `LogPath`, enforce `/etc/docker/daemon.json` logging defaults while preserving existing config keys, and reconcile the GitLab container before Docker image retention runs.
+- VPS bootstrap now installs `python3` explicitly and applies Docker daemon logging defaults for new hosts.
+- Runbooks and lessons now separate Docker json-log cleanup from image/cache retention, warn that existing containers must be recreated, and explicitly prohibit deleting `/var/lib/atlasium/gitlab/data` or using volume pruning as the primary fix.
+- Verification passed: `sh -n` for changed shell scripts; `git diff --check`; Docker daemon config merge and idempotency temp-file tests; Ruby YAML parse for `docker-compose.gitlab.yml` and `.github/workflows/deploy.yml`; `pnpm repo:check`; `pnpm lint`; `pnpm build`.
+- `shellcheck` and real `docker compose --env-file .env.example -f docker-compose.gitlab.yml config` could not run locally because this WSL environment has no `shellcheck` and no Docker CLI integration. The compose config command must run in CI/VPS or a Docker-enabled local shell.
+
 ## Autonomous Merge Train Final Segment (2026-06-21)
 - [x] Confirm local tree is clean, `main` is green/deployed through PR #12, and PRs #13-#15 remain open in draft.
 - [x] Restack PRs #13-#15 on the current `origin/main` while preserving the stack order.

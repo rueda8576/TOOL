@@ -186,6 +186,9 @@
 
 ## Docker disk diagnostics
 - When diagnosing Docker disk pressure on a VPS, do not rely on `df --total` because overlay mounts inflate the apparent total usage; inspect `docker info` for `Docker Root Dir` and use `docker system df -v` to identify reclaimable images and build cache before proposing storage expansion.
+- Docker json logs are not reclaimed by image/build-cache retention. Inspect a container's exact log with `docker inspect <container> --format '{{.LogPath}}'` and truncate only that path when emergency relief is needed.
+- Docker daemon `log-opts` only apply to newly created containers. Existing containers, including managed GitLab, must be recreated before `HostConfig.LogConfig` shows new log rotation limits.
+- Keep managed GitLab disk cleanup targeted: do not delete `/var/lib/atlasium/gitlab/data`, and do not use Docker volume pruning as the primary fix for json-log growth.
 
 ## Multi-compose VPS operations
 - When introducing a second Docker Compose stack on the same VPS, always set an explicit top-level compose `name:` for each stack; otherwise `docker compose ps/logs/up` can mix unrelated services via the default project name.
