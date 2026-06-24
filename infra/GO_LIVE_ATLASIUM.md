@@ -23,7 +23,7 @@ Target:
 
 ```bash
 apt update && apt upgrade -y
-apt install -y nginx certbot python3-certbot-nginx ufw curl git
+apt install -y nginx certbot python3 python3-certbot-nginx ufw curl git
 ```
 
 Install Node 22 + pnpm (needed for Prisma migrations and seed):
@@ -152,6 +152,7 @@ Only after that preflight passes should you merge/push the feature to `main`.
 cd /opt/atlasium
 docker login ghcr.io -u <GHCR_USERNAME>
 sh ./infra/scripts/validate-prod-env.sh .env
+sh ./infra/scripts/ensure-docker-log-rotation.sh apply-daemon --restart-if-changed
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml pull
 sh ./infra/scripts/ensure-storage-permissions.sh --env-file .env --image ghcr.io/rueda8576/atlasium-api:main
 IMAGE_TAG=main docker compose -f docker-compose.prod.yml up -d --wait postgres redis
@@ -179,6 +180,7 @@ First bootstrap can take several minutes.
 Note:
 - `docker-compose.prod.yml` and `docker-compose.gitlab.yml` now use explicit compose project names (`atlasium` and `atlasium-gitlab`) so `docker compose ... ps` and logs no longer mix both stacks.
 - The first restart/deploy after introducing explicit compose names is a one-time migration of the Atlasium stack identity; if old containers from the previous default compose project still exist, remove them only after confirming the new `atlasium` stack is healthy.
+- `docker-compose.gitlab.yml` sets Docker `json-file` log rotation for `atlasium-gitlab` at `100m` x `5` files. Existing GitLab containers must be recreated before `docker inspect atlasium-gitlab --format '{{json .HostConfig.LogConfig}}'` shows those limits.
 
 ## 4) Seed admin (first time only)
 
@@ -333,6 +335,33 @@ sh ./infra/scripts/manage-docker-retention.sh pre-deploy \
   --target-tag <sha-tag> \
   --min-free-gb 12 \
   --dry-run
+```
+
+Docker json log pressure recovery:
+
+```bash
+cd /opt/atlasium
+docker info --format 'DockerRootDir={{.DockerRootDir}} LoggingDriver={{.LoggingDriver}}'
+docker inspect atlasium-gitlab --format 'LogConfig={{json .HostConfig.LogConfig}} LogPath={{.LogPath}}'
+
+# CD runs these automatically before Docker image retention. They are safe to rerun manually.
+sh ./infra/scripts/ensure-docker-log-rotation.sh truncate-container --container atlasium-gitlab
+sh ./infra/scripts/ensure-docker-log-rotation.sh apply-daemon --restart-if-changed
+sh ./infra/scripts/ensure-docker-log-rotation.sh ensure-container \
+  --container atlasium-gitlab \
+  --compose-file docker-compose.gitlab.yml \
+  --env-file .env
+
+df -h "$(docker info --format '{{.DockerRootDir}}')"
+docker ps
+docker compose --env-file .env -f docker-compose.gitlab.yml ps
+```
+
+Do not delete `/var/lib/atlasium/gitlab/data` and do not use volume pruning as the primary response to this incident. Docker image/build-cache retention does not shrink container json logs. If systemd journal is also large, inspect it separately:
+
+```bash
+journalctl --disk-usage
+journalctl --vacuum-size=512M
 ```
 
 ## 8) Rollback

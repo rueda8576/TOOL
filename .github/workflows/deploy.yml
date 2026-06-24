@@ -173,6 +173,12 @@ jobs:
             git reset --hard "${DEPLOY_SHA}"
             git clean -fd --exclude=.deploy-image-state.env --exclude=backups/
             sh ./infra/scripts/validate-prod-env.sh .env
+            sh ./infra/scripts/ensure-docker-log-rotation.sh truncate-container --container atlasium-gitlab
+            sh ./infra/scripts/ensure-docker-log-rotation.sh apply-daemon --restart-if-changed
+            sh ./infra/scripts/ensure-docker-log-rotation.sh ensure-container \
+              --container atlasium-gitlab \
+              --compose-file docker-compose.gitlab.yml \
+              --env-file .env
             sh ./infra/scripts/manage-docker-retention.sh pre-deploy \
               --state-file /opt/atlasium/.deploy-image-state.env \
               --target-tag "${IMAGE_TAG}" \
@@ -291,6 +297,12 @@ jobs:
             git reset --hard origin/main
             git clean -fd --exclude=.deploy-image-state.env --exclude=backups/
             sh ./infra/scripts/validate-prod-env.sh .env
+            sh ./infra/scripts/ensure-docker-log-rotation.sh truncate-container --container atlasium-gitlab
+            sh ./infra/scripts/ensure-docker-log-rotation.sh apply-daemon --restart-if-changed
+            sh ./infra/scripts/ensure-docker-log-rotation.sh ensure-container \
+              --container atlasium-gitlab \
+              --compose-file docker-compose.gitlab.yml \
+              --env-file .env
             sh ./infra/scripts/manage-docker-retention.sh pre-deploy \
               --state-file /opt/atlasium/.deploy-image-state.env \
               --target-tag "${IMAGE_TAG}" \
