@@ -2028,11 +2028,15 @@ describe("WikiService", () => {
         type: "folder",
         name: "guides",
         path: "guides",
+        nodeRole: "folder",
+        orderLabel: null,
         children: [
           {
             type: "page",
             name: "roadmap",
             path: "guides/roadmap",
+            nodeRole: "page",
+            orderLabel: null,
             pageId: "page-1",
             title: "Roadmap",
             isUnpublished: false,
@@ -2077,6 +2081,7 @@ describe("WikiService", () => {
         docsBinding: {
           docsPath: "Docs/Research/Methods.md",
           repository: {
+            id: "repo-1",
             name: "Backend Repository"
           }
         }
@@ -2093,6 +2098,7 @@ describe("WikiService", () => {
         docsBinding: {
           docsPath: "Docs/Research/README.md",
           repository: {
+            id: "repo-1",
             name: "Backend Repository"
           }
         }
@@ -2109,6 +2115,7 @@ describe("WikiService", () => {
         docsBinding: {
           docsPath: "Docs/Implementation/Architecture.md",
           repository: {
+            id: "repo-1",
             name: "Backend Repository"
           }
         }
@@ -2127,7 +2134,8 @@ describe("WikiService", () => {
         name: "research",
         path: "research",
         displayName: "Research",
-        docsKind: "research"
+        docsKind: "research",
+        nodeRole: "section"
       })
     );
     expect(tree[1]).toEqual(
@@ -2136,7 +2144,8 @@ describe("WikiService", () => {
         name: "implementation",
         path: "implementation",
         displayName: "Implementation",
-        docsKind: "implementation"
+        docsKind: "implementation",
+        nodeRole: "section"
       })
     );
     expect(tree[0]?.children[0]).toEqual(
@@ -2145,7 +2154,10 @@ describe("WikiService", () => {
         name: "backend",
         path: "research/backend",
         displayName: "Backend Repository",
-        docsKind: "research"
+        docsKind: "research",
+        nodeRole: "repository",
+        repositoryId: "repo-1",
+        repositoryPrefix: "backend"
       })
     );
     expect(tree[0]?.children[0]?.children.map((node: { path: string }) => node.path)).toEqual([
@@ -2157,6 +2169,8 @@ describe("WikiService", () => {
         title: "Research Overview",
         isDocsOverview: true,
         docsKind: "research",
+        nodeRole: "index",
+        docsPath: "Docs/Research/README.md",
         repositoryName: "Backend Repository"
       })
     );

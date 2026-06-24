@@ -6,7 +6,7 @@ import { installMockApi, seedSession } from "./support/mock-api";
 const authenticatedRoutes = [
   { path: "/projects", heading: "Projects" },
   { path: "/projects/project-1", heading: "Atlasium Research Archive" },
-  { path: "/projects/project-1/wiki", heading: "Archive Home" },
+  { path: "/projects/project-1/wiki", heading: "Research Index" },
   { path: "/projects/project-1/documents", heading: "Documents" },
   { path: "/projects/project-1/documents/document-1", heading: "Field Study Protocol" },
   { path: "/projects/project-1/code", heading: "Code" },

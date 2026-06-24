@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, RefreshCw, Upload } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Plus, RefreshCw, Search, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ChangeEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WebsocketProvider } from "y-websocket";
@@ -86,6 +86,7 @@ const WIKI_REALTIME_AUTOSAVE_MARK_MS = 3250;
 const WIKI_FLASH_SUCCESS_KEY = "atlasium_wiki_flash_success";
 const WIKI_SIDEBAR_WIDTH_STORAGE_KEY = "atlasium_wiki_sidebar_width_px";
 const WIKI_SIDEBAR_MODE_STORAGE_KEY = "atlasium_wiki_sidebar_width_mode";
+const WIKI_EXPANDED_FOLDERS_STORAGE_KEY_PREFIX = "atlasium_wiki_expanded_folders";
 const WIKI_SPLITTER_SIZE_PX = 10;
 const WIKI_SPLITTER_KEYBOARD_STEP_PX = 24;
 const WIKI_SPLIT_MIN_VIEWPORT_PX = 1200;
@@ -146,6 +147,33 @@ const WIKI_MARKDOWN_TOOL_GROUPS: WikiMarkdownTool[][] = [
     { action: "outdent", label: "<<", title: "Outdent (Shift+Tab)" }
   ]
 ];
+
+function DocsKindSegmentedControl({
+  value,
+  onChange,
+  disabled = false
+}: {
+  value: WikiDocsKind;
+  onChange: (nextValue: WikiDocsKind) => void;
+  disabled?: boolean;
+}): JSX.Element {
+  return (
+    <div className="wiki-docs-kind-control" role="group" aria-label="Docs branch">
+      {(Object.keys(DOCS_KIND_LABELS) as WikiDocsKind[]).map((kind) => (
+        <button
+          key={kind}
+          type="button"
+          className={value === kind ? "wiki-docs-kind-option wiki-docs-kind-option-active" : "wiki-docs-kind-option"}
+          disabled={disabled}
+          aria-pressed={value === kind}
+          onClick={() => onChange(kind)}
+        >
+          {DOCS_KIND_LABELS[kind]}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function clampSelectionRange(
   value: string,
@@ -774,6 +802,69 @@ function collectFolderPaths(nodes: WikiTreeNode[]): string[] {
   return paths;
 }
 
+function collectAncestorFolderPaths(path: string | null | undefined): string[] {
+  if (!path) {
+    return [];
+  }
+  const segments = path.split("/").filter(Boolean);
+  return segments.slice(0, -1).map((_, index) => segments.slice(0, index + 1).join("/"));
+}
+
+function collectDefaultExpandedFolderPaths(nodes: WikiTreeNode[], activePath: string | null | undefined): string[] {
+  const paths = new Set<string>();
+  const visit = (list: WikiTreeNode[]): void => {
+    for (const node of list) {
+      if (node.type === "folder" && node.path && (node.nodeRole === "section" || node.nodeRole === "repository")) {
+        paths.add(node.path);
+      }
+      if (node.children.length > 0) {
+        visit(node.children);
+      }
+    }
+  };
+  visit(nodes);
+  collectAncestorFolderPaths(activePath).forEach((path) => paths.add(path));
+  return Array.from(paths);
+}
+
+function readExpandedFolderPaths(storageKey: string): string[] | null {
+  const rawValue = localStorage.getItem(storageKey);
+  if (!rawValue) {
+    return null;
+  }
+  try {
+    const parsedValue = JSON.parse(rawValue) as unknown;
+    return Array.isArray(parsedValue)
+      ? parsedValue.filter((value): value is string => typeof value === "string")
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function countTreePages(node: WikiTreeNode): number {
+  if (node.type === "page") {
+    return 1;
+  }
+  return node.children.reduce((total, child) => total + countTreePages(child), 0);
+}
+
+function treeNodeLabel(node: WikiTreeNode): string {
+  return node.displayName ?? node.title ?? (node.name || "root");
+}
+
+function treeNodeMeta(node: WikiTreeNode): string | null {
+  if (node.nodeRole === "repository") {
+    const prefix = node.repositoryPrefix ?? node.name;
+    return node.docsKind && prefix ? `/${node.docsKind}/${prefix}` : prefix ? `/${prefix}` : null;
+  }
+  if (node.nodeRole === "section") {
+    const pageCount = countTreePages(node);
+    return `${pageCount} page${pageCount === 1 ? "" : "s"}`;
+  }
+  return null;
+}
+
 function timeLabel(dateIso: string | null | undefined): string {
   if (!dateIso) {
     return "n/a";
@@ -814,11 +905,15 @@ function measureWikiSidebarAutoWidth(sidebar: HTMLElement, containerWidth: numbe
     const gapPx = Number.parseFloat(gapValue) || 0;
     const paddingLeftPx = Number.parseFloat(itemStyle?.paddingLeft ?? "0") || 0;
     const paddingRightPx = Number.parseFloat(itemStyle?.paddingRight ?? "0") || 0;
-    const badgeWidthPx = item?.querySelector<HTMLElement>(".badge")?.scrollWidth ?? 0;
+    const trailingWidthPx =
+      item?.querySelector<HTMLElement>(".wiki-tree-badges")?.scrollWidth ??
+      item?.querySelector<HTMLElement>(".wiki-tree-count")?.scrollWidth ??
+      item?.querySelector<HTMLElement>(".badge")?.scrollWidth ??
+      0;
 
     widestContentPx = Math.max(
       widestContentPx,
-      Math.ceil(element.scrollWidth + paddingLeftPx + paddingRightPx + (badgeWidthPx > 0 ? badgeWidthPx + gapPx : 0))
+      Math.ceil(element.scrollWidth + paddingLeftPx + paddingRightPx + (trailingWidthPx > 0 ? trailingWidthPx + gapPx : 0))
     );
   });
 
@@ -856,6 +951,7 @@ export function WikiHub({
   const [projectAccess, setProjectAccess] = useState<ProjectAccess | null>(null);
   const [treeNodes, setTreeNodes] = useState<WikiTreeNode[]>([]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [expandedFoldersLoaded, setExpandedFoldersLoaded] = useState(false);
   const [treeQuery, setTreeQuery] = useState("");
   const [loadingTree, setLoadingTree] = useState(true);
   const [loadingPage, setLoadingPage] = useState(false);
@@ -925,6 +1021,10 @@ export function WikiHub({
   const [success, setSuccess] = useState<string | null>(null);
 
   const initialPathNormalized = useMemo(() => normalizePath(initialPath ?? null), [initialPath]);
+  const expandedFoldersStorageKey = useMemo(
+    () => `${WIKI_EXPANDED_FOLDERS_STORAGE_KEY_PREFIX}:${projectId}`,
+    [projectId]
+  );
   const normalizedSearchQuery = useMemo(() => treeQuery.trim(), [treeQuery]);
   const searchModeActive = normalizedSearchQuery.length >= 2;
   const canWrite = projectAccess?.canWrite ?? false;
@@ -1217,13 +1317,24 @@ export function WikiHub({
     setPublishNote("");
   }, []);
 
+  const expandFoldersForPath = useCallback((path: string | null | undefined): void => {
+    const ancestorPaths = collectAncestorFolderPaths(path);
+    if (ancestorPaths.length === 0) {
+      return;
+    }
+    setExpandedFolders((current) => {
+      const next = new Set(current);
+      ancestorPaths.forEach((ancestorPath) => next.add(ancestorPath));
+      return next;
+    });
+  }, []);
+
   const loadTree = useCallback(
     async (authToken: string): Promise<WikiTreeNode[]> => {
       setLoadingTree(true);
       try {
         const nodes = await listWikiTree(projectId, authToken);
         setTreeNodes(nodes);
-        setExpandedFolders(new Set(collectFolderPaths(nodes)));
         setError(null);
         return nodes;
       } catch (treeError) {
@@ -1354,6 +1465,7 @@ export function WikiHub({
       return;
     }
 
+    setExpandedFoldersLoaded(false);
     setToken(storedToken);
     const storedUser = parseStoredUser(localStorage.getItem("doctoral_user"));
     setSessionUser(storedUser);
@@ -1367,16 +1479,37 @@ export function WikiHub({
         (initialPathNormalized && paths.includes(initialPathNormalized) ? initialPathNormalized : null) ??
         paths[0] ??
         null;
+      const existingFolders = new Set(collectFolderPaths(nodes));
+      const persistedExpandedPaths = readExpandedFolderPaths(expandedFoldersStorageKey);
+      const nextExpandedPaths = (persistedExpandedPaths ?? collectDefaultExpandedFolderPaths(nodes, candidatePath))
+        .filter((path) => existingFolders.has(path));
+      if (candidatePath) {
+        collectAncestorFolderPaths(candidatePath).forEach((path) => {
+          if (existingFolders.has(path)) {
+            nextExpandedPaths.push(path);
+          }
+        });
+      }
+      setExpandedFolders(new Set(nextExpandedPaths));
+      setExpandedFoldersLoaded(true);
       setSelectedPath(candidatePath);
     })();
-  }, [initialPathNormalized, loadAccess, loadDocsSyncStatus, loadTree, router]);
+  }, [expandedFoldersStorageKey, initialPathNormalized, loadAccess, loadDocsSyncStatus, loadTree, router]);
+
+  useEffect(() => {
+    if (!expandedFoldersLoaded) {
+      return;
+    }
+    localStorage.setItem(expandedFoldersStorageKey, JSON.stringify(Array.from(expandedFolders)));
+  }, [expandedFolders, expandedFoldersLoaded, expandedFoldersStorageKey]);
 
   useEffect(() => {
     if (!token || !selectedPath) {
       return;
     }
+    expandFoldersForPath(selectedPath);
     void loadPage(token, selectedPath);
-  }, [loadPage, selectedPath, token]);
+  }, [expandFoldersForPath, loadPage, selectedPath, token]);
 
   useEffect(() => {
     setHistoryOpen(false);
@@ -2748,15 +2881,22 @@ export function WikiHub({
   }, []);
 
   const renderTreeNode = (node: WikiTreeNode, depth = 0): JSX.Element => {
+    const nodeRole = node.nodeRole ?? (node.type === "folder" ? "folder" : "page");
+    const rowClassName = `wiki-tree-row-${nodeRole}`;
+    const label = treeNodeLabel(node);
+    const meta = treeNodeMeta(node);
+
     if (node.type === "folder") {
       const isExpanded = expandedFolders.has(node.path);
+      const NodeIcon = nodeRole === "section" ? BookOpen : nodeRole === "repository" ? GitBranch : Folder;
       return (
         <li key={`folder:${node.path}`} className="wiki-tree-item">
           <button
             type="button"
-            className="wiki-tree-folder"
+            className={`wiki-tree-folder ${rowClassName}`}
             data-wiki-sidebar-item="folder"
             style={{ paddingLeft: `${0.6 + depth * 0.8}rem` }}
+            aria-expanded={isExpanded}
             onClick={() => {
               setExpandedFolders((current) => {
                 const next = new Set(current);
@@ -2772,10 +2912,18 @@ export function WikiHub({
           >
             <span className="wiki-tree-row-content" data-wiki-sidebar-measure>
               <span className="wiki-tree-chevron" aria-hidden>
-                {isExpanded ? "▾" : "▸"}
+                {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </span>
-              <span className="wiki-tree-folder-name">{node.displayName ?? (node.name || "root")}</span>
+              {node.orderLabel ? <span className="wiki-tree-folio">{node.orderLabel}</span> : null}
+              <span className="wiki-tree-icon" aria-hidden>
+                <NodeIcon size={14} />
+              </span>
+              <span className="wiki-tree-copy">
+                <span className="wiki-tree-folder-name">{label}</span>
+                {meta ? <span className="wiki-tree-meta">{meta}</span> : null}
+              </span>
             </span>
+            {nodeRole === "repository" ? <span className="wiki-tree-count">{countTreePages(node)}</span> : null}
           </button>
           {isExpanded ? <ul className="wiki-tree-list">{node.children.map((child) => renderTreeNode(child, depth + 1))}</ul> : null}
         </li>
@@ -2787,18 +2935,26 @@ export function WikiHub({
       <li key={`page:${node.path}`} className="wiki-tree-item">
         <button
           type="button"
-          className={isActive ? "wiki-tree-page wiki-tree-page-active" : "wiki-tree-page"}
+          className={isActive ? `wiki-tree-page ${rowClassName} wiki-tree-page-active` : `wiki-tree-page ${rowClassName}`}
           data-wiki-sidebar-item="page"
           style={{ paddingLeft: `${0.8 + depth * 0.8}rem` }}
           onClick={() => void openPath(node.path)}
           title={`/${node.path}`}
         >
           <span className="wiki-tree-row-content" data-wiki-sidebar-measure>
-            <span className="wiki-tree-page-title">{node.title ?? node.name}</span>
+            {node.orderLabel ? <span className="wiki-tree-folio">{node.orderLabel}</span> : null}
+            <span className="wiki-tree-icon" aria-hidden>
+              <FileText size={14} />
+            </span>
+            <span className="wiki-tree-copy">
+              <span className="wiki-tree-page-title">{label}</span>
+            </span>
           </span>
-          {node.isDocsOverview ? <span className="badge">Overview</span> : null}
-          {node.isUnpublished ? <span className="badge">Unpublished</span> : null}
-          {!node.isUnpublished && node.hasDraftChanges ? <span className="badge">Draft</span> : null}
+          <span className="wiki-tree-badges">
+            {node.isDocsOverview ? <span className="wiki-tree-badge">Index</span> : null}
+            {node.isUnpublished ? <span className="wiki-tree-badge">Unpublished</span> : null}
+            {!node.isUnpublished && node.hasDraftChanges ? <span className="wiki-tree-badge">Draft</span> : null}
+          </span>
         </button>
       </li>
     );
@@ -2836,7 +2992,7 @@ export function WikiHub({
           <ModuleCockpit
             variant="archive"
             className="wiki-sidebar-toolbar"
-            title="Pages"
+            title="Index"
             titleLevel="h3"
             metrics={
               <>
@@ -2939,13 +3095,16 @@ export function WikiHub({
           ) : null}
 
           <label className="wiki-search-label">
-            Search
-            <input
-              className="input"
-              value={treeQuery}
-              onChange={(event) => setTreeQuery(event.target.value)}
-              placeholder="Search by words in wiki content"
-            />
+            <span className="wiki-search-label-text">Search</span>
+            <span className="wiki-search-field">
+              <Search size={15} aria-hidden="true" />
+              <input
+                className="input"
+                value={treeQuery}
+                onChange={(event) => setTreeQuery(event.target.value)}
+                placeholder="Search wiki content"
+              />
+            </span>
           </label>
 
           {showCreateForm ? (
@@ -3006,18 +3165,14 @@ export function WikiHub({
               ) : (
                 <p className="alert alert-info">No Code repositories are available for Docs-backed wiki pages.</p>
               )}
-              <label>
-                Docs branch
-                <select
-                  className="input"
+              <div className="wiki-field-group">
+                <span className="wiki-field-label">Docs branch</span>
+                <DocsKindSegmentedControl
                   value={createDocsKind}
-                  onChange={(event) => setCreateDocsKind(event.target.value as WikiDocsKind)}
                   disabled={creatingPage}
-                >
-                  <option value="research">Research</option>
-                  <option value="implementation">Implementation</option>
-                </select>
-              </label>
+                  onChange={setCreateDocsKind}
+                />
+              </div>
               <label>
                 Folder path inside branch (optional)
                 <input
@@ -3025,7 +3180,7 @@ export function WikiHub({
                   value={createFolderPath}
                   maxLength={300}
                   onChange={(event) => setCreateFolderPath(event.target.value)}
-                  placeholder={createDocsKind === "research" ? "methods" : "architecture"}
+                  placeholder={createDocsKind === "research" ? "01-background" : "01-architecture"}
                   disabled={creatingPage}
                 />
                 {selectedCreateDocsRepository ? (
@@ -3556,18 +3711,14 @@ export function WikiHub({
                             ))}
                           </select>
                         </label>
-                        <label>
-                          Docs branch
-                          <select
-                            className="input"
+                        <div className="wiki-field-group">
+                          <span className="wiki-field-label">Docs branch</span>
+                          <DocsKindSegmentedControl
                             value={entry.row.docsKind}
                             disabled={assigningDocs}
-                            onChange={(event) => updateAssignDocsRow(entry.row.pageId, { docsKind: event.target.value as WikiDocsKind })}
-                          >
-                            <option value="research">Research</option>
-                            <option value="implementation">Implementation</option>
-                          </select>
-                        </label>
+                            onChange={(docsKind) => updateAssignDocsRow(entry.row.pageId, { docsKind })}
+                          />
+                        </div>
                         <label>
                           Folder path inside branch
                           <input
@@ -3575,7 +3726,7 @@ export function WikiHub({
                             value={entry.row.folderPath}
                             maxLength={300}
                             disabled={assigningDocs}
-                            placeholder={entry.row.docsKind === "research" ? "methods" : "architecture"}
+                            placeholder={entry.row.docsKind === "research" ? "01-background" : "01-architecture"}
                             onChange={(event) => updateAssignDocsRow(entry.row.pageId, { folderPath: event.target.value })}
                           />
                         </label>

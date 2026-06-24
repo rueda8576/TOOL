@@ -1,5 +1,19 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Editorial Index Redesign (2026-06-24)
+- [x] Register the implementation checklist and keep progress current.
+- [x] Extend the Wiki tree contract with optional editorial index metadata and update backend tree ordering/humanization.
+- [x] Update managed repository Docs bootstrap and generated `AGENTS.md` guidance for the Research/Implementation taxonomy.
+- [x] Redesign the Wiki sidebar, tree rows, search/actions, Docs creation, and assignment controls as an editorial index.
+- [x] Run focused API/web verification, static audits, visual QA where available, and document results.
+
+### Review
+- Extended `WikiTreeNode` with additive editorial metadata (`nodeRole`, Docs paths, repository identity, repository prefix, folio/order label) and updated backend tree building so Research and Implementation remain primary, repositories become labeled index rows, README/index pages sort first, and numbered folders such as `01-background` render with human labels and stable ordering.
+- Reworked managed GitLab repository bootstrap so new repos get `AGENTS.md`, branch README indexes, and minimal ordered folder seeds under `Docs/Research` and `Docs/Implementation`; existing repositories remain unchanged and migration stays assisted.
+- Redesigned the Wiki sidebar into a compact archive index: `Index` cockpit title, integrated search, lucide row/action icons, section/repository/page/index row roles, compact `Index`/`Draft`/`Unpublished` state chips, persisted per-project expansion, and segmented Research/Implementation controls in create/assign flows.
+- Updated Playwright fixtures and visual baseline so mocked Wiki QA covers the new editorial tree; only the Wiki mobile snapshot changed.
+- Verification passed: `pnpm --filter @doctoral/shared build`; focused API unit specs for `wiki-view-builders`, `wiki.service`, and `gitlab.service`; HTTP specs for Wiki/GitLab controllers; API and Web type-checks; API build; Web build; Web e2e; Web a11y; visual snapshot update plus stable visual rerun; `pnpm repo:check`; `pnpm lint`; `git diff --check`; active-code static audit for stale branding and old Wiki/Docs strings.
+
 ## VPS Docker Log Rotation - GitLab json logs (2026-06-23)
 - [x] Add bounded `json-file` logging to the managed GitLab compose service.
 - [x] Add an idempotent Docker log-rotation helper for daemon config, GitLab log truncation, and GitLab container recreation when `LogConfig` is stale.

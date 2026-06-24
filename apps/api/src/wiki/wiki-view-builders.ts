@@ -21,7 +21,7 @@ import {
   legacyDocsPathToCanonicalDocsPath,
   WIKI_DOCS_ROOT
 } from "./wiki-docs-paths";
-import { extractTitleFromMarkdown, hashMarkdownContent } from "./wiki-paths";
+import { extractTitleFromMarkdown, hashMarkdownContent, humanizeFileStem } from "./wiki-paths";
 
 const WIKI_DOCS_BINDING_STATUS_ACTIVE = "active";
 const WIKI_DOCS_KIND_LABELS: Record<WikiDocsKind, string> = {
@@ -44,6 +44,7 @@ export type WikiTreePageInput = {
   title: string;
   path: string;
   docsPath: string | null;
+  repositoryId: string | null;
   repositoryName: string | null;
   isUnpublished: boolean;
   updatedAt: Date;
@@ -176,6 +177,20 @@ export function buildWikiTreeNodes(
       .filter((repository) => repository.wikiDocsPrefix)
       .map((repository) => [repository.wikiDocsPrefix as string, repository.name])
   );
+  const repositoriesByPrefix = new Map(
+    repositories
+      .filter((repository) => repository.wikiDocsPrefix)
+      .map((repository) => [repository.wikiDocsPrefix as string, repository])
+  );
+
+  const orderPrefixMatch = (segment: string): RegExpMatchArray | null => segment.match(/^(\d{2,})[-_](.+)$/);
+
+  const orderLabelForSegment = (segment: string): string | null => orderPrefixMatch(segment)?.[1] ?? null;
+
+  const displayNameForSegment = (segment: string): string => {
+    const match = orderPrefixMatch(segment);
+    return humanizeFileStem(match?.[2] ?? segment).replace(/\b[a-z]/g, (character) => character.toUpperCase());
+  };
 
   const folderDisplayName = (path: string, name: string): string | undefined => {
     if (path === "research") {
@@ -191,7 +206,37 @@ export function buildWikiTreeNodes(
     if (segments.length === 1) {
       return repositoryNamesByPrefix.get(segments[0]!) ?? undefined;
     }
-    return undefined;
+    return displayNameForSegment(name);
+  };
+
+  const applyFolderMetadata = (folderNode: MutableNode, path: string, name: string): void => {
+    const segments = path.split("/").filter(Boolean);
+    const folderDocsKind = extractDocsKindFromWikiPath(path);
+    const displayName = folderDisplayName(path, name);
+    if (displayName) {
+      folderNode.displayName = displayName;
+    }
+    if (folderDocsKind !== "legacy") {
+      folderNode.docsKind = folderDocsKind;
+    }
+    if (path === "research" || path === "implementation") {
+      folderNode.nodeRole = "section";
+      return;
+    }
+
+    const repositoryPrefix =
+      (segments[0] === "research" || segments[0] === "implementation" ? segments[1] : segments[0]) ?? null;
+    const repository = repositoryPrefix ? repositoriesByPrefix.get(repositoryPrefix) ?? null : null;
+    if (repository && (segments.length === 1 || segments.length === 2)) {
+      folderNode.nodeRole = "repository";
+      folderNode.repositoryId = repository.id;
+      folderNode.repositoryName = repository.name;
+      folderNode.repositoryPrefix = repository.wikiDocsPrefix;
+      return;
+    }
+
+    folderNode.nodeRole = "folder";
+    folderNode.orderLabel = orderLabelForSegment(name);
   };
 
   for (const page of pages) {
@@ -213,16 +258,10 @@ export function buildWikiTreeNodes(
         type: "folder",
         name: segment,
         path: currentPath,
+        nodeRole: "folder",
         children: []
       };
-      const displayName = folderDisplayName(currentPath, segment);
-      if (displayName) {
-        folderNode.displayName = displayName;
-      }
-      const folderDocsKind = extractDocsKindFromWikiPath(currentPath);
-      if (folderDocsKind !== "legacy") {
-        folderNode.docsKind = folderDocsKind;
-      }
+      applyFolderMetadata(folderNode, currentPath, segment);
       folders.get(parentPath)?.children.push(folderNode);
       folders.set(currentPath, folderNode);
       parentPath = currentPath;
@@ -233,6 +272,7 @@ export function buildWikiTreeNodes(
       type: "page",
       name: pageName,
       path: page.path,
+      nodeRole: "page",
       pageId: page.id,
       title: page.title,
       isUnpublished: page.isUnpublished,
@@ -244,12 +284,25 @@ export function buildWikiTreeNodes(
     if (docsInfo) {
       pageNode.docsKind = docsInfo.kind;
       pageNode.isDocsOverview = docsInfo.isOverview;
+      pageNode.docsPath = docsInfo.docsPath;
+      pageNode.docsRelativePath = docsInfo.relativePath;
+      pageNode.nodeRole = docsInfo.isOverview ? "index" : "page";
     }
     if (page.repositoryName) {
       pageNode.repositoryName = page.repositoryName;
     }
+    if (page.repositoryId) {
+      pageNode.repositoryId = page.repositoryId;
+    }
+    const repositoryPrefix = extractRepositoryPrefixFromWikiPath(page.path);
+    if (repositoryPrefix && repositoriesByPrefix.has(repositoryPrefix)) {
+      pageNode.repositoryPrefix = repositoryPrefix;
+    }
+    pageNode.orderLabel = orderLabelForSegment(pageName);
     parent.children.push(pageNode);
   }
+
+  const sortLabel = (node: MutableNode): string => (node.displayName ?? node.title ?? node.name).toLowerCase();
 
   const sortNodes = (nodes: MutableNode[]): MutableNode[] =>
     nodes
@@ -269,18 +322,45 @@ export function buildWikiTreeNodes(
           }
           return 2;
         };
+        const roleOrder = (node: MutableNode): number => {
+          if (node.nodeRole === "section") {
+            return 0;
+          }
+          if (node.nodeRole === "repository") {
+            return 1;
+          }
+          if (node.nodeRole === "index" || node.isDocsOverview) {
+            return 2;
+          }
+          if (node.type === "folder") {
+            return 3;
+          }
+          return 4;
+        };
         const leftRootOrder = rootOrder(left);
         const rightRootOrder = rootOrder(right);
         if (leftRootOrder !== rightRootOrder) {
           return leftRootOrder - rightRootOrder;
         }
-        if (left.isDocsOverview !== right.isDocsOverview) {
-          return left.isDocsOverview ? -1 : 1;
+        const leftRoleOrder = roleOrder(left);
+        const rightRoleOrder = roleOrder(right);
+        if (leftRoleOrder !== rightRoleOrder) {
+          return leftRoleOrder - rightRoleOrder;
         }
-        if (left.type !== right.type) {
-          return left.type === "folder" ? -1 : 1;
+        const leftOrderLabel = left.orderLabel ? Number.parseInt(left.orderLabel, 10) : null;
+        const rightOrderLabel = right.orderLabel ? Number.parseInt(right.orderLabel, 10) : null;
+        if (leftOrderLabel !== null || rightOrderLabel !== null) {
+          if (leftOrderLabel === null) {
+            return 1;
+          }
+          if (rightOrderLabel === null) {
+            return -1;
+          }
+          if (leftOrderLabel !== rightOrderLabel) {
+            return leftOrderLabel - rightOrderLabel;
+          }
         }
-        return left.name.localeCompare(right.name);
+        return sortLabel(left).localeCompare(sortLabel(right));
       });
 
   return sortNodes(root.children);

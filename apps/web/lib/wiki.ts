@@ -57,6 +57,7 @@ export type {
   WikiRevisionView,
   WikiSearchResult,
   WikiTreeNode,
+  WikiTreeNodeRole,
   WikiUserSummary
 } from "@doctoral/shared";
 

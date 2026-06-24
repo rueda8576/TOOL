@@ -14,17 +14,24 @@ export type WikiUserSummary = {
 
 export type WikiDocsKind = (typeof WIKI_DOCS_KINDS)[number];
 export type WikiDocsStructureKind = (typeof WIKI_DOCS_STRUCTURE_KINDS)[number];
+export type WikiTreeNodeRole = "section" | "repository" | "folder" | "page" | "index";
 
 export type WikiTreeNode = {
   type: "folder" | "page";
   name: string;
   displayName?: string;
   path: string;
+  nodeRole?: WikiTreeNodeRole;
   pageId?: string;
   title?: string;
   isDocsOverview?: boolean;
   docsKind?: WikiDocsStructureKind;
+  docsPath?: string | null;
+  docsRelativePath?: string | null;
+  repositoryId?: string | null;
   repositoryName?: string | null;
+  repositoryPrefix?: string | null;
+  orderLabel?: string | null;
   isUnpublished?: boolean;
   hasDraftChanges?: boolean;
   draftUpdatedAt?: string | null;

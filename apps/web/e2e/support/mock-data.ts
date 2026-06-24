@@ -57,6 +57,116 @@ export const documentItem = {
 
 export const wikiTree = [
   {
+    type: "folder",
+    name: "research",
+    displayName: "Research",
+    path: "research",
+    nodeRole: "section",
+    docsKind: "research",
+    children: [
+      {
+        type: "folder",
+        name: "atlasium-research-archive",
+        displayName: "atlasium-research-archive",
+        path: "research/atlasium-research-archive",
+        nodeRole: "repository",
+        docsKind: "research",
+        repositoryId: "repo-1",
+        repositoryName: "atlasium-research-archive",
+        repositoryPrefix: "atlasium-research-archive",
+        children: [
+          {
+            type: "page",
+            name: "readme",
+            pageId: "wiki-research-index",
+            title: "Research Index",
+            path: "research/atlasium-research-archive/readme",
+            nodeRole: "index",
+            docsKind: "research",
+            docsPath: "Docs/Research/README.md",
+            docsRelativePath: "Research/README.md",
+            repositoryId: "repo-1",
+            repositoryName: "atlasium-research-archive",
+            repositoryPrefix: "atlasium-research-archive",
+            isDocsOverview: true,
+            isUnpublished: false,
+            hasDraftChanges: false,
+            children: []
+          },
+          {
+            type: "folder",
+            name: "01-background",
+            displayName: "Background",
+            path: "research/atlasium-research-archive/01-background",
+            nodeRole: "folder",
+            docsKind: "research",
+            orderLabel: "01",
+            children: [
+              {
+                type: "page",
+                name: "field-study-context",
+                pageId: "wiki-field-study-context",
+                title: "Field Study Context",
+                path: "research/atlasium-research-archive/01-background/field-study-context",
+                nodeRole: "page",
+                docsKind: "research",
+                docsPath: "Docs/Research/01-background/field-study-context.md",
+                docsRelativePath: "Research/01-background/field-study-context.md",
+                repositoryId: "repo-1",
+                repositoryName: "atlasium-research-archive",
+                repositoryPrefix: "atlasium-research-archive",
+                isUnpublished: false,
+                hasDraftChanges: true,
+                children: []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    type: "folder",
+    name: "implementation",
+    displayName: "Implementation",
+    path: "implementation",
+    nodeRole: "section",
+    docsKind: "implementation",
+    children: [
+      {
+        type: "folder",
+        name: "atlasium-research-archive",
+        displayName: "atlasium-research-archive",
+        path: "implementation/atlasium-research-archive",
+        nodeRole: "repository",
+        docsKind: "implementation",
+        repositoryId: "repo-1",
+        repositoryName: "atlasium-research-archive",
+        repositoryPrefix: "atlasium-research-archive",
+        children: [
+          {
+            type: "page",
+            name: "readme",
+            pageId: "wiki-implementation-index",
+            title: "Implementation Index",
+            path: "implementation/atlasium-research-archive/readme",
+            nodeRole: "index",
+            docsKind: "implementation",
+            docsPath: "Docs/Implementation/README.md",
+            docsRelativePath: "Implementation/README.md",
+            repositoryId: "repo-1",
+            repositoryName: "atlasium-research-archive",
+            repositoryPrefix: "atlasium-research-archive",
+            isDocsOverview: true,
+            isUnpublished: false,
+            hasDraftChanges: false,
+            children: []
+          }
+        ]
+      }
+    ]
+  },
+  {
     type: "page",
     name: "home",
     id: "wiki-home",
@@ -74,13 +184,56 @@ export const wikiTree = [
   }
 ];
 
+export const wikiResearchPage = {
+  page: {
+    id: "wiki-research-index",
+    projectId: qaProject.id,
+    slug: "readme",
+    folderPath: "research/atlasium-research-archive",
+    title: "Research Index",
+    path: "research/atlasium-research-archive/readme",
+    templateType: null,
+    updatedAt: "2026-06-18T08:00:00.000Z"
+  },
+  draft: {
+    title: "Research Index",
+    contentMarkdown: "# Research Index\n\nCanonical research documentation for the project archive.",
+    draftVersion: 2,
+    updatedAt: "2026-06-18T08:00:00.000Z",
+    updatedBy: qaUser
+  },
+  published: {
+    id: "revision-research-1",
+    revisionNumber: 1,
+    contentMarkdown: "# Research Index\n\nCanonical research documentation for the project archive.",
+    publishedAt: "2026-06-17T10:00:00.000Z",
+    createdBy: qaUser,
+    changeNote: "Initial research index"
+  },
+  outgoingLinks: [],
+  backlinks: [],
+  docsSource: {
+    repositoryId: "repo-1",
+    repositoryName: "atlasium-research-archive",
+    pathWithNamespace: "atlasium/research-archive",
+    defaultBranch: "main",
+    docsPath: "Docs/Research/README.md",
+    docsRoot: "Docs",
+    wikiPrefix: "atlasium-research-archive",
+    docsKind: "research",
+    isOverview: true
+  }
+};
+
 export const wikiPage = {
   page: {
     id: "wiki-home",
     projectId: qaProject.id,
     slug: "home",
+    folderPath: "",
     title: "Archive Home",
     path: "home",
+    templateType: null,
     parentPath: null,
     deletedAt: null,
     createdAt: "2026-06-01T09:00:00.000Z",
@@ -94,10 +247,11 @@ export const wikiPage = {
     updatedBy: qaUser
   },
   published: {
+    id: "revision-home-1",
     revisionNumber: 1,
-    title: "Archive Home",
     contentMarkdown: "# Archive Home\n\nAtlasium keeps project knowledge traceable across modules.",
     publishedAt: "2026-06-17T10:00:00.000Z",
+    createdBy: qaUser,
     changeNote: "Initial archive page",
     publishedBy: qaUser
   },

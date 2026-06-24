@@ -13,6 +13,7 @@ import {
   repository,
   taskItems,
   wikiPage,
+  wikiResearchPage,
   wikiTree
 } from "./mock-data";
 
@@ -138,7 +139,8 @@ export async function installMockApi(page: Page): Promise<void> {
       return;
     }
     if (method === "GET" && path === `/projects/${qaProject.id}/wiki-pages/by-path`) {
-      await json(route, wikiPage);
+      const wikiPath = url.searchParams.get("path");
+      await json(route, wikiPath === "home" ? wikiPage : wikiResearchPage);
       return;
     }
     if (method === "GET" && path === `/projects/${qaProject.id}/wiki-pages/docs-sync/status`) {
@@ -149,7 +151,7 @@ export async function installMockApi(page: Page): Promise<void> {
             name: repository.name,
             pathWithNamespace: repository.pathWithNamespace,
             defaultBranch: repository.defaultBranch,
-            wikiDocsPrefix: "Docs",
+            wikiDocsPrefix: "atlasium-research-archive",
             docsRoot: "Docs",
             lastSyncedAt: "2026-06-18T08:00:00.000Z",
             lastSyncError: null,
@@ -158,7 +160,7 @@ export async function installMockApi(page: Page): Promise<void> {
               research: 1,
               implementation: 0,
               legacy: 0,
-              unassigned: 0
+              migrationAvailable: false
             }
           }
         ],

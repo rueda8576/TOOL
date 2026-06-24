@@ -53,7 +53,9 @@ export async function waitForAtlasiumRouteReady(page: Page, route: string): Prom
   } else if (path === "/projects/project-1") {
     await expect(page.getByText("Atlasium Research Archive").first()).toBeVisible();
     await expect(page.getByText("Protocol ready")).toBeVisible();
-  } else if (path === "/projects/project-1/wiki" || path === "/projects/project-1/wiki/home") {
+  } else if (path === "/projects/project-1/wiki") {
+    await expect(page.getByRole("heading", { name: "Research Index" }).first()).toBeVisible();
+  } else if (path === "/projects/project-1/wiki/home") {
     await expect(page.getByRole("heading", { name: "Archive Home" }).first()).toBeVisible();
   } else if (path === "/projects/project-1/documents") {
     await expect(page.getByRole("heading", { name: "Field Study Protocol" })).toBeVisible();

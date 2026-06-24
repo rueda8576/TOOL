@@ -579,21 +579,45 @@ describe("GitlabService", () => {
         expect.objectContaining({
           action: "create",
           file_path: "AGENTS.md",
-          content: expect.stringContaining("Docs/Research/")
+          content: expect.stringContaining("Docs/Research/README.md")
+        }),
+        expect.objectContaining({
+          action: "create",
+          file_path: "Docs/Research/README.md",
+          content: expect.stringContaining("01-background/")
+        }),
+        expect.objectContaining({
+          action: "create",
+          file_path: "Docs/Implementation/README.md",
+          content: expect.stringContaining("01-architecture/")
         }),
         {
           action: "create",
-          file_path: "Docs/Research/.gitkeep",
+          file_path: "Docs/Research/01-background/.gitkeep",
           content: ""
         },
         {
           action: "create",
-          file_path: "Docs/Implementation/.gitkeep",
+          file_path: "Docs/Implementation/04-quality/.gitkeep",
           content: ""
         }
       ])
     );
+    expect(bootstrapBody.actions.map((action: { file_path: string }) => action.file_path)).toEqual([
+      "AGENTS.md",
+      "Docs/Research/README.md",
+      "Docs/Implementation/README.md",
+      "Docs/Research/01-background/.gitkeep",
+      "Docs/Research/02-methods/.gitkeep",
+      "Docs/Research/03-models/.gitkeep",
+      "Docs/Research/04-references/.gitkeep",
+      "Docs/Implementation/01-architecture/.gitkeep",
+      "Docs/Implementation/02-runtime/.gitkeep",
+      "Docs/Implementation/03-interfaces/.gitkeep",
+      "Docs/Implementation/04-quality/.gitkeep"
+    ]);
     expect(bootstrapBody.actions[0].content).toContain("Repo `Docs/` is not the Atlasium Documents module");
+    expect(bootstrapBody.actions[0].content).toContain("ordered folders such as `01-background/`");
   });
 
   it("allows project writers to create an additional managed repository", async () => {

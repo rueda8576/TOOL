@@ -66,6 +66,7 @@ describe("wiki view builders", () => {
           title: "Architecture",
           path: "implementation/atlasium-nav/architecture",
           docsPath: "Docs/Implementation/architecture.md",
+          repositoryId: "repo-1",
           repositoryName: "Atlasium Nav",
           isUnpublished: false,
           updatedAt: new Date("2026-06-18T11:00:00.000Z"),
@@ -78,6 +79,7 @@ describe("wiki view builders", () => {
           title: "Implementation Overview",
           path: "implementation/atlasium-nav/index",
           docsPath: "Docs/Implementation/index.md",
+          repositoryId: "repo-1",
           repositoryName: "Atlasium Nav",
           isUnpublished: false,
           updatedAt: new Date("2026-06-18T10:00:00.000Z"),
@@ -90,6 +92,7 @@ describe("wiki view builders", () => {
           title: "Research Overview",
           path: "research/atlasium-nav/index",
           docsPath: "Docs/Research/README.md",
+          repositoryId: "repo-1",
           repositoryName: "Atlasium Nav",
           isUnpublished: true,
           updatedAt: new Date("2026-06-18T09:00:00.000Z"),
@@ -102,12 +105,21 @@ describe("wiki view builders", () => {
     );
 
     expect(tree.map((node) => node.path)).toEqual(["research", "implementation"]);
-    expect(tree[0]).toMatchObject({ type: "folder", path: "research", displayName: "Research", docsKind: "research" });
+    expect(tree[0]).toMatchObject({
+      type: "folder",
+      path: "research",
+      displayName: "Research",
+      docsKind: "research",
+      nodeRole: "section"
+    });
     expect(tree[1]?.children[0]).toMatchObject({
       type: "folder",
       path: "implementation/atlasium-nav",
       displayName: "Atlasium Nav",
-      docsKind: "implementation"
+      docsKind: "implementation",
+      nodeRole: "repository",
+      repositoryId: "repo-1",
+      repositoryPrefix: "atlasium-nav"
     });
     expect(tree[1]?.children[0]?.children.map((node) => node.path)).toEqual([
       "implementation/atlasium-nav/index",
@@ -117,7 +129,55 @@ describe("wiki view builders", () => {
       pageId: "page-2",
       hasDraftChanges: true,
       draftUpdatedAt: "2026-06-18T11:30:00.000Z",
-      repositoryName: "Atlasium Nav"
+      repositoryName: "Atlasium Nav",
+      docsPath: "Docs/Implementation/architecture.md",
+      docsRelativePath: "Implementation/architecture.md",
+      nodeRole: "page"
+    });
+  });
+
+  it("humanizes numbered Docs folders while preserving stable paths", () => {
+    const tree = buildWikiTreeNodes(
+      [
+        {
+          id: "page-1",
+          title: "Sputtering Models",
+          path: "research/atlasium-nav/03-models/sputtering",
+          docsPath: "Docs/Research/03-models/sputtering.md",
+          repositoryId: "repo-1",
+          repositoryName: "Atlasium Nav",
+          isUnpublished: false,
+          updatedAt: new Date("2026-06-18T11:00:00.000Z"),
+          hasDraftChanges: false,
+          draftUpdatedAt: null,
+          draftUpdatedBy: null
+        },
+        {
+          id: "page-2",
+          title: "Physical Background",
+          path: "research/atlasium-nav/01-background/physical-background",
+          docsPath: "Docs/Research/01-background/physical-background.md",
+          repositoryId: "repo-1",
+          repositoryName: "Atlasium Nav",
+          isUnpublished: false,
+          updatedAt: new Date("2026-06-18T11:00:00.000Z"),
+          hasDraftChanges: false,
+          draftUpdatedAt: null,
+          draftUpdatedBy: null
+        }
+      ],
+      [repository]
+    );
+
+    const repositoryFolder = tree[0]?.children[0];
+    expect(repositoryFolder?.children.map((node) => node.path)).toEqual([
+      "research/atlasium-nav/01-background",
+      "research/atlasium-nav/03-models"
+    ]);
+    expect(repositoryFolder?.children[0]).toMatchObject({
+      displayName: "Background",
+      orderLabel: "01",
+      nodeRole: "folder"
     });
   });
 

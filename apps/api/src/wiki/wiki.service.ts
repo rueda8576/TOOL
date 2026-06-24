@@ -2657,6 +2657,7 @@ export class WikiService {
             docsPath: true,
             repository: {
               select: {
+                id: true,
                 name: true
               }
             }
@@ -2681,6 +2682,7 @@ export class WikiService {
           title: page.title,
           path: page.path,
           docsPath: page.docsBinding?.docsPath ?? null,
+          repositoryId: page.docsBinding?.repository.id ?? null,
           repositoryName: page.docsBinding?.repository.name ?? null,
           isUnpublished,
           updatedAt: page.updatedAt,

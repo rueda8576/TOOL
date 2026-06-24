@@ -82,15 +82,52 @@ const MANAGED_REPOSITORY_AGENTS_MD = `# Atlasium Repository Documentation
 
 This repository belongs to an Atlasium project archive.
 
-## Repo Docs
+## Atlasium Repo Docs
 
 - Use the repo-local \`Docs/\` folder for Markdown documentation that should sync into the Atlasium Wiki.
 - \`Docs/Research/\` is for academic, theoretical, methodological, scientific, and technical reference knowledge.
 - \`Docs/Implementation/\` is for code architecture, implementation decisions, runtime behavior, integration notes, deployment, and engineering traceability.
 - Repo \`Docs/\` is not the Atlasium Documents module; it is the Git-backed Wiki sync source.
-- Prefer clear Markdown headings, stable filenames, relative links, citations or references when relevant, and concise operational language.
-- Use \`README.md\` or \`index.md\` inside a Docs branch only when the page is the branch overview.
+- Keep \`Docs/Research/README.md\` and \`Docs/Implementation/README.md\` as the branch indexes.
+- Prefer stable paths with ordered folders such as \`01-background/\`, \`02-methods/\`, \`01-architecture/\`, and \`04-quality/\`.
+- Use concise Markdown pages with clear headings, stable filenames, relative links, citations or references where relevant, and no generated marketing copy.
+- Do not move existing Docs files automatically. When structure is unclear, propose a review path before renaming or relocating content.
 `;
+
+const MANAGED_REPOSITORY_RESEARCH_README = `# Research
+
+Use this branch for academic, theoretical, methodological, scientific, and technical reference knowledge.
+
+## Index
+
+- \`01-background/\` - context, physical background, literature, and assumptions.
+- \`02-methods/\` - methodology, derivations, protocols, and measurement approach.
+- \`03-models/\` - scientific or computational models and parameter references.
+- \`04-references/\` - citations, source notes, and external references.
+`;
+
+const MANAGED_REPOSITORY_IMPLEMENTATION_README = `# Implementation
+
+Use this branch for code architecture, implementation decisions, runtime behavior, integration notes, deployment, and engineering traceability.
+
+## Index
+
+- \`01-architecture/\` - project structure, module boundaries, and design decisions.
+- \`02-runtime/\` - execution flow, configuration, deployment, and operational behavior.
+- \`03-interfaces/\` - public APIs, CLI commands, file formats, and integration contracts.
+- \`04-quality/\` - tests, validation, limitations, and extension guidance.
+`;
+
+const MANAGED_REPOSITORY_DOCS_FOLDERS = [
+  "Docs/Research/01-background/.gitkeep",
+  "Docs/Research/02-methods/.gitkeep",
+  "Docs/Research/03-models/.gitkeep",
+  "Docs/Research/04-references/.gitkeep",
+  "Docs/Implementation/01-architecture/.gitkeep",
+  "Docs/Implementation/02-runtime/.gitkeep",
+  "Docs/Implementation/03-interfaces/.gitkeep",
+  "Docs/Implementation/04-quality/.gitkeep"
+] as const;
 
 type GitlabOAuthTokenPayload = {
   access_token: string;
@@ -717,14 +754,19 @@ export class GitlabService {
             },
             {
               action: "create",
-              file_path: "Docs/Research/.gitkeep",
-              content: ""
+              file_path: "Docs/Research/README.md",
+              content: MANAGED_REPOSITORY_RESEARCH_README
             },
             {
               action: "create",
-              file_path: "Docs/Implementation/.gitkeep",
+              file_path: "Docs/Implementation/README.md",
+              content: MANAGED_REPOSITORY_IMPLEMENTATION_README
+            },
+            ...MANAGED_REPOSITORY_DOCS_FOLDERS.map((filePath) => ({
+              action: "create",
+              file_path: filePath,
               content: ""
-            }
+            }))
           ]
         })
       }
