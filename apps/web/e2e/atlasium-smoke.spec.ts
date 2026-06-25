@@ -96,6 +96,10 @@ test("@e2e wiki single-repo sections render without repository rows", async ({ p
   await page.goto("/projects/project-1/wiki", { waitUntil: "domcontentloaded" });
   await waitForAtlasiumRouteReady(page, "/projects/project-1/wiki");
 
+  const dossierRows = page.locator(".wiki-tree-row-section-dossier");
+  await expect(dossierRows).toHaveCount(2);
+  await expect(dossierRows.filter({ hasText: "Research" }).locator(".wiki-tree-count")).toHaveText("2");
+  await expect(dossierRows.filter({ hasText: "Implementation" }).locator(".wiki-tree-count")).toHaveText("1");
   await expect(page.locator(".wiki-tree-row-repository")).toHaveCount(0);
   await expect(page.locator(".wiki-tree-row-index").filter({ hasText: "Research Index" })).toBeVisible();
   await expect(page.locator(".wiki-tree-row-index").filter({ hasText: "Implementation Index" })).toBeVisible();

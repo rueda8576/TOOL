@@ -1,5 +1,19 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Compacted Section Dossier Rows (2026-06-25)
+- [x] Register the implementation checklist and keep progress current.
+- [x] Add a compacted section row state for single-repository Research/Implementation sections.
+- [x] Style compacted section rows as restrained archive dossier rows without reintroducing repository labels.
+- [x] Update focused Wiki e2e/visual coverage and snapshots as needed.
+- [x] Run focused web verification, static audits, and document results.
+
+### Review
+- Added a compacted section dossier state so single-repository Research/Implementation rows regain a restrained box, page-count chip, and archive anchor without showing the repository name/path again.
+- Kept multi-repository behavior intact: repository rows still own their existing box when they are needed as a choice level.
+- Refined the focused Wiki e2e coverage to assert the two dossier section rows and their counts while confirming repository rows stay hidden in the single-repo fixture.
+- Updated the Wiki mobile visual snapshot after reviewing the rendered result; the section rows now carry the box treatment and the index pages remain directly underneath.
+- Verification passed: web type-check, web build, web e2e, web a11y, visual snapshot update, clean visual rerun, `pnpm repo:check`, `pnpm lint`, `git diff --check`, and static audits for obsolete branding plus stale Docs repo copy.
+
 ## Wiki Single-Repo Index Compaction (2026-06-25)
 - [x] Register the implementation checklist and keep progress current.
 - [x] Compact single-repository Research/Implementation sections in the Wiki tree render without changing API/tree contracts.

@@ -3738,6 +3738,34 @@ body.wiki-layout-dragging * {
   text-transform: uppercase;
 }
 
+.wiki-tree-row-section-dossier {
+  margin-top: 0.44rem;
+  padding: 0.42rem 0.5rem 0.42rem 0.42rem;
+  border-color: color-mix(in srgb, var(--line) 84%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--brand) 58%, var(--line));
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: color-mix(in srgb, var(--surface-paper) 56%, transparent);
+  color: var(--text-strong);
+}
+
+.wiki-tree-row-section-dossier:hover {
+  border-color: color-mix(in srgb, var(--line-strong) 72%, var(--line));
+  border-left-color: color-mix(in srgb, var(--brand) 72%, var(--line));
+  background: color-mix(in srgb, var(--surface-paper) 72%, var(--surface));
+}
+
+.wiki-tree-row-section-dossier .wiki-tree-folder-name {
+  font-size: 0.78rem;
+}
+
+.wiki-tree-row-section-dossier .wiki-tree-icon {
+  color: color-mix(in srgb, var(--brand) 50%, var(--text-muted));
+}
+
+.wiki-tree-row-section-dossier .wiki-tree-count {
+  background: color-mix(in srgb, var(--surface-raised) 86%, var(--surface-paper));
+}
+
 .wiki-tree-row-repository {
   border-color: color-mix(in srgb, var(--line) 82%, transparent);
   background: color-mix(in srgb, var(--surface-paper) 48%, transparent);

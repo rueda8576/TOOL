@@ -849,13 +849,13 @@ function countTreePages(node: WikiTreeNode): number {
   return node.children.reduce((total, child) => total + countTreePages(child), 0);
 }
 
+function treePageCountLabel(count: number): string {
+  return `${count} page${count === 1 ? "" : "s"}`;
+}
+
 function getCompactedSectionRepository(node: WikiTreeNode): WikiTreeNode | null {
   const onlyChild = node.children[0];
   return node.nodeRole === "section" && node.children.length === 1 && onlyChild?.nodeRole === "repository" ? onlyChild : null;
-}
-
-function visibleTreeChildren(node: WikiTreeNode): WikiTreeNode[] {
-  return getCompactedSectionRepository(node)?.children ?? node.children;
 }
 
 function docsRepositoryMetricLabel(count: number): string {
@@ -873,7 +873,7 @@ function treeNodeMeta(node: WikiTreeNode): string | null {
   }
   if (node.nodeRole === "section") {
     const pageCount = countTreePages(node);
-    return `${pageCount} page${pageCount === 1 ? "" : "s"}`;
+    return treePageCountLabel(pageCount);
   }
   return null;
 }
@@ -2895,14 +2895,20 @@ export function WikiHub({
 
   const renderTreeNode = (node: WikiTreeNode, depth = 0): JSX.Element => {
     const nodeRole = node.nodeRole ?? (node.type === "folder" ? "folder" : "page");
-    const rowClassName = `wiki-tree-row-${nodeRole}`;
+    const compactedSectionRepository = getCompactedSectionRepository(node);
+    const isCompactedSection = Boolean(compactedSectionRepository);
+    const rowClassName = isCompactedSection
+      ? `wiki-tree-row-${nodeRole} wiki-tree-row-section-dossier`
+      : `wiki-tree-row-${nodeRole}`;
     const label = treeNodeLabel(node);
-    const meta = treeNodeMeta(node);
+    const meta = isCompactedSection ? null : treeNodeMeta(node);
 
     if (node.type === "folder") {
       const isExpanded = expandedFolders.has(node.path);
       const NodeIcon = nodeRole === "section" ? BookOpen : nodeRole === "repository" ? GitBranch : Folder;
-      const childNodes = visibleTreeChildren(node);
+      const childNodes = compactedSectionRepository?.children ?? node.children;
+      const showPageCount = nodeRole === "repository" || isCompactedSection;
+      const pageCount = showPageCount ? countTreePages(node) : null;
       return (
         <li key={`folder:${node.path}`} className="wiki-tree-item">
           <button
@@ -2937,7 +2943,11 @@ export function WikiHub({
                 {meta ? <span className="wiki-tree-meta">{meta}</span> : null}
               </span>
             </span>
-            {nodeRole === "repository" ? <span className="wiki-tree-count">{countTreePages(node)}</span> : null}
+            {pageCount !== null ? (
+              <span className="wiki-tree-count" title={treePageCountLabel(pageCount)}>
+                {pageCount}
+              </span>
+            ) : null}
           </button>
           {isExpanded ? <ul className="wiki-tree-list">{childNodes.map((child) => renderTreeNode(child, depth + 1))}</ul> : null}
         </li>
