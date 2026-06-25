@@ -1,5 +1,19 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Single-Repo Index Compaction (2026-06-25)
+- [x] Register the implementation checklist and keep progress current.
+- [x] Compact single-repository Research/Implementation sections in the Wiki tree render without changing API/tree contracts.
+- [x] Fix Wiki cockpit Docs repository metric pluralization.
+- [x] Add focused Playwright coverage for compacted single-repo Wiki sections.
+- [x] Run focused web verification, visual QA, static audits, and document results.
+
+### Review
+- Compacted the Wiki sidebar render so a Research/Implementation section with exactly one repository shows the repository's pages and folders directly under the section, while preserving the original tree data, paths, expansion state, and multi-repository behavior.
+- Fixed the Wiki cockpit metric copy so one repository reads `1 Docs repo`; plural counts continue to read `N Docs repos`.
+- Added Playwright e2e coverage proving single-repo Wiki fixtures render no repository rows while keeping Research and Implementation index rows visible.
+- Updated the Wiki mobile visual snapshot after confirming the new hierarchy removes the redundant repository row and keeps the archive index readable.
+- Verification passed: web type-check, web build, web e2e, web a11y, visual snapshot update, clean visual rerun, `pnpm repo:check`, `pnpm lint`, `git diff --check`, and static audits for stale `1 Docs repos` copy plus obsolete active branding.
+
 ## Wiki Editorial Index Redesign (2026-06-24)
 - [x] Register the implementation checklist and keep progress current.
 - [x] Extend the Wiki tree contract with optional editorial index metadata and update backend tree ordering/humanization.

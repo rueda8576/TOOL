@@ -849,6 +849,19 @@ function countTreePages(node: WikiTreeNode): number {
   return node.children.reduce((total, child) => total + countTreePages(child), 0);
 }
 
+function getCompactedSectionRepository(node: WikiTreeNode): WikiTreeNode | null {
+  const onlyChild = node.children[0];
+  return node.nodeRole === "section" && node.children.length === 1 && onlyChild?.nodeRole === "repository" ? onlyChild : null;
+}
+
+function visibleTreeChildren(node: WikiTreeNode): WikiTreeNode[] {
+  return getCompactedSectionRepository(node)?.children ?? node.children;
+}
+
+function docsRepositoryMetricLabel(count: number): string {
+  return `${count} Docs repo${count === 1 ? "" : "s"}`;
+}
+
 function treeNodeLabel(node: WikiTreeNode): string {
   return node.displayName ?? node.title ?? (node.name || "root");
 }
@@ -2889,6 +2902,7 @@ export function WikiHub({
     if (node.type === "folder") {
       const isExpanded = expandedFolders.has(node.path);
       const NodeIcon = nodeRole === "section" ? BookOpen : nodeRole === "repository" ? GitBranch : Folder;
+      const childNodes = visibleTreeChildren(node);
       return (
         <li key={`folder:${node.path}`} className="wiki-tree-item">
           <button
@@ -2925,7 +2939,7 @@ export function WikiHub({
             </span>
             {nodeRole === "repository" ? <span className="wiki-tree-count">{countTreePages(node)}</span> : null}
           </button>
-          {isExpanded ? <ul className="wiki-tree-list">{node.children.map((child) => renderTreeNode(child, depth + 1))}</ul> : null}
+          {isExpanded ? <ul className="wiki-tree-list">{childNodes.map((child) => renderTreeNode(child, depth + 1))}</ul> : null}
         </li>
       );
     }
@@ -2997,7 +3011,7 @@ export function WikiHub({
             metrics={
               <>
                 <MetricPill>{canWrite ? "Writable" : "Read only"}</MetricPill>
-                {docsSyncStatus ? <MetricPill>{docsSyncStatus.repositories.length} Docs repos</MetricPill> : null}
+                {docsSyncStatus ? <MetricPill>{docsRepositoryMetricLabel(docsSyncStatus.repositories.length)}</MetricPill> : null}
               </>
             }
           />

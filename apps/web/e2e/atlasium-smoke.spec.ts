@@ -91,6 +91,17 @@ test("@e2e wiki markdown toolbar renders editor formatting controls", async ({ p
   await expectNoHorizontalOverflow(page);
 });
 
+test("@e2e wiki single-repo sections render without repository rows", async ({ page }) => {
+  await seedSession(page, "admin");
+  await page.goto("/projects/project-1/wiki", { waitUntil: "domcontentloaded" });
+  await waitForAtlasiumRouteReady(page, "/projects/project-1/wiki");
+
+  await expect(page.locator(".wiki-tree-row-repository")).toHaveCount(0);
+  await expect(page.locator(".wiki-tree-row-index").filter({ hasText: "Research Index" })).toBeVisible();
+  await expect(page.locator(".wiki-tree-row-index").filter({ hasText: "Implementation Index" })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
 test("@e2e code repository sections render mocked repository lists", async ({ page }) => {
   await seedSession(page, "admin");
   await page.goto("/projects/project-1/code", { waitUntil: "domcontentloaded" });
