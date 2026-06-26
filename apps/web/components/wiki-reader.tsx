@@ -1,6 +1,6 @@
 "use client";
 
-import { MouseEvent as ReactMouseEvent } from "react";
+import { MouseEvent as ReactMouseEvent, RefObject } from "react";
 
 import { WikiMarkdown } from "./wiki-markdown";
 import { WikiPageDetail } from "../lib/wiki";
@@ -18,14 +18,18 @@ export function WikiReader({
   token,
   onOpenPath,
   activeWord,
-  onRenderedWordClick
+  activeWordOccurrenceIndex,
+  renderedMarkdownRef,
+  onRenderedWordDoubleClick
 }: {
   projectId: string;
   pageDetail: WikiPageDetail;
   token: string | null;
   onOpenPath: (path: string) => void;
   activeWord?: string | null;
-  onRenderedWordClick?: (event: ReactMouseEvent<HTMLElement>) => void;
+  activeWordOccurrenceIndex?: number;
+  renderedMarkdownRef?: RefObject<HTMLElement>;
+  onRenderedWordDoubleClick?: (event: ReactMouseEvent<HTMLElement>) => void;
 }): JSX.Element {
   return (
     <div className="wiki-read-view">
@@ -44,7 +48,7 @@ export function WikiReader({
           </>
         )}
       </div>
-      <article className="wiki-markdown" onClick={onRenderedWordClick}>
+      <article className="wiki-markdown" ref={renderedMarkdownRef} onDoubleClick={onRenderedWordDoubleClick}>
         <WikiMarkdown
           contentMarkdown={pageDetail.published ? pageDetail.published.contentMarkdown : pageDetail.draft?.contentMarkdown ?? ""}
           links={pageDetail.outgoingLinks}
@@ -53,6 +57,7 @@ export function WikiReader({
           docsSource={pageDetail.docsSource}
           onNavigateWikiPath={onOpenPath}
           activeWord={activeWord}
+          activeWordOccurrenceIndex={activeWordOccurrenceIndex}
         />
       </article>
 

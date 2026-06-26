@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
 import { expectAtlasiumBrand, expectNoDecorativeBrandDrift, expectNoHorizontalOverflow, waitForAtlasiumRouteReady } from "./support/assertions";
 import { installMockApi, seedSession } from "./support/mock-api";
@@ -14,6 +14,39 @@ const authenticatedRoutes = [
   { path: "/projects/project-1/meetings", heading: "Meetings" },
   { path: "/account", heading: "Account" }
 ];
+
+async function wordPointIn(locator: Locator, word: string, occurrenceIndex = 0): Promise<{ x: number; y: number }> {
+  const point = await locator.evaluate(
+    (root, options) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let currentNode = walker.nextNode();
+      let seen = 0;
+      while (currentNode) {
+        const text = currentNode.textContent ?? "";
+        let index = text.indexOf(options.word);
+        while (index >= 0) {
+          if (seen === options.occurrenceIndex) {
+            const range = document.createRange();
+            range.setStart(currentNode, index);
+            range.setEnd(currentNode, index + options.word.length);
+            const rect = range.getBoundingClientRect();
+            return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+          }
+          seen += 1;
+          index = text.indexOf(options.word, index + options.word.length);
+        }
+        currentNode = walker.nextNode();
+      }
+      return null;
+    },
+    { word, occurrenceIndex }
+  );
+  expect(point).not.toBeNull();
+  if (!point) {
+    throw new Error(`Unable to find "${word}" in locator text.`);
+  }
+  return point;
+}
 
 test.beforeEach(async ({ page }) => {
   await installMockApi(page);
@@ -91,50 +124,85 @@ test("@e2e wiki markdown toolbar renders editor formatting controls", async ({ p
   await expectNoHorizontalOverflow(page);
 });
 
-test("@e2e wiki editor and preview cross-highlight clicked words", async ({ page }) => {
+test("@e2e wiki editor and preview cross-highlight double-clicked words", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await seedSession(page, "admin");
   await page.goto("/projects/project-1/wiki/home", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByRole("heading", { name: "Archive Home", level: 2 })).toBeVisible();
+  const readArticle = page.locator(".wiki-read-view .wiki-markdown");
+  const readWordPoint = await wordPointIn(readArticle.locator("p").first(), "Atlasium");
+  await page.mouse.click(readWordPoint.x, readWordPoint.y);
+  await expect(readArticle.locator(".wiki-word-highlight")).toHaveCount(0);
+
   await page.getByRole("button", { name: "Edit" }).click();
 
   const textarea = page.locator(".wiki-editor-textarea");
+  const previewArticle = page.locator(".wiki-preview-panel .wiki-markdown");
   await expect(textarea).toBeVisible();
-  await textarea.evaluate((node: HTMLTextAreaElement) => {
-    const index = node.value.indexOf("project");
-    node.focus();
-    node.setSelectionRange(index, index + "project".length);
-    node.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-  });
-  await expect(page.locator(".wiki-preview-panel .wiki-word-highlight", { hasText: "project" }).first()).toBeVisible();
+  await textarea.click();
+  await expect(previewArticle.locator(".wiki-word-highlight")).toHaveCount(0);
 
-  const previewWordPoint = await page.locator(".wiki-preview-panel .wiki-markdown p").evaluate((paragraph) => {
-    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
-    let currentNode = walker.nextNode();
-    while (currentNode) {
-      const text = currentNode.textContent ?? "";
-      const index = text.indexOf("Atlasium");
-      if (index >= 0) {
-        const range = document.createRange();
-        range.setStart(currentNode, index);
-        range.setEnd(currentNode, index + "Atlasium".length);
-        const rect = range.getBoundingClientRect();
-        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      }
-      currentNode = walker.nextNode();
-    }
-    return null;
-  });
-  expect(previewWordPoint).not.toBeNull();
-  if (!previewWordPoint) {
-    return;
-  }
-
+  const previewWordPoint = await wordPointIn(previewArticle.locator("p").first(), "Atlasium");
   await page.mouse.click(previewWordPoint.x, previewWordPoint.y);
-  await expect(page.locator(".wiki-preview-panel .wiki-word-highlight", { hasText: "Atlasium" }).first()).toBeVisible();
-  await expect(textarea).toHaveJSProperty("selectionStart", 16);
+  await expect(previewArticle.locator(".wiki-word-highlight")).toHaveCount(0);
+
+  const longMarkdown = [
+    "# Archive Home",
+    "",
+    "Opening Atlasium reference stays near the top of the page.",
+    "",
+    ...Array.from({ length: 34 }, (_, index) => `Paragraph ${String(index + 1).padStart(2, "0")} keeps project knowledge traceable across modules.`),
+    "",
+    "Final Atlasium anchor proves the selected occurrence is centered across the editor and preview.",
+    "",
+    ...Array.from({ length: 10 }, (_, index) => `Tail paragraph ${String(index + 1).padStart(2, "0")} leaves enough paper below the target for centered scrolling.`)
+  ].join("\n\n");
+  await textarea.fill(longMarkdown);
+
+  await textarea.evaluate((node: HTMLTextAreaElement) => {
+    const index = node.value.lastIndexOf("Atlasium");
+    node.focus();
+    node.setSelectionRange(index, index + "Atlasium".length);
+    node.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  });
+
+  const atlasiumHighlights = previewArticle.locator(".wiki-word-highlight", { hasText: "Atlasium" });
+  await expect(atlasiumHighlights).toHaveCount(2);
+  const targetHighlight = previewArticle.locator(".wiki-word-highlight-target", { hasText: "Atlasium" });
+  await expect(targetHighlight).toHaveCount(1);
+  await expect.poll(() => targetHighlight.evaluate((node) => node.closest("p")?.textContent ?? "")).toContain("Final Atlasium anchor");
+  await expect
+    .poll(() =>
+      targetHighlight.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        const center = rect.top + rect.height / 2;
+        return Math.abs(center - window.innerHeight / 2) < window.innerHeight * 0.38;
+      })
+    )
+    .toBe(true);
+
+  await textarea.evaluate((node: HTMLTextAreaElement) => {
+    node.scrollTop = 0;
+    node.setSelectionRange(0, 0);
+  });
+  await targetHighlight.dblclick();
+
   const selectedText = await textarea.evaluate((node: HTMLTextAreaElement) => node.value.slice(node.selectionStart, node.selectionEnd));
   expect(selectedText).toBe("Atlasium");
+  const textareaState = await textarea.evaluate((node: HTMLTextAreaElement) => ({
+    expectedStart: node.value.lastIndexOf("Atlasium"),
+    selectionStart: node.selectionStart,
+    scrollTop: node.scrollTop,
+    rect: (() => {
+      const rect = node.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom };
+    })()
+  }));
+  expect(textareaState.selectionStart).toBe(textareaState.expectedStart);
+  expect(textareaState.scrollTop).toBeGreaterThan(0);
+  expect(textareaState.rect.bottom).toBeGreaterThan(0);
+  expect(textareaState.rect.top).toBeLessThan(await page.evaluate(() => window.innerHeight));
   await expectNoHorizontalOverflow(page);
 });
 

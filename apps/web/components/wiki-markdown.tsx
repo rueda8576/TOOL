@@ -22,7 +22,12 @@ type HastNode = {
   children?: HastNode[];
 };
 
-function splitTextNodeForWikiWord(value: string, normalizedWord: string): HastNode[] {
+function splitTextNodeForWikiWord(
+  value: string,
+  normalizedWord: string,
+  targetOccurrenceIndex: number,
+  occurrenceState: { currentIndex: number }
+): HastNode[] {
   const nodes: HastNode[] = [];
   let cursor = 0;
 
@@ -36,10 +41,15 @@ function splitTextNodeForWikiWord(value: string, normalizedWord: string): HastNo
     }
 
     if (normalizeWikiWordToken(word) === normalizedWord) {
+      const isTargetOccurrence = occurrenceState.currentIndex === targetOccurrenceIndex;
+      occurrenceState.currentIndex += 1;
       nodes.push({
         type: "element",
         tagName: "span",
-        properties: { className: ["wiki-word-highlight"] },
+        properties: {
+          className: isTargetOccurrence ? ["wiki-word-highlight", "wiki-word-highlight-target"] : ["wiki-word-highlight"],
+          ...(isTargetOccurrence ? { "data-wiki-word-target": "true" } : {})
+        },
         children: [{ type: "text", value: word }]
       });
     } else {
@@ -56,11 +66,12 @@ function splitTextNodeForWikiWord(value: string, normalizedWord: string): HastNo
   return nodes.length > 0 ? nodes : [{ type: "text", value }];
 }
 
-function createWikiWordHighlightPlugin(activeWord: string) {
+function createWikiWordHighlightPlugin(activeWord: string, activeWordOccurrenceIndex: number) {
   const normalizedWord = normalizeWikiWordToken(activeWord);
 
   return function wikiWordHighlightPlugin() {
     return (tree: HastNode): void => {
+      const occurrenceState = { currentIndex: 0 };
       const visit = (node: HastNode): void => {
         if (!node.children || ["code", "pre", "script", "style"].includes(node.tagName ?? "")) {
           return;
@@ -69,7 +80,7 @@ function createWikiWordHighlightPlugin(activeWord: string) {
         const nextChildren: HastNode[] = [];
         for (const child of node.children) {
           if (child.type === "text" && typeof child.value === "string") {
-            nextChildren.push(...splitTextNodeForWikiWord(child.value, normalizedWord));
+            nextChildren.push(...splitTextNodeForWikiWord(child.value, normalizedWord, activeWordOccurrenceIndex, occurrenceState));
             continue;
           }
           visit(child);
@@ -384,7 +395,8 @@ export function WikiMarkdown({
   projectId,
   docsSource,
   onNavigateWikiPath,
-  activeWord
+  activeWord,
+  activeWordOccurrenceIndex = 0
 }: {
   contentMarkdown: string;
   links?: WikiLinkView[];
@@ -393,6 +405,7 @@ export function WikiMarkdown({
   docsSource?: WikiDocsSourceView | null;
   onNavigateWikiPath?: (path: string) => void;
   activeWord?: string | null;
+  activeWordOccurrenceIndex?: number;
 }): JSX.Element {
   const renderedMarkdown = useMemo(
     () => normalizeWikiLinksMarkdown(normalizeWikiMathMarkdown(contentMarkdown)),
@@ -400,8 +413,8 @@ export function WikiMarkdown({
   );
   const linkByPath = useMemo(() => new Map(links.map((link) => [link.toPath, link])), [links]);
   const rehypePlugins = useMemo(
-    () => (activeWord ? [createWikiWordHighlightPlugin(activeWord), rehypeKatex] : [rehypeKatex]),
-    [activeWord]
+    () => (activeWord ? [createWikiWordHighlightPlugin(activeWord, activeWordOccurrenceIndex), rehypeKatex] : [rehypeKatex]),
+    [activeWord, activeWordOccurrenceIndex]
   );
 
   return (

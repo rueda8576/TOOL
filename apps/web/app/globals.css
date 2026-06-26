@@ -3870,6 +3870,13 @@ body.wiki-layout-dragging * {
   color: inherit;
 }
 
+.wiki-word-highlight-target {
+  background: color-mix(in srgb, var(--brand-soft) 88%, var(--surface-raised));
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--brand) 58%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--brand) 24%, transparent);
+  outline-offset: 1px;
+}
+
 .wiki-markdown pre {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);

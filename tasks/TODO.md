@@ -1,5 +1,20 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Double-Click Word Sync + Centering (2026-06-26)
+- [x] Register the implementation checklist and update the related lesson.
+- [x] Replace single-click/caret word sync with deliberate double-click activation.
+- [x] Track exact word occurrences and target highlights across editor, preview, and reader surfaces.
+- [x] Center the paired surface with reduced-motion-aware scroll behavior.
+- [x] Update focused Wiki e2e coverage for click suppression, double-click sync, and centering.
+- [x] Run focused web verification, static audits, and document results.
+
+### Review
+- Replaced accidental single-click/caret word synchronization with deliberate double-click activation in the Wiki editor, live preview, and reader.
+- Added occurrence-aware word matching so repeated words can keep all contextual highlights while the exact double-clicked occurrence becomes the target highlight.
+- Added reduced-motion-aware centering for the paired surface: Markdown targets scroll into view, and textarea selection uses a mirror measurement to center the selected source word inside the editor scroll.
+- Updated focused Wiki e2e coverage to prove simple clicks do not create highlights, double-clicks target the intended repeated word, and editor/preview scrolling follows the selected occurrence.
+- Verification passed: web type-check, web build, focused Wiki e2e, full web e2e, web a11y, web visual snapshots, `pnpm repo:check`, `pnpm lint`, `git diff --check`, and static audits for stale Docs repo copy plus obsolete branding.
+
 ## Wiki Editor/View Word Cross-Highlight (2026-06-26)
 - [x] Register the implementation checklist and keep progress current.
 - [x] Inspect Wiki editor, rendered view, preview pipeline, and existing tests.

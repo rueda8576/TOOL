@@ -24,7 +24,7 @@ import { WikiImportDraftEntry, WikiImportPanel } from "./wiki-import-panel";
 import { WikiMarkdown } from "./wiki-markdown";
 import { WikiMarkdownToolbar, WikiMarkdownAction, WikiMarkdownTool } from "./wiki-markdown-toolbar";
 import { WikiReader } from "./wiki-reader";
-import { findFirstWikiWordMatch, findWikiWordAtOffset, WikiWordMatch } from "./wiki-word-selection";
+import { countWikiWordOccurrencesBeforeOffset, findFirstWikiWordMatch, findWikiWordAtOffset, WikiWordMatch } from "./wiki-word-selection";
 import { API_BASE_URL, LoginResponse } from "../lib/client-api";
 import {
   buildCollaboratorIdentity,
@@ -76,6 +76,7 @@ type WikiActiveWordSource = "editor" | "preview" | "reader";
 type WikiActiveWord = {
   word: string;
   normalized: string;
+  occurrenceIndex: number;
   source: WikiActiveWordSource;
 };
 
@@ -930,7 +931,32 @@ function shouldIgnoreRenderedWordClick(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && Boolean(target.closest("a,button,input,textarea,select"));
 }
 
-function findRenderedWordFromClick(event: ReactMouseEvent<HTMLElement>): WikiWordMatch | null {
+function shouldSkipRenderedWordTextNode(node: Node): boolean {
+  const parentElement = node.parentElement;
+  return Boolean(parentElement?.closest("code,pre,script,style"));
+}
+
+function countRenderedWordOccurrencesBeforeNode(root: HTMLElement, targetNode: Node, normalizedWord: string, targetStart: number): number {
+  const ownerDocument = root.ownerDocument;
+  const walker = ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let occurrenceIndex = 0;
+  let currentNode = walker.nextNode();
+
+  while (currentNode) {
+    if (!shouldSkipRenderedWordTextNode(currentNode)) {
+      const text = currentNode.textContent ?? "";
+      if (currentNode === targetNode) {
+        return occurrenceIndex + countWikiWordOccurrencesBeforeOffset(text, normalizedWord, targetStart);
+      }
+      occurrenceIndex += countWikiWordOccurrencesBeforeOffset(text, normalizedWord, text.length);
+    }
+    currentNode = walker.nextNode();
+  }
+
+  return occurrenceIndex;
+}
+
+function findRenderedWordFromDoubleClick(event: ReactMouseEvent<HTMLElement>): WikiWordMatch | null {
   if (shouldIgnoreRenderedWordClick(event.target)) {
     return null;
   }
@@ -944,12 +970,68 @@ function findRenderedWordFromClick(event: ReactMouseEvent<HTMLElement>): WikiWor
   const textNode = caretPosition?.offsetNode ?? caretRange?.startContainer ?? null;
   const offset = caretPosition?.offset ?? caretRange?.startOffset ?? 0;
 
-  if (!textNode || textNode.nodeType !== 3) {
+  if (!textNode || textNode.nodeType !== 3 || shouldSkipRenderedWordTextNode(textNode)) {
     return null;
   }
 
   const text = textNode.textContent ?? "";
-  return findWikiWordAtOffset(text, offset) ?? findWikiWordAtOffset(text, Math.max(0, offset - 1));
+  const match = findWikiWordAtOffset(text, offset) ?? findWikiWordAtOffset(text, Math.max(0, offset - 1));
+  if (!match) {
+    return null;
+  }
+
+  return {
+    ...match,
+    occurrenceIndex: countRenderedWordOccurrencesBeforeNode(event.currentTarget, textNode, match.normalized, match.start)
+  };
+}
+
+function resolveWikiScrollBehavior(): ScrollBehavior {
+  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+}
+
+function scrollRenderedWikiWordIntoView(container: HTMLElement | null): void {
+  const target = container?.querySelector<HTMLElement>('[data-wiki-word-target="true"]') ?? container?.querySelector<HTMLElement>(".wiki-word-highlight");
+  target?.scrollIntoView({ block: "center", inline: "nearest", behavior: resolveWikiScrollBehavior() });
+}
+
+function centerTextareaSelection(textarea: HTMLTextAreaElement, selectionStart: number): void {
+  const ownerDocument = textarea.ownerDocument;
+  const computedStyle = ownerDocument.defaultView?.getComputedStyle(textarea);
+  if (!computedStyle) {
+    return;
+  }
+
+  const marker = ownerDocument.createElement("span");
+  marker.textContent = textarea.value.slice(selectionStart, selectionStart + 1) || ".";
+  const mirror = ownerDocument.createElement("div");
+  mirror.style.position = "absolute";
+  mirror.style.visibility = "hidden";
+  mirror.style.pointerEvents = "none";
+  mirror.style.left = "-10000px";
+  mirror.style.top = "0";
+  mirror.style.boxSizing = computedStyle.boxSizing;
+  mirror.style.width = `${textarea.clientWidth}px`;
+  mirror.style.minHeight = "0";
+  mirror.style.padding = computedStyle.padding;
+  mirror.style.border = computedStyle.border;
+  mirror.style.font = computedStyle.font;
+  mirror.style.letterSpacing = computedStyle.letterSpacing;
+  mirror.style.lineHeight = computedStyle.lineHeight;
+  mirror.style.textAlign = computedStyle.textAlign;
+  mirror.style.textTransform = computedStyle.textTransform;
+  mirror.style.textIndent = computedStyle.textIndent;
+  mirror.style.tabSize = computedStyle.tabSize;
+  mirror.style.whiteSpace = "pre-wrap";
+  mirror.style.wordBreak = computedStyle.wordBreak;
+  mirror.style.overflowWrap = "break-word";
+  mirror.append(ownerDocument.createTextNode(textarea.value.slice(0, selectionStart)), marker);
+  ownerDocument.body.append(mirror);
+
+  const targetScrollTop = marker.offsetTop - textarea.clientHeight / 2 + marker.offsetHeight / 2;
+  const maxScrollTop = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
+  textarea.scrollTop = Math.min(Math.max(targetScrollTop, 0), maxScrollTop);
+  mirror.remove();
 }
 
 function measureWikiSidebarAutoWidth(sidebar: HTMLElement, containerWidth: number): number {
@@ -991,6 +1073,8 @@ export function WikiHub({
   const importFilesInputRef = useRef<HTMLInputElement>(null);
   const importFolderInputRef = useRef<HTMLInputElement>(null);
   const markdownRef = useRef<HTMLTextAreaElement>(null);
+  const readMarkdownRef = useRef<HTMLElement>(null);
+  const previewMarkdownRef = useRef<HTMLElement>(null);
   const lastSavedSnapshotRef = useRef<{ title: string; content: string } | null>(null);
   const draftVersionRef = useRef<number | null>(null);
   const wikiLayoutRef = useRef<HTMLDivElement | null>(null);
@@ -2542,12 +2626,12 @@ export function WikiHub({
   };
 
   const setActiveWordMatch = useCallback((match: WikiWordMatch | null, source: WikiActiveWordSource): void => {
-    setActiveWikiWord(match ? { word: match.word, normalized: match.normalized, source } : null);
+    setActiveWikiWord(match ? { word: match.word, normalized: match.normalized, occurrenceIndex: match.occurrenceIndex, source } : null);
   }, []);
 
   const selectMarkdownWordByNormalized = useCallback(
-    (normalizedWord: string): void => {
-      const match = findFirstWikiWordMatch(draftContent, normalizedWord);
+    (normalizedWord: string, occurrenceIndex: number, shouldCenter = false): void => {
+      const match = findFirstWikiWordMatch(draftContent, normalizedWord, occurrenceIndex) ?? findFirstWikiWordMatch(draftContent, normalizedWord);
       if (!match) {
         return;
       }
@@ -2557,38 +2641,62 @@ export function WikiHub({
         if (!textarea) {
           return;
         }
-        textarea.focus();
+        textarea.focus({ preventScroll: true });
         textarea.setSelectionRange(match.start, match.end);
+        if (shouldCenter) {
+          centerTextareaSelection(textarea, match.start);
+          textarea.scrollIntoView({ block: "center", inline: "nearest", behavior: resolveWikiScrollBehavior() });
+        }
       });
     },
     [draftContent]
   );
 
-  const syncActiveWordFromMarkdownCaret = useCallback((): void => {
-    const textarea = markdownRef.current;
-    if (!textarea) {
-      return;
-    }
+  const onMarkdownDoubleClick = useCallback((): void => {
+    requestAnimationFrame(() => {
+      const textarea = markdownRef.current;
+      if (!textarea) {
+        return;
+      }
 
-    const offset = textarea.selectionStart ?? 0;
-    const match = findWikiWordAtOffset(draftContent, offset) ?? findWikiWordAtOffset(draftContent, Math.max(0, offset - 1));
-    setActiveWordMatch(match, "editor");
+      const selectionStart = textarea.selectionStart ?? 0;
+      const match = findWikiWordAtOffset(draftContent, selectionStart) ?? findWikiWordAtOffset(draftContent, Math.max(0, selectionStart - 1));
+      setActiveWordMatch(match, "editor");
+    });
   }, [draftContent, setActiveWordMatch]);
 
-  const onRenderedWikiWordClick = useCallback(
+  const onRenderedWikiWordDoubleClick = useCallback(
     (event: ReactMouseEvent<HTMLElement>): void => {
-      const match = findRenderedWordFromClick(event);
-      setActiveWordMatch(match, isEditing ? "preview" : "reader");
-      if (match && isEditing) {
-        selectMarkdownWordByNormalized(match.normalized);
+      const match = findRenderedWordFromDoubleClick(event);
+      if (match) {
+        event.preventDefault();
       }
+      setActiveWordMatch(match, isEditing ? "preview" : "reader");
     },
-    [isEditing, selectMarkdownWordByNormalized, setActiveWordMatch]
+    [isEditing, setActiveWordMatch]
   );
 
   useEffect(() => {
-    if (isEditing && activeWikiWord?.source === "reader") {
-      selectMarkdownWordByNormalized(activeWikiWord.normalized);
+    if (!activeWikiWord) {
+      return;
+    }
+
+    if (activeWikiWord.source === "editor") {
+      requestAnimationFrame(() => {
+        scrollRenderedWikiWordIntoView(previewMarkdownRef.current);
+      });
+      return;
+    }
+
+    if (activeWikiWord.source === "reader" && !isEditing) {
+      requestAnimationFrame(() => {
+        scrollRenderedWikiWordIntoView(readMarkdownRef.current);
+      });
+      return;
+    }
+
+    if (isEditing) {
+      selectMarkdownWordByNormalized(activeWikiWord.normalized, activeWikiWord.occurrenceIndex, true);
     }
   }, [activeWikiWord, isEditing, selectMarkdownWordByNormalized]);
 
@@ -3492,7 +3600,9 @@ export function WikiHub({
               token={token}
               onOpenPath={(path) => void openPath(path)}
               activeWord={activeWikiWord?.normalized ?? null}
-              onRenderedWordClick={onRenderedWikiWordClick}
+              activeWordOccurrenceIndex={activeWikiWord?.occurrenceIndex ?? 0}
+              renderedMarkdownRef={readMarkdownRef}
+              onRenderedWordDoubleClick={onRenderedWikiWordDoubleClick}
             />
           ) : null}
 
@@ -3608,14 +3718,13 @@ export function WikiHub({
                       updateDraftContent(event.target.value);
                     }}
                     onKeyDown={onMarkdownKeyDown}
-                    onKeyUp={syncActiveWordFromMarkdownCaret}
-                    onMouseUp={syncActiveWordFromMarkdownCaret}
+                    onDoubleClick={onMarkdownDoubleClick}
                     onBlur={onDraftBlur}
                   />
                 </label>
                 <section className="wiki-preview-panel">
                   <h4>Live preview</h4>
-                  <article className="wiki-markdown" onClick={onRenderedWikiWordClick}>
+                  <article className="wiki-markdown" ref={previewMarkdownRef} onDoubleClick={onRenderedWikiWordDoubleClick}>
                     <WikiMarkdown
                       contentMarkdown={draftContent}
                       links={pageDetail.outgoingLinks}
@@ -3624,6 +3733,7 @@ export function WikiHub({
                       docsSource={pageDetail.docsSource}
                       onNavigateWikiPath={(path) => void openPath(path)}
                       activeWord={activeWikiWord?.normalized ?? null}
+                      activeWordOccurrenceIndex={activeWikiWord?.occurrenceIndex ?? 0}
                     />
                   </article>
                 </section>
