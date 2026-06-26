@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Plus, RefreshCw, Search, Upload } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Plus, RefreshCw, Search, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   ChangeEvent,
@@ -8,6 +8,7 @@ import {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
+  ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -882,6 +883,66 @@ function docsRepositoryMetricLabel(count: number): string {
   return `${count} Docs repo${count === 1 ? "" : "s"}`;
 }
 
+function getWikiSearchTerms(query: string): string[] {
+  const seen = new Set<string>();
+  const matches = query.toLocaleLowerCase().matchAll(/[\p{L}\p{N}]+/gu);
+
+  for (const match of matches) {
+    const term = match[0];
+    if (term.length < 2 || seen.has(term)) {
+      continue;
+    }
+    seen.add(term);
+    if (seen.size >= 8) {
+      break;
+    }
+  }
+
+  return [...seen].sort((left, right) => right.length - left.length);
+}
+
+function escapeWikiSearchRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function renderWikiSearchText(value: string, terms: string[]): ReactNode {
+  if (terms.length === 0 || !value) {
+    return value;
+  }
+
+  const expression = new RegExp(`(${terms.map(escapeWikiSearchRegExp).join("|")})`, "giu");
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+
+  for (const match of value.matchAll(expression)) {
+    const index = match.index ?? 0;
+    const text = match[0];
+    if (index > lastIndex) {
+      parts.push(value.slice(lastIndex, index));
+    }
+    parts.push(
+      <mark key={`${index}-${text}`} className="wiki-search-hit">
+        {text}
+      </mark>
+    );
+    lastIndex = index + text.length;
+  }
+
+  if (parts.length === 0) {
+    return value;
+  }
+
+  if (lastIndex < value.length) {
+    parts.push(value.slice(lastIndex));
+  }
+
+  return parts;
+}
+
+function wikiSearchResultCountLabel(count: number): string {
+  return `${count} result${count === 1 ? "" : "s"}`;
+}
+
 function treeNodeLabel(node: WikiTreeNode): string {
   return node.displayName ?? node.title ?? (node.name || "root");
 }
@@ -1169,6 +1230,7 @@ export function WikiHub({
     [projectId]
   );
   const normalizedSearchQuery = useMemo(() => treeQuery.trim(), [treeQuery]);
+  const searchTerms = useMemo(() => getWikiSearchTerms(normalizedSearchQuery), [normalizedSearchQuery]);
   const searchModeActive = normalizedSearchQuery.length >= 2;
   const canWrite = projectAccess?.canWrite ?? false;
   const { collaborationServerUrl, collaborationConfigError } = useMemo(() => {
@@ -3193,12 +3255,13 @@ export function WikiHub({
     );
   };
 
-  const renderSearchBadges = (result: WikiSearchResult): JSX.Element => (
+  const renderSearchBadges = (result: WikiSearchResult, isCurrent: boolean): JSX.Element => (
     <div className="wiki-search-badges">
       {result.matches.title ? <span className="badge">Title</span> : null}
       {result.matches.path ? <span className="badge">Path</span> : null}
       {result.matches.published ? <span className="badge">Published</span> : null}
       {result.matches.draft ? <span className="badge">Draft</span> : null}
+      {isCurrent ? <span className="badge">Current</span> : null}
     </div>
   );
 
@@ -3336,9 +3399,62 @@ export function WikiHub({
                 value={treeQuery}
                 onChange={(event) => setTreeQuery(event.target.value)}
                 placeholder="Search wiki content"
+                aria-label="Search wiki content"
               />
+              {treeQuery.length > 0 ? (
+                <button
+                  type="button"
+                  className="wiki-search-clear"
+                  aria-label="Clear wiki search"
+                  title="Clear"
+                  onClick={() => setTreeQuery("")}
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
+              ) : null}
             </span>
           </label>
+
+          {!loadingTree && searchModeActive ? (
+            <section className="wiki-search-results" aria-label="Wiki search results" aria-live="polite">
+              <div className="wiki-search-results-header">
+                <h4 className="section-heading">Search results</h4>
+                <span className="wiki-search-results-count">{searching ? "Searching..." : wikiSearchResultCountLabel(searchResults.length)}</span>
+              </div>
+              {searchError ? <p className="alert alert-error">{searchError}</p> : null}
+              {!searching && !searchError && searchResults.length === 0 ? (
+                <p className="alert alert-info">
+                  No matches for "{normalizedSearchQuery}". Search covers title, path, {canWrite ? "published content, and draft content." : "and published content."}
+                </p>
+              ) : null}
+              {!searchError && searchResults.length > 0 ? (
+                <ul className="wiki-search-result-list">
+                  {searchResults.map((result) => {
+                    const isCurrent = result.path === selectedPath;
+                    return (
+                      <li
+                        key={`${result.pageId}-${result.path}`}
+                        className={isCurrent ? "wiki-search-result-row wiki-search-result-row-current" : "wiki-search-result-row"}
+                        data-wiki-sidebar-item="search-result"
+                      >
+                        <button
+                          type="button"
+                          className="wiki-search-result-title"
+                          onClick={() => void openPath(result.path)}
+                          data-wiki-sidebar-measure
+                        >
+                          {renderWikiSearchText(result.title, searchTerms)}
+                        </button>
+                        <p className="wiki-search-result-path">/{renderWikiSearchText(result.path, searchTerms)}</p>
+                        <p className="wiki-search-snippet">{renderWikiSearchText(result.snippet, searchTerms)}</p>
+                        {renderSearchBadges(result, isCurrent)}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+            </section>
+          ) : null}
 
           {showCreateForm ? (
             <form className="wiki-create-form" onSubmit={onCreatePage}>
@@ -3493,31 +3609,6 @@ export function WikiHub({
           />
 
           {loadingTree ? <LoadingState title="Loading page tree" detail="Preparing the wiki index." /> : null}
-
-          {!loadingTree && searchModeActive ? (
-            <section className="wiki-search-results">
-              <h4 className="section-heading">Search results</h4>
-              {searching ? <p className="alert alert-info">Searching...</p> : null}
-              {searchError ? <p className="alert alert-error">{searchError}</p> : null}
-              {!searching && !searchError && searchResults.length === 0 ? (
-                <p className="alert alert-info">No results for "{normalizedSearchQuery}".</p>
-              ) : null}
-              {!searching && !searchError && searchResults.length > 0 ? (
-                <ul className="list">
-                  {searchResults.map((result) => (
-                    <li key={`${result.pageId}-${result.path}`} className="list-item wiki-search-item" data-wiki-sidebar-item="search-result">
-                      <button type="button" className="link-button" onClick={() => void openPath(result.path)} data-wiki-sidebar-measure>
-                        <strong>{result.title}</strong>
-                      </button>
-                      <p className="wiki-page-path">/{result.path}</p>
-                      <p className="wiki-search-snippet">{result.snippet}</p>
-                      {renderSearchBadges(result)}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </section>
-          ) : null}
 
           {!loadingTree && !searchModeActive && treeNodes.length === 0 ? <p className="alert alert-info">{canWrite ? "No wiki pages yet." : "No published wiki pages available yet."}</p> : null}
           {!loadingTree && !searchModeActive && treeNodes.length > 0 ? (

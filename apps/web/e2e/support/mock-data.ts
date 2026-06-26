@@ -225,6 +225,49 @@ export const wikiResearchPage = {
   }
 };
 
+export const wikiContaminantPage = {
+  page: {
+    id: "wiki-contaminant-deposition",
+    projectId: qaProject.id,
+    slug: "contaminant-deposition",
+    folderPath: "research/atlasium-research-archive/05-contaminant-deposition",
+    title: "Contaminant Deposition",
+    path: "research/atlasium-research-archive/05-contaminant-deposition/contaminant-deposition",
+    templateType: null,
+    updatedAt: "2026-06-18T08:00:00.000Z"
+  },
+  draft: {
+    title: "Contaminant Deposition",
+    contentMarkdown:
+      "# Contaminant Deposition\n\nContaminant deposition evidence connects the sputtering model, material path, and published project archive.",
+    draftVersion: 2,
+    updatedAt: "2026-06-18T08:00:00.000Z",
+    updatedBy: qaUser
+  },
+  published: {
+    id: "revision-contaminant-1",
+    revisionNumber: 1,
+    contentMarkdown:
+      "# Contaminant Deposition\n\nContaminant deposition evidence connects the sputtering model, material path, and published project archive.",
+    publishedAt: "2026-06-17T10:00:00.000Z",
+    createdBy: qaUser,
+    changeNote: "Initial contaminant deposition note"
+  },
+  outgoingLinks: [],
+  backlinks: [],
+  docsSource: {
+    repositoryId: "repo-1",
+    repositoryName: "atlasium-research-archive",
+    pathWithNamespace: "atlasium/research-archive",
+    defaultBranch: "main",
+    docsPath: "Docs/Research/05-contaminant-deposition/contaminant-deposition.md",
+    docsRoot: "Docs",
+    wikiPrefix: "atlasium-research-archive",
+    docsKind: "research",
+    isOverview: false
+  }
+};
+
 export const wikiPage = {
   page: {
     id: "wiki-home",

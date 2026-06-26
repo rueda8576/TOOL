@@ -221,6 +221,39 @@ test("@e2e wiki single-repo sections render without repository rows", async ({ p
   await expectNoHorizontalOverflow(page);
 });
 
+test("@e2e wiki search renders an indexed result list with evidence", async ({ page }) => {
+  await seedSession(page, "admin");
+  await page.goto("/projects/project-1/wiki", { waitUntil: "domcontentloaded" });
+  await waitForAtlasiumRouteReady(page, "/projects/project-1/wiki");
+
+  const searchInput = page.getByLabel("Search wiki content");
+  await searchInput.fill("contam");
+
+  const resultRows = page.locator(".wiki-search-result-row");
+  await expect(resultRows).toHaveCount(1);
+  await expect(page.locator(".wiki-tree-list")).toHaveCount(0);
+
+  const contaminantResult = resultRows.first();
+  await expect(contaminantResult.getByRole("button", { name: /Contaminant Deposition/ })).toBeVisible();
+  await expect(contaminantResult.locator(".wiki-search-hit").filter({ hasText: /Contam/i }).first()).toBeVisible();
+  await expect(contaminantResult.locator(".badge", { hasText: "Title" })).toBeVisible();
+  await expect(contaminantResult.locator(".badge", { hasText: "Published" })).toBeVisible();
+
+  await contaminantResult.getByRole("button", { name: /Contaminant Deposition/ }).click();
+
+  await expect(page.getByRole("heading", { name: "Contaminant Deposition", level: 2 })).toBeVisible();
+  await expect(searchInput).toHaveValue("contam");
+  await expect(contaminantResult.locator(".badge", { hasText: "Current" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Clear wiki search" }).click();
+
+  await expect(searchInput).toHaveValue("");
+  await expect(page.locator(".wiki-search-result-row")).toHaveCount(0);
+  await expect(page.locator(".wiki-tree-row-section-dossier").filter({ hasText: "Research" })).toBeVisible();
+  await expect(page.locator(".wiki-tree-row-section-dossier").filter({ hasText: "Implementation" })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
 test("@e2e code repository sections render mocked repository lists", async ({ page }) => {
   await seedSession(page, "admin");
   await page.goto("/projects/project-1/code", { waitUntil: "domcontentloaded" });

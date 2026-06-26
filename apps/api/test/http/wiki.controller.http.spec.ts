@@ -99,6 +99,44 @@ describe("WikiController HTTP", () => {
     expect(response.body[0].pageId).toBe("page-1");
   });
 
+  it("accepts partial wiki search queries for service ranking", async () => {
+    wikiService.searchPages.mockResolvedValue([
+      {
+        pageId: "page-2",
+        path: "research/contaminant-deposition",
+        title: "Contaminant Deposition",
+        snippet: "Contaminant deposition evidence",
+        score: 91,
+        matches: {
+          title: true,
+          path: true,
+          published: true,
+          draft: false
+        },
+        updatedAt: "2026-03-03T10:00:00.000Z"
+      }
+    ]);
+
+    const response = await request(app.getHttpServer())
+      .get("/projects/project-1/wiki-pages/search")
+      .query({ q: "contam" })
+      .set(authHeaders("reader"))
+      .expect(200);
+
+    expect(wikiService.searchPages).toHaveBeenCalledWith(
+      "project-1",
+      {
+        q: "contam"
+      },
+      {
+        userId: "reader-1",
+        email: "reader@example.com",
+        globalRole: "reader"
+      }
+    );
+    expect(response.body[0].title).toBe("Contaminant Deposition");
+  });
+
   it("rejects wiki search limits outside the allowed DTO range", async () => {
     await request(app.getHttpServer())
       .get("/projects/project-1/wiki-pages/search")

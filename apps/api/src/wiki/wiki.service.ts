@@ -138,6 +138,43 @@ type WikiSearchRow = {
   updatedAt: Date;
 };
 
+function tokenizeWikiSearchText(searchText: string): string[] {
+  const seen = new Set<string>();
+  const matches = searchText.toLocaleLowerCase().matchAll(/[\p{L}\p{N}]+/gu);
+
+  for (const match of matches) {
+    const term = match[0];
+    if (term.length < 2 || seen.has(term)) {
+      continue;
+    }
+    seen.add(term);
+    if (seen.size >= 8) {
+      break;
+    }
+  }
+
+  return [...seen];
+}
+
+function escapeWikiLikeTerm(term: string): string {
+  return term.replace(/[\\%_]/g, "\\$&");
+}
+
+function buildWikiPrefixTsQuery(terms: string[]): string {
+  return terms.length > 0 ? terms.map((term) => `${term}:*`).join(" & ") : "atlasiumsearchnomatch:*";
+}
+
+function buildWikiIlikeCondition(fieldSql: Prisma.Sql, terms: string[]): Prisma.Sql {
+  if (terms.length === 0) {
+    return Prisma.sql`FALSE`;
+  }
+
+  return Prisma.sql`(${Prisma.join(
+    terms.map((term) => Prisma.sql`${fieldSql} ILIKE ${`%${escapeWikiLikeTerm(term)}%`} ESCAPE '\\'`),
+    " AND "
+  )})`;
+}
+
 type PreparedImportEntry = ImportWikiPageEntryDto & {
   slug: string;
   folderPath: string;
@@ -2853,18 +2890,33 @@ export class WikiService {
     const limit = Math.min(Math.max(query.limit ?? 20, 1), 50);
     const includeDraft = access.canWrite;
     const visibilityCondition = includeDraft ? Prisma.sql`TRUE` : Prisma.sql`p."currentRevisionId" IS NOT NULL`;
+    const searchTerms = tokenizeWikiSearchText(searchText);
+    const prefixQueryText = buildWikiPrefixTsQuery(searchTerms);
 
     const draftVectorPart = includeDraft
       ? Prisma.sql`COALESCE(d."contentMarkdown", '')`
       : Prisma.sql`''`;
+    const titleFullTextCondition = Prisma.sql`to_tsvector('simple', COALESCE(p.title, '')) @@ query`;
+    const pathFullTextCondition = Prisma.sql`to_tsvector('simple', COALESCE(p.path, '')) @@ query`;
+    const publishedFullTextCondition = Prisma.sql`to_tsvector('simple', COALESCE(pr."contentMarkdown", '')) @@ query`;
+    const titlePrefixCondition = Prisma.sql`to_tsvector('simple', COALESCE(p.title, '')) @@ prefix_query`;
+    const pathPrefixCondition = Prisma.sql`to_tsvector('simple', COALESCE(p.path, '')) @@ prefix_query`;
+    const publishedPrefixCondition = Prisma.sql`to_tsvector('simple', COALESCE(pr."contentMarkdown", '')) @@ prefix_query`;
+    const titleSubstringCondition = buildWikiIlikeCondition(Prisma.sql`COALESCE(p.title, '')`, searchTerms);
+    const pathSubstringCondition = buildWikiIlikeCondition(Prisma.sql`COALESCE(p.path, '')`, searchTerms);
+    const publishedSubstringCondition = buildWikiIlikeCondition(Prisma.sql`COALESCE(pr."contentMarkdown", '')`, searchTerms);
+    const titleExactCondition = Prisma.sql`LOWER(COALESCE(p.title, '')) = LOWER(${searchText})`;
+    const pathExactCondition = Prisma.sql`LOWER(COALESCE(p.path, '')) = LOWER(${searchText})`;
+    const titleMatchCondition = Prisma.sql`(${titleFullTextCondition} OR ${titlePrefixCondition} OR ${titleSubstringCondition})`;
+    const pathMatchCondition = Prisma.sql`(${pathFullTextCondition} OR ${pathPrefixCondition} OR ${pathSubstringCondition})`;
+    const publishedMatchCondition = Prisma.sql`(${publishedFullTextCondition} OR ${publishedPrefixCondition} OR ${publishedSubstringCondition})`;
     const draftMatchCondition = includeDraft
-      ? Prisma.sql`to_tsvector('simple', COALESCE(d."contentMarkdown", '')) @@ query`
+      ? Prisma.sql`(
+          to_tsvector('simple', COALESCE(d."contentMarkdown", '')) @@ query OR
+          to_tsvector('simple', COALESCE(d."contentMarkdown", '')) @@ prefix_query OR
+          ${buildWikiIlikeCondition(Prisma.sql`COALESCE(d."contentMarkdown", '')`, searchTerms)}
+        )`
       : Prisma.sql`FALSE`;
-    const pageMatchCondition = Prisma.sql`(
-      to_tsvector('simple', COALESCE(p.title, '')) @@ query OR
-      to_tsvector('simple', COALESCE(p.path, '')) @@ query
-    )`;
-    const publishedMatchCondition = Prisma.sql`to_tsvector('simple', COALESCE(pr."contentMarkdown", '')) @@ query`;
 
     const rows = await this.prisma.$queryRaw<WikiSearchRow[]>(Prisma.sql`
       SELECT
@@ -2872,26 +2924,42 @@ export class WikiService {
         p.path AS "path",
         p.title AS "title",
         p."updatedAt" AS "updatedAt",
-        ts_rank_cd(search_data.search_vector, query) AS "score",
+        (
+          ts_rank_cd(search_data.search_vector, query) * 10 +
+          CASE WHEN ${titleExactCondition} THEN 120 ELSE 0 END +
+          CASE WHEN ${pathExactCondition} THEN 110 ELSE 0 END +
+          CASE WHEN ${titlePrefixCondition} THEN 80 ELSE 0 END +
+          CASE WHEN ${pathPrefixCondition} THEN 70 ELSE 0 END +
+          CASE WHEN ${titleFullTextCondition} THEN 64 ELSE 0 END +
+          CASE WHEN ${pathFullTextCondition} THEN 58 ELSE 0 END +
+          CASE WHEN ${publishedFullTextCondition} THEN 34 ELSE 0 END +
+          CASE WHEN ${publishedPrefixCondition} THEN 26 ELSE 0 END +
+          CASE WHEN ${draftMatchCondition} THEN 18 ELSE 0 END +
+          CASE WHEN ${titleSubstringCondition} THEN 12 ELSE 0 END +
+          CASE WHEN ${pathSubstringCondition} THEN 10 ELSE 0 END +
+          CASE WHEN ${publishedSubstringCondition} THEN 5 ELSE 0 END
+        ) AS "score",
         ts_headline(
           'simple',
           CASE
-            WHEN to_tsvector('simple', COALESCE(p.title, '')) @@ query THEN COALESCE(p.title, '')
-            WHEN to_tsvector('simple', COALESCE(p.path, '')) @@ query THEN COALESCE(p.path, '')
+            WHEN ${titleMatchCondition} THEN COALESCE(p.title, '')
+            WHEN ${pathMatchCondition} THEN COALESCE(p.path, '')
+            WHEN ${publishedMatchCondition} THEN COALESCE(pr."contentMarkdown", '')
             WHEN ${draftMatchCondition} THEN COALESCE(d."contentMarkdown", '')
-            ELSE COALESCE(pr."contentMarkdown", '')
+            ELSE COALESCE(pr."contentMarkdown", d."contentMarkdown", p.title, p.path, '')
           END,
           query,
           'MaxFragments=2, MinWords=5, MaxWords=20, FragmentDelimiter= ... '
         ) AS "snippet",
-        to_tsvector('simple', COALESCE(p.title, '')) @@ query AS "matchTitle",
-        to_tsvector('simple', COALESCE(p.path, '')) @@ query AS "matchPath",
-        to_tsvector('simple', COALESCE(pr."contentMarkdown", '')) @@ query AS "matchPublished",
+        ${titleMatchCondition} AS "matchTitle",
+        ${pathMatchCondition} AS "matchPath",
+        ${publishedMatchCondition} AS "matchPublished",
         ${draftMatchCondition} AS "matchDraft"
       FROM "WikiPage" p
       LEFT JOIN "WikiRevision" pr ON pr.id = p."currentRevisionId"
       LEFT JOIN "WikiDraft" d ON d."pageId" = p.id
       CROSS JOIN websearch_to_tsquery('simple', ${searchText}) AS query
+      CROSS JOIN to_tsquery('simple', ${prefixQueryText}) AS prefix_query
       CROSS JOIN LATERAL (
         SELECT to_tsvector(
           'simple',
@@ -2904,7 +2972,7 @@ export class WikiService {
       WHERE p."projectId" = ${projectId}
         AND p."deletedAt" IS NULL
         AND ${visibilityCondition}
-        AND (${pageMatchCondition} OR ${publishedMatchCondition} OR ${draftMatchCondition})
+        AND (${titleMatchCondition} OR ${pathMatchCondition} OR ${publishedMatchCondition} OR ${draftMatchCondition})
       ORDER BY "score" DESC, p."updatedAt" DESC
       LIMIT ${limit}
     `);

@@ -3362,6 +3362,30 @@ describe("WikiService", () => {
     });
   });
 
+  it("adds prefix token and bounded substring matching to wiki search SQL", async () => {
+    const { service, prisma } = makeService();
+    prisma.$queryRaw.mockResolvedValue([]);
+
+    await service.searchPages(
+      "project-1",
+      {
+        q: "contam"
+      },
+      {
+        userId: "editor-1",
+        email: "editor@example.com",
+        globalRole: "editor"
+      }
+    );
+
+    const rawQuery = prisma.$queryRaw.mock.calls[0][0] as { strings?: string[]; values?: unknown[] };
+    const sqlText = rawQuery.strings?.join(" ") ?? "";
+
+    expect(sqlText).toContain("to_tsquery");
+    expect(sqlText).toContain("ILIKE");
+    expect(rawQuery.values).toEqual(expect.arrayContaining(["contam:*", "%contam%"]));
+  });
+
   it("rejects short search queries", async () => {
     const { service, prisma } = makeService();
 

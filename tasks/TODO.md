@@ -1,5 +1,18 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Search Results Index (2026-06-26)
+- [x] Register the implementation checklist and inspect current Wiki search contracts.
+- [x] Improve backend Wiki search for full words, prefixes, and bounded fragments.
+- [x] Redesign sidebar search results as a dense editorial index with evidence highlights and clear/current states.
+- [x] Update API and web e2e coverage for search behavior and UI.
+- [x] Run verification suite, static audits, and document results.
+
+### Review
+- Reworked Wiki search ranking so full-text remains the base signal while token prefix search and bounded substring fallback cover partial queries such as `contam` across title, path, published content, and writable drafts.
+- Redesigned the Wiki sidebar search mode into a dense index under the search field: compact count/searching state, clear control, current-result state, source chips, and inline evidence highlights without changing Wiki routes, tree contracts, Docs sync, or backend response shape.
+- Added focused API coverage for prefix/substring SQL generation, HTTP coverage for partial search queries, and web e2e coverage proving the search list replaces the tree, preserves the query after opening a result, highlights evidence, and restores Research/Implementation on clear.
+- Verification passed: `pnpm --filter @doctoral/api test -- wiki.service`; HTTP spec via `pnpm --filter @doctoral/api exec jest --config jest.http.config.ts --runInBand test/http/wiki.controller.http.spec.ts` after the requested `pnpm --filter @doctoral/api test -- wiki.controller.http` pattern found no tests; web type-check; web build; web e2e; web a11y; visual snapshot update pass with no snapshot changes; web visual; `pnpm repo:check`; `pnpm lint`; `git diff --check`; static audits for obsolete branding, stale `1 Docs repos`, and old search empty copy.
+
 ## Wiki Double-Click Word Sync + Centering (2026-06-26)
 - [x] Register the implementation checklist and update the related lesson.
 - [x] Replace single-click/caret word sync with deliberate double-click activation.

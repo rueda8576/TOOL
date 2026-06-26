@@ -12,6 +12,7 @@ import {
   qaUser,
   repository,
   taskItems,
+  wikiContaminantPage,
   wikiPage,
   wikiResearchPage,
   wikiTree
@@ -32,6 +33,69 @@ function json(route: Route, payload: JsonValue, status = 200): Promise<void> {
 
 function notFound(route: Route): Promise<void> {
   return json(route, { message: "Mock route not found" }, 404);
+}
+
+function tokenizeSearchQuery(query: string): string[] {
+  return [...query.toLocaleLowerCase().matchAll(/[\p{L}\p{N}]+/gu)]
+    .map((match) => match[0])
+    .filter((term) => term.length >= 2);
+}
+
+function matchesMockSearchField(field: string, term: string): boolean {
+  const normalizedField = field.toLocaleLowerCase();
+  if (normalizedField.includes(term)) {
+    return true;
+  }
+
+  return normalizedField
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .some((token) => token.startsWith(term));
+}
+
+function buildWikiSearchResults(query: string): JsonValue {
+  const terms = tokenizeSearchQuery(query);
+  if (terms.length === 0) {
+    return [];
+  }
+
+  const results = [
+    {
+      pageId: wikiContaminantPage.page.id,
+      path: wikiContaminantPage.page.path,
+      title: wikiContaminantPage.page.title,
+      snippet:
+        "Contaminant deposition evidence connects the sputtering model, material path, and published project archive.",
+      score: 94,
+      matches: {
+        title: true,
+        path: true,
+        published: true,
+        draft: false
+      },
+      updatedAt: wikiContaminantPage.page.updatedAt
+    },
+    {
+      pageId: wikiResearchPage.page.id,
+      path: wikiResearchPage.page.path,
+      title: wikiResearchPage.page.title,
+      snippet: wikiResearchPage.published.contentMarkdown,
+      score: 31,
+      matches: {
+        title: true,
+        path: true,
+        published: true,
+        draft: false
+      },
+      updatedAt: wikiResearchPage.page.updatedAt
+    }
+  ];
+
+  return results.filter((result) =>
+    terms.every((term) =>
+      [result.title, result.path, result.snippet].some((field) => matchesMockSearchField(field, term))
+    )
+  );
 }
 
 export async function installMockApi(page: Page): Promise<void> {
@@ -138,9 +202,15 @@ export async function installMockApi(page: Page): Promise<void> {
       await json(route, wikiTree);
       return;
     }
+    if (method === "GET" && path === `/projects/${qaProject.id}/wiki-pages/search`) {
+      const limit = Number.parseInt(url.searchParams.get("limit") ?? "20", 10);
+      const results = buildWikiSearchResults(url.searchParams.get("q") ?? "");
+      await json(route, Array.isArray(results) ? results.slice(0, Number.isFinite(limit) ? limit : 20) : results);
+      return;
+    }
     if (method === "GET" && path === `/projects/${qaProject.id}/wiki-pages/by-path`) {
       const wikiPath = url.searchParams.get("path");
-      await json(route, wikiPath === "home" ? wikiPage : wikiResearchPage);
+      await json(route, wikiPath === "home" ? wikiPage : wikiPath === wikiContaminantPage.page.path ? wikiContaminantPage : wikiResearchPage);
       return;
     }
     if (method === "GET" && path === `/projects/${qaProject.id}/wiki-pages/docs-sync/status`) {
