@@ -91,6 +91,53 @@ test("@e2e wiki markdown toolbar renders editor formatting controls", async ({ p
   await expectNoHorizontalOverflow(page);
 });
 
+test("@e2e wiki editor and preview cross-highlight clicked words", async ({ page }) => {
+  await seedSession(page, "admin");
+  await page.goto("/projects/project-1/wiki/home", { waitUntil: "domcontentloaded" });
+
+  await expect(page.getByRole("heading", { name: "Archive Home", level: 2 })).toBeVisible();
+  await page.getByRole("button", { name: "Edit" }).click();
+
+  const textarea = page.locator(".wiki-editor-textarea");
+  await expect(textarea).toBeVisible();
+  await textarea.evaluate((node: HTMLTextAreaElement) => {
+    const index = node.value.indexOf("project");
+    node.focus();
+    node.setSelectionRange(index, index + "project".length);
+    node.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  await expect(page.locator(".wiki-preview-panel .wiki-word-highlight", { hasText: "project" }).first()).toBeVisible();
+
+  const previewWordPoint = await page.locator(".wiki-preview-panel .wiki-markdown p").evaluate((paragraph) => {
+    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+    let currentNode = walker.nextNode();
+    while (currentNode) {
+      const text = currentNode.textContent ?? "";
+      const index = text.indexOf("Atlasium");
+      if (index >= 0) {
+        const range = document.createRange();
+        range.setStart(currentNode, index);
+        range.setEnd(currentNode, index + "Atlasium".length);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+      currentNode = walker.nextNode();
+    }
+    return null;
+  });
+  expect(previewWordPoint).not.toBeNull();
+  if (!previewWordPoint) {
+    return;
+  }
+
+  await page.mouse.click(previewWordPoint.x, previewWordPoint.y);
+  await expect(page.locator(".wiki-preview-panel .wiki-word-highlight", { hasText: "Atlasium" }).first()).toBeVisible();
+  await expect(textarea).toHaveJSProperty("selectionStart", 16);
+  const selectedText = await textarea.evaluate((node: HTMLTextAreaElement) => node.value.slice(node.selectionStart, node.selectionEnd));
+  expect(selectedText).toBe("Atlasium");
+  await expectNoHorizontalOverflow(page);
+});
+
 test("@e2e wiki single-repo sections render without repository rows", async ({ page }) => {
   await seedSession(page, "admin");
   await page.goto("/projects/project-1/wiki", { waitUntil: "domcontentloaded" });

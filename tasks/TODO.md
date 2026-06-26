@@ -1,5 +1,20 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Editor/View Word Cross-Highlight (2026-06-26)
+- [x] Register the implementation checklist and keep progress current.
+- [x] Inspect Wiki editor, rendered view, preview pipeline, and existing tests.
+- [x] Implement click-to-highlight synchronization between Markdown source and rendered Wiki surfaces.
+- [x] Add focused coverage and update visual snapshots only if the visible baseline changes.
+- [x] Run focused web verification, static audits, and document results.
+
+### Review
+- Added shared Wiki word-token matching so editor selections and rendered Markdown clicks resolve the same normalized token boundaries.
+- Wired read view and live preview clicks to highlight matching words in rendered Markdown; in edit mode, rendered clicks also select the corresponding source word in the textarea.
+- Kept link/button interactions intact by ignoring rendered-word detection inside interactive controls, and skipped code/pre/math-safe surfaces during highlight wrapping.
+- Styled the highlight with existing Atlasium brand tokens only, using a quiet inline mark that does not change the default visual baseline.
+- Added Playwright coverage for editor-to-preview and preview-to-editor word synchronization.
+- Verification passed: web type-check, web build, web e2e, web a11y, clean visual rerun, `pnpm repo:check`, `pnpm lint`, `git diff --check`, and static audits for stale Docs repo copy plus obsolete branding.
+
 ## Wiki Compacted Section Dossier Rows (2026-06-25)
 - [x] Register the implementation checklist and keep progress current.
 - [x] Add a compacted section row state for single-repository Research/Implementation sections.

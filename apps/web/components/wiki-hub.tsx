@@ -2,7 +2,18 @@
 
 import { BookOpen, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Plus, RefreshCw, Search, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { ChangeEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 
@@ -13,6 +24,7 @@ import { WikiImportDraftEntry, WikiImportPanel } from "./wiki-import-panel";
 import { WikiMarkdown } from "./wiki-markdown";
 import { WikiMarkdownToolbar, WikiMarkdownAction, WikiMarkdownTool } from "./wiki-markdown-toolbar";
 import { WikiReader } from "./wiki-reader";
+import { findFirstWikiWordMatch, findWikiWordAtOffset, WikiWordMatch } from "./wiki-word-selection";
 import { API_BASE_URL, LoginResponse } from "../lib/client-api";
 import {
   buildCollaboratorIdentity,
@@ -59,6 +71,13 @@ import { useConfirmDialog } from "../lib/use-confirm-dialog";
 
 type SaveState = "idle" | "saving" | "saved" | "error" | "conflict";
 type WikiSidebarWidthMode = "auto" | "manual";
+type WikiActiveWordSource = "editor" | "preview" | "reader";
+
+type WikiActiveWord = {
+  word: string;
+  normalized: string;
+  source: WikiActiveWordSource;
+};
 
 type WikiImportSelectionResult = {
   entries: WikiImportDraftEntry[];
@@ -907,6 +926,32 @@ function clampWikiSidebarWidth(width: number, containerWidth: number): number {
   return Math.min(Math.max(width, WIKI_SIDEBAR_MIN_PX), effectiveMax);
 }
 
+function shouldIgnoreRenderedWordClick(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(target.closest("a,button,input,textarea,select"));
+}
+
+function findRenderedWordFromClick(event: ReactMouseEvent<HTMLElement>): WikiWordMatch | null {
+  if (shouldIgnoreRenderedWordClick(event.target)) {
+    return null;
+  }
+
+  const ownerDocument = event.currentTarget.ownerDocument as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const caretPosition = ownerDocument.caretPositionFromPoint?.(event.clientX, event.clientY) ?? null;
+  const caretRange = caretPosition ? null : ownerDocument.caretRangeFromPoint?.(event.clientX, event.clientY) ?? null;
+  const textNode = caretPosition?.offsetNode ?? caretRange?.startContainer ?? null;
+  const offset = caretPosition?.offset ?? caretRange?.startOffset ?? 0;
+
+  if (!textNode || textNode.nodeType !== 3) {
+    return null;
+  }
+
+  const text = textNode.textContent ?? "";
+  return findWikiWordAtOffset(text, offset) ?? findWikiWordAtOffset(text, Math.max(0, offset - 1));
+}
+
 function measureWikiSidebarAutoWidth(sidebar: HTMLElement, containerWidth: number): number {
   const measurableNodes = Array.from(sidebar.querySelectorAll<HTMLElement>("[data-wiki-sidebar-measure]"));
   let widestContentPx = 0;
@@ -1028,6 +1073,7 @@ export function WikiHub({
   const [sidebarWidthPx, setSidebarWidthPx] = useState<number | null>(null);
   const [sidebarWidthMode, setSidebarWidthMode] = useState<WikiSidebarWidthMode>("auto");
   const [sidebarPreferenceLoaded, setSidebarPreferenceLoaded] = useState(false);
+  const [activeWikiWord, setActiveWikiWord] = useState<WikiActiveWord | null>(null);
   const [isDesktopWikiLayout, setIsDesktopWikiLayout] = useState(false);
   const [isDraggingSidebarSplitter, setIsDraggingSidebarSplitter] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2495,6 +2541,61 @@ export function WikiHub({
     fileInputRef.current?.click();
   };
 
+  const setActiveWordMatch = useCallback((match: WikiWordMatch | null, source: WikiActiveWordSource): void => {
+    setActiveWikiWord(match ? { word: match.word, normalized: match.normalized, source } : null);
+  }, []);
+
+  const selectMarkdownWordByNormalized = useCallback(
+    (normalizedWord: string): void => {
+      const match = findFirstWikiWordMatch(draftContent, normalizedWord);
+      if (!match) {
+        return;
+      }
+
+      requestAnimationFrame(() => {
+        const textarea = markdownRef.current;
+        if (!textarea) {
+          return;
+        }
+        textarea.focus();
+        textarea.setSelectionRange(match.start, match.end);
+      });
+    },
+    [draftContent]
+  );
+
+  const syncActiveWordFromMarkdownCaret = useCallback((): void => {
+    const textarea = markdownRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    const offset = textarea.selectionStart ?? 0;
+    const match = findWikiWordAtOffset(draftContent, offset) ?? findWikiWordAtOffset(draftContent, Math.max(0, offset - 1));
+    setActiveWordMatch(match, "editor");
+  }, [draftContent, setActiveWordMatch]);
+
+  const onRenderedWikiWordClick = useCallback(
+    (event: ReactMouseEvent<HTMLElement>): void => {
+      const match = findRenderedWordFromClick(event);
+      setActiveWordMatch(match, isEditing ? "preview" : "reader");
+      if (match && isEditing) {
+        selectMarkdownWordByNormalized(match.normalized);
+      }
+    },
+    [isEditing, selectMarkdownWordByNormalized, setActiveWordMatch]
+  );
+
+  useEffect(() => {
+    if (isEditing && activeWikiWord?.source === "reader") {
+      selectMarkdownWordByNormalized(activeWikiWord.normalized);
+    }
+  }, [activeWikiWord, isEditing, selectMarkdownWordByNormalized]);
+
+  useEffect(() => {
+    setActiveWikiWord(null);
+  }, [selectedPath]);
+
   const applyMarkdownTransform = useCallback(
     (transformed: TextTransformResult): void => {
       updateDraftContent(transformed.nextValue);
@@ -3385,7 +3486,14 @@ export function WikiHub({
           {loadingPage ? <LoadingState title="Loading wiki page" detail="Preparing content, links, and collaboration state." /> : null}
 
           {pageDetail && !isEditing && !historyOpen ? (
-            <WikiReader projectId={projectId} pageDetail={pageDetail} token={token} onOpenPath={(path) => void openPath(path)} />
+            <WikiReader
+              projectId={projectId}
+              pageDetail={pageDetail}
+              token={token}
+              onOpenPath={(path) => void openPath(path)}
+              activeWord={activeWikiWord?.normalized ?? null}
+              onRenderedWordClick={onRenderedWikiWordClick}
+            />
           ) : null}
 
           {pageDetail && isEditing && canWrite && !historyOpen ? (
@@ -3500,12 +3608,14 @@ export function WikiHub({
                       updateDraftContent(event.target.value);
                     }}
                     onKeyDown={onMarkdownKeyDown}
+                    onKeyUp={syncActiveWordFromMarkdownCaret}
+                    onMouseUp={syncActiveWordFromMarkdownCaret}
                     onBlur={onDraftBlur}
                   />
                 </label>
                 <section className="wiki-preview-panel">
                   <h4>Live preview</h4>
-                  <article className="wiki-markdown">
+                  <article className="wiki-markdown" onClick={onRenderedWikiWordClick}>
                     <WikiMarkdown
                       contentMarkdown={draftContent}
                       links={pageDetail.outgoingLinks}
@@ -3513,6 +3623,7 @@ export function WikiHub({
                       projectId={projectId}
                       docsSource={pageDetail.docsSource}
                       onNavigateWikiPath={(path) => void openPath(path)}
+                      activeWord={activeWikiWord?.normalized ?? null}
                     />
                   </article>
                 </section>

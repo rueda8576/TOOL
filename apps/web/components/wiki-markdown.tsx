@@ -8,10 +8,80 @@ import remarkMath from "remark-math";
 
 import { API_BASE_URL } from "../lib/client-api";
 import { normalizeWikiMathMarkdown, WikiDocsSourceView, WikiLinkView } from "../lib/wiki";
+import { WIKI_WORD_PATTERN, normalizeWikiWordToken } from "./wiki-word-selection";
 
 const WIKI_LINK_PATTERN = /\[\[([^[\]]+)]]/g;
 const WIKI_PATH_SEGMENT_PATTERN = /^[a-z0-9-]+$/;
 const WIKI_LINK_PREFIX = "/__wiki-link/";
+
+type HastNode = {
+  type?: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+};
+
+function splitTextNodeForWikiWord(value: string, normalizedWord: string): HastNode[] {
+  const nodes: HastNode[] = [];
+  let cursor = 0;
+
+  for (const match of value.matchAll(WIKI_WORD_PATTERN)) {
+    const word = match[0];
+    const start = match.index ?? 0;
+    const end = start + word.length;
+
+    if (start > cursor) {
+      nodes.push({ type: "text", value: value.slice(cursor, start) });
+    }
+
+    if (normalizeWikiWordToken(word) === normalizedWord) {
+      nodes.push({
+        type: "element",
+        tagName: "span",
+        properties: { className: ["wiki-word-highlight"] },
+        children: [{ type: "text", value: word }]
+      });
+    } else {
+      nodes.push({ type: "text", value: word });
+    }
+
+    cursor = end;
+  }
+
+  if (cursor < value.length) {
+    nodes.push({ type: "text", value: value.slice(cursor) });
+  }
+
+  return nodes.length > 0 ? nodes : [{ type: "text", value }];
+}
+
+function createWikiWordHighlightPlugin(activeWord: string) {
+  const normalizedWord = normalizeWikiWordToken(activeWord);
+
+  return function wikiWordHighlightPlugin() {
+    return (tree: HastNode): void => {
+      const visit = (node: HastNode): void => {
+        if (!node.children || ["code", "pre", "script", "style"].includes(node.tagName ?? "")) {
+          return;
+        }
+
+        const nextChildren: HastNode[] = [];
+        for (const child of node.children) {
+          if (child.type === "text" && typeof child.value === "string") {
+            nextChildren.push(...splitTextNodeForWikiWord(child.value, normalizedWord));
+            continue;
+          }
+          visit(child);
+          nextChildren.push(child);
+        }
+        node.children = nextChildren;
+      };
+
+      visit(tree);
+    };
+  };
+}
 
 function encodeWikiPath(path: string): string {
   return path
@@ -313,7 +383,8 @@ export function WikiMarkdown({
   token,
   projectId,
   docsSource,
-  onNavigateWikiPath
+  onNavigateWikiPath,
+  activeWord
 }: {
   contentMarkdown: string;
   links?: WikiLinkView[];
@@ -321,17 +392,22 @@ export function WikiMarkdown({
   projectId?: string;
   docsSource?: WikiDocsSourceView | null;
   onNavigateWikiPath?: (path: string) => void;
+  activeWord?: string | null;
 }): JSX.Element {
   const renderedMarkdown = useMemo(
     () => normalizeWikiLinksMarkdown(normalizeWikiMathMarkdown(contentMarkdown)),
     [contentMarkdown]
   );
   const linkByPath = useMemo(() => new Map(links.map((link) => [link.toPath, link])), [links]);
+  const rehypePlugins = useMemo(
+    () => (activeWord ? [createWikiWordHighlightPlugin(activeWord), rehypeKatex] : [rehypeKatex]),
+    [activeWord]
+  );
 
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath]}
-      rehypePlugins={[rehypeKatex]}
+      rehypePlugins={rehypePlugins}
       components={{
         a: ({ href, children }) => {
           if (!href?.startsWith(WIKI_LINK_PREFIX)) {

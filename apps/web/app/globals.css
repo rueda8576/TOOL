@@ -3862,6 +3862,14 @@ body.wiki-layout-dragging * {
   margin-bottom: 0;
 }
 
+.wiki-word-highlight {
+  border-radius: 0.18rem;
+  background: color-mix(in srgb, var(--brand-soft) 72%, transparent);
+  box-decoration-break: clone;
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--brand) 42%, transparent);
+  color: inherit;
+}
+
 .wiki-markdown pre {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
