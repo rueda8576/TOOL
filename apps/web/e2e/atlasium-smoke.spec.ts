@@ -227,23 +227,32 @@ test("@e2e wiki search renders an indexed result list with evidence", async ({ p
   await waitForAtlasiumRouteReady(page, "/projects/project-1/wiki");
 
   const searchInput = page.getByLabel("Search wiki content");
-  await searchInput.fill("contam");
+  await searchInput.fill("sputtering");
 
   const resultRows = page.locator(".wiki-search-result-row");
   await expect(resultRows).toHaveCount(1);
   await expect(page.locator(".wiki-tree-list")).toHaveCount(0);
 
-  const contaminantResult = resultRows.first();
-  await expect(contaminantResult.getByRole("button", { name: /Contaminant Deposition/ })).toBeVisible();
-  await expect(contaminantResult.locator(".wiki-search-hit").filter({ hasText: /Contam/i }).first()).toBeVisible();
-  await expect(contaminantResult.locator(".badge", { hasText: "Title" })).toBeVisible();
-  await expect(contaminantResult.locator(".badge", { hasText: "Published" })).toBeVisible();
+  const fieldResult = resultRows.first();
+  await expect(fieldResult.getByRole("button", { name: /Field Study Context/ })).toBeVisible();
+  await expect(fieldResult.locator(".wiki-search-hit").filter({ hasText: /sputtering/i }).first()).toBeVisible();
+  await expect(fieldResult.locator(".badge", { hasText: "Published" })).toBeVisible();
 
-  await contaminantResult.getByRole("button", { name: /Contaminant Deposition/ }).click();
+  await fieldResult.getByRole("button", { name: /Field Study Context/ }).click();
 
-  await expect(page.getByRole("heading", { name: "Contaminant Deposition", level: 2 })).toBeVisible();
-  await expect(searchInput).toHaveValue("contam");
-  await expect(contaminantResult.locator(".badge", { hasText: "Current" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Field Study Context", level: 2 })).toBeVisible();
+  await expect(searchInput).toHaveValue("sputtering");
+  await expect(page.getByLabel("Find in page")).toHaveValue("sputtering");
+  const targetMatch = page.locator(".wiki-page-find-highlight-target", { hasText: /sputtering/i });
+  await expect(targetMatch).toHaveCount(1);
+  await expect.poll(() =>
+    targetMatch.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const center = rect.top + rect.height / 2;
+      return Math.abs(center - window.innerHeight / 2) < window.innerHeight * 0.38;
+    })
+  ).toBe(true);
+  await expect(fieldResult.locator(".badge", { hasText: "Current" })).toBeVisible();
 
   await page.getByRole("button", { name: "Clear wiki search" }).click();
 
@@ -251,6 +260,28 @@ test("@e2e wiki search renders an indexed result list with evidence", async ({ p
   await expect(page.locator(".wiki-search-result-row")).toHaveCount(0);
   await expect(page.locator(".wiki-tree-row-section-dossier").filter({ hasText: "Research" })).toBeVisible();
   await expect(page.locator(".wiki-tree-row-section-dossier").filter({ hasText: "Implementation" })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
+test("@e2e wiki page find opens with Shift+F and searches the current page", async ({ page }) => {
+  await seedSession(page, "admin");
+  await page.goto("/projects/project-1/wiki/home", { waitUntil: "domcontentloaded" });
+  await waitForAtlasiumRouteReady(page, "/projects/project-1/wiki/home");
+
+  await page.keyboard.press("Shift+F");
+  const pageFind = page.getByRole("search", { name: "Find in current wiki page" });
+  await expect(pageFind).toBeVisible();
+
+  const pageFindInput = page.getByLabel("Find in page");
+  await pageFindInput.fill("modules");
+
+  await expect(pageFind.getByText("1/1")).toBeVisible();
+  await expect(page.locator(".wiki-page-find-highlight-target", { hasText: "modules" })).toHaveCount(1);
+
+  await page.keyboard.press("Escape");
+
+  await expect(pageFind).toHaveCount(0);
+  await expect(page.locator(".wiki-page-find-highlight")).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
 });
 

@@ -94,6 +94,80 @@ function createWikiWordHighlightPlugin(activeWord: string, activeWordOccurrenceI
   };
 }
 
+function splitTextNodeForPageFind(
+  value: string,
+  normalizedQuery: string,
+  targetOccurrenceIndex: number,
+  occurrenceState: { currentIndex: number }
+): HastNode[] {
+  const nodes: HastNode[] = [];
+  const normalizedValue = value.toLocaleLowerCase();
+  let cursor = 0;
+  let matchIndex = normalizedValue.indexOf(normalizedQuery);
+
+  while (matchIndex >= 0) {
+    const end = matchIndex + normalizedQuery.length;
+    if (matchIndex > cursor) {
+      nodes.push({ type: "text", value: value.slice(cursor, matchIndex) });
+    }
+
+    const isTargetOccurrence = occurrenceState.currentIndex === targetOccurrenceIndex;
+    occurrenceState.currentIndex += 1;
+    nodes.push({
+      type: "element",
+      tagName: "span",
+      properties: {
+        className: isTargetOccurrence
+          ? ["wiki-page-find-highlight", "wiki-page-find-highlight-target"]
+          : ["wiki-page-find-highlight"],
+        ...(isTargetOccurrence ? { "data-wiki-page-find-target": "true" } : {})
+      },
+      children: [{ type: "text", value: value.slice(matchIndex, end) }]
+    });
+
+    cursor = end;
+    matchIndex = normalizedValue.indexOf(normalizedQuery, cursor);
+  }
+
+  if (cursor < value.length) {
+    nodes.push({ type: "text", value: value.slice(cursor) });
+  }
+
+  return nodes.length > 0 ? nodes : [{ type: "text", value }];
+}
+
+function createWikiPageFindHighlightPlugin(pageFindQuery: string, pageFindMatchIndex: number) {
+  const normalizedQuery = pageFindQuery.trim().toLocaleLowerCase();
+
+  return function wikiPageFindHighlightPlugin() {
+    return (tree: HastNode): void => {
+      if (normalizedQuery.length < 2) {
+        return;
+      }
+
+      const occurrenceState = { currentIndex: 0 };
+      const visit = (node: HastNode): void => {
+        if (!node.children || ["code", "pre", "script", "style"].includes(node.tagName ?? "")) {
+          return;
+        }
+
+        const nextChildren: HastNode[] = [];
+        for (const child of node.children) {
+          if (child.type === "text" && typeof child.value === "string") {
+            nextChildren.push(...splitTextNodeForPageFind(child.value, normalizedQuery, pageFindMatchIndex, occurrenceState));
+            continue;
+          }
+          visit(child);
+          nextChildren.push(child);
+        }
+        node.children = nextChildren;
+      };
+
+      visit(tree);
+    };
+  };
+}
+
 function encodeWikiPath(path: string): string {
   return path
     .split("/")
@@ -396,7 +470,9 @@ export function WikiMarkdown({
   docsSource,
   onNavigateWikiPath,
   activeWord,
-  activeWordOccurrenceIndex = 0
+  activeWordOccurrenceIndex = 0,
+  pageFindQuery,
+  pageFindMatchIndex = 0
 }: {
   contentMarkdown: string;
   links?: WikiLinkView[];
@@ -406,6 +482,8 @@ export function WikiMarkdown({
   onNavigateWikiPath?: (path: string) => void;
   activeWord?: string | null;
   activeWordOccurrenceIndex?: number;
+  pageFindQuery?: string | null;
+  pageFindMatchIndex?: number;
 }): JSX.Element {
   const renderedMarkdown = useMemo(
     () => normalizeWikiLinksMarkdown(normalizeWikiMathMarkdown(contentMarkdown)),
@@ -413,8 +491,14 @@ export function WikiMarkdown({
   );
   const linkByPath = useMemo(() => new Map(links.map((link) => [link.toPath, link])), [links]);
   const rehypePlugins = useMemo(
-    () => (activeWord ? [createWikiWordHighlightPlugin(activeWord, activeWordOccurrenceIndex), rehypeKatex] : [rehypeKatex]),
-    [activeWord, activeWordOccurrenceIndex]
+    () => [
+      ...(activeWord ? [createWikiWordHighlightPlugin(activeWord, activeWordOccurrenceIndex)] : []),
+      ...(pageFindQuery && pageFindQuery.trim().length >= 2
+        ? [createWikiPageFindHighlightPlugin(pageFindQuery, pageFindMatchIndex)]
+        : []),
+      rehypeKatex
+    ],
+    [activeWord, activeWordOccurrenceIndex, pageFindMatchIndex, pageFindQuery]
   );
 
   return (

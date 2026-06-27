@@ -126,6 +126,7 @@
 - For wiki search at project scope, backend full-text (`websearch_to_tsquery` + `ts_rank_cd`) gives better relevance than client title/path filtering, and role checks must gate draft content visibility.
 - If immutable wiki revisions already store author and timestamp, expose a dedicated revision-detail endpoint for history preview rather than overloading the revision summary list with full markdown content.
 - For editor/view word synchronization, use deliberate gestures such as double-click plus explicit centering. Do not bind cross-pane highlights to ordinary click, caret movement, or key navigation because that creates accidental visual noise.
+- Project-wide Wiki search result clicks should hand off the query to page-level find, highlight/center the matched evidence, and survive route remounts; otherwise navigation can feel disconnected from the search evidence the user selected.
 
 ## Branding consistency
 - Keep product naming aligned across visible UI brand labels and metadata title to avoid split identity between shell and browser tab.

@@ -225,6 +225,79 @@ export const wikiResearchPage = {
   }
 };
 
+const wikiFieldStudyMarkdown = [
+  "# Field Study Context",
+  "",
+  ...Array.from(
+    { length: 28 },
+    (_, index) => `Archive paragraph ${String(index + 1).padStart(2, "0")} records field context before the target evidence.`
+  ),
+  "",
+  "The sputtering model evidence links field-study context, material path, and the published project archive.",
+  "",
+  ...Array.from(
+    { length: 8 },
+    (_, index) => `Traceability tail ${String(index + 1).padStart(2, "0")} keeps enough paper below the centered match.`
+  )
+].join("\n\n");
+
+export const wikiFieldStudyPage = {
+  page: {
+    id: "wiki-field-study-context",
+    projectId: qaProject.id,
+    slug: "field-study-context",
+    folderPath: "research/atlasium-research-archive/01-background",
+    title: "Field Study Context",
+    path: "research/atlasium-research-archive/01-background/field-study-context",
+    templateType: null,
+    updatedAt: "2026-06-18T08:00:00.000Z"
+  },
+  draft: {
+    title: "Field Study Context",
+    contentMarkdown: wikiFieldStudyMarkdown,
+    draftVersion: 2,
+    updatedAt: "2026-06-18T08:00:00.000Z",
+    updatedBy: qaUser
+  },
+  published: {
+    id: "revision-field-study-1",
+    revisionNumber: 1,
+    contentMarkdown: wikiFieldStudyMarkdown,
+    publishedAt: "2026-06-17T10:00:00.000Z",
+    createdBy: qaUser,
+    changeNote: "Initial field study context"
+  },
+  outgoingLinks: [],
+  backlinks: [],
+  docsSource: {
+    repositoryId: "repo-1",
+    repositoryName: "atlasium-research-archive",
+    pathWithNamespace: "atlasium/research-archive",
+    defaultBranch: "main",
+    docsPath: "Docs/Research/01-background/field-study-context.md",
+    docsRoot: "Docs",
+    wikiPrefix: "atlasium-research-archive",
+    docsKind: "research",
+    isOverview: false
+  }
+};
+
+const wikiContaminantMarkdown = [
+  "# Contaminant Deposition",
+  "",
+  ...Array.from(
+    { length: 28 },
+    (_, index) => `Archive paragraph ${String(index + 1).padStart(2, "0")} records deposition context before the target evidence.`
+  ),
+  "",
+  "The sputtering model evidence links contaminant deposition, material path, and the published project archive.",
+  "",
+  ...Array.from(
+    { length: 8 },
+    (_, index) => `Traceability tail ${String(index + 1).padStart(2, "0")} keeps enough paper below the centered match.`
+  )
+].join("\n\n");
+
 export const wikiContaminantPage = {
   page: {
     id: "wiki-contaminant-deposition",
@@ -238,8 +311,7 @@ export const wikiContaminantPage = {
   },
   draft: {
     title: "Contaminant Deposition",
-    contentMarkdown:
-      "# Contaminant Deposition\n\nContaminant deposition evidence connects the sputtering model, material path, and published project archive.",
+    contentMarkdown: wikiContaminantMarkdown,
     draftVersion: 2,
     updatedAt: "2026-06-18T08:00:00.000Z",
     updatedBy: qaUser
@@ -247,8 +319,7 @@ export const wikiContaminantPage = {
   published: {
     id: "revision-contaminant-1",
     revisionNumber: 1,
-    contentMarkdown:
-      "# Contaminant Deposition\n\nContaminant deposition evidence connects the sputtering model, material path, and published project archive.",
+    contentMarkdown: wikiContaminantMarkdown,
     publishedAt: "2026-06-17T10:00:00.000Z",
     createdBy: qaUser,
     changeNote: "Initial contaminant deposition note"

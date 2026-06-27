@@ -1,5 +1,19 @@
 # Implementation TODO (v1 bootstrap)
 
+## Wiki Page Find And Search Result Centering (2026-06-26)
+- [x] Register the implementation checklist and inspect current Wiki search/highlight surfaces.
+- [x] Add local page-find state, `Shift+F` shortcut, result-click handoff, and centered target navigation.
+- [x] Extend rendered Markdown highlighting for page-find matches without disturbing double-click word sync.
+- [x] Style the page-find bar as a compact Atlasium workspace control with existing tokens.
+- [x] Update focused Wiki e2e coverage and run verification/static audits.
+
+### Review
+- Added a page-level Wiki find widget opened by `Shift+F` or the local `Find` action, with compact current/total match state, previous/next controls, close, and responsive Atlasium styling using existing tokens.
+- Clicking a project-wide search result now hands the query to page find, opens the matched page, restores the query after route remounts, highlights the evidence, and centers the active match in the reader/preview/editor context.
+- Extended `WikiMarkdown` with separate page-find highlighting classes so local search does not interfere with the existing double-click editor/view word synchronization.
+- Updated Wiki e2e coverage for result-click centering and `Shift+F` current-page search; updated the mobile visual snapshot for the new `Find` action in the Wiki page header.
+- Verification passed: web type-check, web build, focused Wiki e2e, full web e2e, web a11y, visual snapshot update, clean visual rerun, `pnpm repo:check`, `pnpm lint`, `git diff --check`, and static audits for obsolete branding/search copy.
+
 ## Wiki Search Results Index (2026-06-26)
 - [x] Register the implementation checklist and inspect current Wiki search contracts.
 - [x] Improve backend Wiki search for full words, prefixes, and bounded fragments.

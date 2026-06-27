@@ -19,6 +19,8 @@ export function WikiReader({
   onOpenPath,
   activeWord,
   activeWordOccurrenceIndex,
+  pageFindQuery,
+  pageFindMatchIndex,
   renderedMarkdownRef,
   onRenderedWordDoubleClick
 }: {
@@ -28,6 +30,8 @@ export function WikiReader({
   onOpenPath: (path: string) => void;
   activeWord?: string | null;
   activeWordOccurrenceIndex?: number;
+  pageFindQuery?: string | null;
+  pageFindMatchIndex?: number;
   renderedMarkdownRef?: RefObject<HTMLElement>;
   onRenderedWordDoubleClick?: (event: ReactMouseEvent<HTMLElement>) => void;
 }): JSX.Element {
@@ -58,6 +62,8 @@ export function WikiReader({
           onNavigateWikiPath={onOpenPath}
           activeWord={activeWord}
           activeWordOccurrenceIndex={activeWordOccurrenceIndex}
+          pageFindQuery={pageFindQuery}
+          pageFindMatchIndex={pageFindMatchIndex}
         />
       </article>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Plus, RefreshCw, Search, Upload, X } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, ChevronUp, FileText, Folder, GitBranch, Plus, RefreshCw, Search, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   ChangeEvent,
@@ -105,6 +105,7 @@ const WIKI_REALTIME_TITLE_KEY = "title";
 const WIKI_REALTIME_CONTENT_KEY = "content";
 const WIKI_REALTIME_AUTOSAVE_MARK_MS = 3250;
 const WIKI_FLASH_SUCCESS_KEY = "atlasium_wiki_flash_success";
+const WIKI_PENDING_PAGE_FIND_KEY = "atlasium_wiki_pending_page_find";
 const WIKI_SIDEBAR_WIDTH_STORAGE_KEY = "atlasium_wiki_sidebar_width_px";
 const WIKI_SIDEBAR_MODE_STORAGE_KEY = "atlasium_wiki_sidebar_width_mode";
 const WIKI_EXPANDED_FOLDERS_STORAGE_KEY_PREFIX = "atlasium_wiki_expanded_folders";
@@ -863,6 +864,40 @@ function readExpandedFolderPaths(storageKey: string): string[] | null {
   }
 }
 
+function readPendingPageFind(projectId: string): { path: string; query: string } | null {
+  const rawValue = sessionStorage.getItem(WIKI_PENDING_PAGE_FIND_KEY);
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const parsedValue = JSON.parse(rawValue) as unknown;
+    if (
+      parsedValue &&
+      typeof parsedValue === "object" &&
+      "projectId" in parsedValue &&
+      "path" in parsedValue &&
+      "query" in parsedValue
+    ) {
+      const pending = parsedValue as { projectId?: unknown; path?: unknown; query?: unknown };
+      if (pending.projectId === projectId && typeof pending.path === "string" && typeof pending.query === "string") {
+        return {
+          path: pending.path,
+          query: pending.query
+        };
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function writePendingPageFind(projectId: string, path: string, query: string): void {
+  sessionStorage.setItem(WIKI_PENDING_PAGE_FIND_KEY, JSON.stringify({ projectId, path, query }));
+}
+
 function countTreePages(node: WikiTreeNode): number {
   if (node.type === "page") {
     return 1;
@@ -941,6 +976,50 @@ function renderWikiSearchText(value: string, terms: string[]): ReactNode {
 
 function wikiSearchResultCountLabel(count: number): string {
   return `${count} result${count === 1 ? "" : "s"}`;
+}
+
+function normalizeWikiPageFindQuery(query: string): string {
+  return query.trim();
+}
+
+function countWikiPageFindMatches(value: string, query: string): number {
+  const normalizedQuery = normalizeWikiPageFindQuery(query).toLocaleLowerCase();
+  if (normalizedQuery.length < 2) {
+    return 0;
+  }
+
+  const normalizedValue = value.toLocaleLowerCase();
+  let count = 0;
+  let cursor = normalizedValue.indexOf(normalizedQuery);
+  while (cursor >= 0) {
+    count += 1;
+    cursor = normalizedValue.indexOf(normalizedQuery, cursor + normalizedQuery.length);
+  }
+  return count;
+}
+
+function findWikiPageFindMatch(value: string, query: string, occurrenceIndex: number): { start: number; end: number } | null {
+  const normalizedQuery = normalizeWikiPageFindQuery(query).toLocaleLowerCase();
+  if (normalizedQuery.length < 2) {
+    return null;
+  }
+
+  const normalizedValue = value.toLocaleLowerCase();
+  let seen = 0;
+  let cursor = normalizedValue.indexOf(normalizedQuery);
+  while (cursor >= 0) {
+    const end = cursor + normalizedQuery.length;
+    if (seen === occurrenceIndex) {
+      return { start: cursor, end };
+    }
+    seen += 1;
+    cursor = normalizedValue.indexOf(normalizedQuery, end);
+  }
+  return null;
+}
+
+function shouldIgnoreWikiPageFindShortcut(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(target.closest("input,textarea,select,[contenteditable='true']"));
 }
 
 function treeNodeLabel(node: WikiTreeNode): string {
@@ -1136,6 +1215,8 @@ export function WikiHub({
   const markdownRef = useRef<HTMLTextAreaElement>(null);
   const readMarkdownRef = useRef<HTMLElement>(null);
   const previewMarkdownRef = useRef<HTMLElement>(null);
+  const pageFindInputRef = useRef<HTMLInputElement>(null);
+  const wikiMainHeaderRef = useRef<HTMLDivElement | null>(null);
   const lastSavedSnapshotRef = useRef<{ title: string; content: string } | null>(null);
   const draftVersionRef = useRef<number | null>(null);
   const wikiLayoutRef = useRef<HTMLDivElement | null>(null);
@@ -1209,6 +1290,9 @@ export function WikiHub({
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<WikiSearchResult[]>([]);
+  const [pageFindOpen, setPageFindOpen] = useState(false);
+  const [pageFindQuery, setPageFindQuery] = useState("");
+  const [pageFindIndex, setPageFindIndex] = useState(0);
   const [conflictDraft, setConflictDraft] = useState<DraftConflictPayload | null>(null);
   const [conflictLocalSnapshot, setConflictLocalSnapshot] = useState<{ title: string; content: string } | null>(null);
   const [collaborators, setCollaborators] = useState<CollaboratorPresence[]>([]);
@@ -1328,6 +1412,22 @@ export function WikiHub({
     () => (baseRevisionSummary ? revisionPreviewById[baseRevisionSummary.id] ?? null : null),
     [baseRevisionSummary, revisionPreviewById]
   );
+  const pageFindContent = useMemo(() => {
+    if (!pageDetail) {
+      return "";
+    }
+    if (isEditing && canWrite) {
+      return draftContent;
+    }
+    return pageDetail.published?.contentMarkdown ?? pageDetail.draft?.contentMarkdown ?? "";
+  }, [canWrite, draftContent, isEditing, pageDetail]);
+  const normalizedPageFindQuery = useMemo(() => normalizeWikiPageFindQuery(pageFindQuery), [pageFindQuery]);
+  const pageFindActive = pageFindOpen && normalizedPageFindQuery.length >= 2;
+  const pageFindMatchCount = useMemo(
+    () => (pageFindActive ? countWikiPageFindMatches(pageFindContent, normalizedPageFindQuery) : 0),
+    [normalizedPageFindQuery, pageFindActive, pageFindContent]
+  );
+  const activePageFindIndex = pageFindMatchCount > 0 ? pageFindIndex % pageFindMatchCount : 0;
   const showResizableWikiLayout = isDesktopWikiLayout && sidebarWidthPx !== null;
   const wikiLayoutStyle = useMemo(
     () =>
@@ -1694,6 +1794,14 @@ export function WikiHub({
             nextExpandedPaths.push(path);
           }
         });
+      }
+      const pendingPageFind = readPendingPageFind(projectId);
+      if (pendingPageFind && pendingPageFind.path === candidatePath && pendingPageFind.query.trim().length >= 2) {
+        setTreeQuery(pendingPageFind.query);
+        setPageFindOpen(true);
+        setPageFindQuery(pendingPageFind.query);
+        setPageFindIndex(0);
+        sessionStorage.removeItem(WIKI_PENDING_PAGE_FIND_KEY);
       }
       setExpandedFolders(new Set(nextExpandedPaths));
       setExpandedFoldersLoaded(true);
@@ -2714,6 +2822,73 @@ export function WikiHub({
     [draftContent]
   );
 
+  const selectPageFindMatchInEditor = useCallback(
+    (query: string, occurrenceIndex: number): void => {
+      const match = findWikiPageFindMatch(draftContent, query, occurrenceIndex);
+      const textarea = markdownRef.current;
+      if (!match || !textarea) {
+        return;
+      }
+      textarea.setSelectionRange(match.start, match.end);
+      centerTextareaSelection(textarea, match.start);
+    },
+    [draftContent]
+  );
+
+  const scrollPageFindTargetIntoView = useCallback((): void => {
+    const container = isEditing ? previewMarkdownRef.current : readMarkdownRef.current;
+    const target =
+      container?.querySelector<HTMLElement>('[data-wiki-page-find-target="true"]') ??
+      container?.querySelector<HTMLElement>(".wiki-page-find-highlight");
+    const fallback = isEditing ? markdownRef.current : wikiMainHeaderRef.current;
+
+    if (target) {
+      target.scrollIntoView({ block: "center", inline: "nearest", behavior: resolveWikiScrollBehavior() });
+      return;
+    }
+    fallback?.scrollIntoView({ block: "center", inline: "nearest", behavior: resolveWikiScrollBehavior() });
+  }, [isEditing]);
+
+  const openPageFind = useCallback((): void => {
+    setPageFindOpen(true);
+    setPageFindQuery((current) => {
+      if (current.trim().length >= 2) {
+        return current;
+      }
+      return normalizedSearchQuery.length >= 2 ? normalizedSearchQuery : current;
+    });
+  }, [normalizedSearchQuery]);
+
+  const closePageFind = useCallback((): void => {
+    setPageFindOpen(false);
+    setPageFindIndex(0);
+  }, []);
+
+  const movePageFindMatch = useCallback(
+    (direction: 1 | -1): void => {
+      setPageFindIndex((current) => {
+        if (pageFindMatchCount === 0) {
+          return 0;
+        }
+        return (current + direction + pageFindMatchCount) % pageFindMatchCount;
+      });
+    },
+    [pageFindMatchCount]
+  );
+
+  const openSearchResult = useCallback(
+    async (path: string): Promise<void> => {
+      if (normalizedSearchQuery.length >= 2) {
+        writePendingPageFind(projectId, path, normalizedSearchQuery);
+        setPageFindOpen(true);
+        setPageFindQuery(normalizedSearchQuery);
+        setPageFindIndex(0);
+      }
+      await openPath(path);
+    },
+    [normalizedSearchQuery, openPath, projectId]
+  );
+
   const onMarkdownDoubleClick = useCallback((): void => {
     requestAnimationFrame(() => {
       const textarea = markdownRef.current;
@@ -2761,6 +2936,73 @@ export function WikiHub({
       selectMarkdownWordByNormalized(activeWikiWord.normalized, activeWikiWord.occurrenceIndex, true);
     }
   }, [activeWikiWord, isEditing, selectMarkdownWordByNormalized]);
+
+  useEffect(() => {
+    if (!pageFindOpen) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      pageFindInputRef.current?.focus({ preventScroll: true });
+      pageFindInputRef.current?.select();
+    });
+  }, [pageFindOpen]);
+
+  useEffect(() => {
+    setPageFindIndex(0);
+  }, [normalizedPageFindQuery, selectedPath]);
+
+  useEffect(() => {
+    setPageFindIndex((current) => {
+      if (pageFindMatchCount === 0) {
+        return 0;
+      }
+      return current >= pageFindMatchCount ? current % pageFindMatchCount : current;
+    });
+  }, [pageFindMatchCount]);
+
+  useEffect(() => {
+    if (!pageFindActive) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      if (isEditing) {
+        selectPageFindMatchInEditor(normalizedPageFindQuery, activePageFindIndex);
+      }
+      scrollPageFindTargetIntoView();
+    });
+  }, [
+    activePageFindIndex,
+    isEditing,
+    normalizedPageFindQuery,
+    pageFindActive,
+    pageFindContent,
+    scrollPageFindTargetIntoView,
+    selectPageFindMatchInEditor
+  ]);
+
+  useEffect(() => {
+    const onWindowKeyDown = (event: KeyboardEvent): void => {
+      if (
+        event.key.toLowerCase() !== "f" ||
+        !event.shiftKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        shouldIgnoreWikiPageFindShortcut(event.target)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      openPageFind();
+    };
+
+    window.addEventListener("keydown", onWindowKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onWindowKeyDown);
+    };
+  }, [openPageFind]);
 
   useEffect(() => {
     setActiveWikiWord(null);
@@ -3265,6 +3507,80 @@ export function WikiHub({
     </div>
   );
 
+  const renderPageFindBar = (): JSX.Element | null => {
+    if (!pageFindOpen || !pageDetail || historyOpen) {
+      return null;
+    }
+
+    const countLabel =
+      normalizedPageFindQuery.length < 2
+        ? "0 matches"
+        : pageFindMatchCount > 0
+          ? `${activePageFindIndex + 1}/${pageFindMatchCount}`
+          : "No matches";
+
+    return (
+      <div className="wiki-page-find-bar" role="search" aria-label="Find in current wiki page">
+        <Search size={15} aria-hidden="true" />
+        <input
+          ref={pageFindInputRef}
+          className="input wiki-page-find-input"
+          value={pageFindQuery}
+          onChange={(event) => {
+            setPageFindQuery(event.target.value);
+            setPageFindIndex(0);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              movePageFindMatch(event.shiftKey ? -1 : 1);
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closePageFind();
+            }
+          }}
+          placeholder="Find in page"
+          aria-label="Find in page"
+        />
+        <span className="wiki-page-find-count" aria-live="polite">
+          {countLabel}
+        </span>
+        <div className="wiki-page-find-actions">
+          <button
+            type="button"
+            className="wiki-page-find-action"
+            onClick={() => movePageFindMatch(-1)}
+            disabled={!pageFindActive || pageFindMatchCount === 0}
+            aria-label="Previous match"
+            title="Previous match"
+          >
+            <ChevronUp size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="wiki-page-find-action"
+            onClick={() => movePageFindMatch(1)}
+            disabled={!pageFindActive || pageFindMatchCount === 0}
+            aria-label="Next match"
+            title="Next match"
+          >
+            <ChevronDown size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="wiki-page-find-action"
+            onClick={closePageFind}
+            aria-label="Close page find"
+            title="Close"
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const docsSyncSummary = docsSyncResult ? formatDocsSyncSummary(docsSyncResult) : null;
 
   return (
@@ -3440,7 +3756,7 @@ export function WikiHub({
                         <button
                           type="button"
                           className="wiki-search-result-title"
-                          onClick={() => void openPath(result.path)}
+                          onClick={() => void openSearchResult(result.path)}
                           data-wiki-sidebar-measure
                         >
                           {renderWikiSearchText(result.title, searchTerms)}
@@ -3636,7 +3952,7 @@ export function WikiHub({
         ) : null}
 
         <section className="wiki-main workspace-surface">
-          <div className="wiki-main-header">
+          <div className="wiki-main-header" ref={wikiMainHeaderRef}>
             <div>
               <h2 className="section-heading">{pageDetail?.page.title ?? "Wiki page"}</h2>
               {selectedPath ? <p className="wiki-page-path">/{selectedPath}</p> : null}
@@ -3644,6 +3960,17 @@ export function WikiHub({
             </div>
             {pageDetail ? (
               <div className="inline-actions">
+                {!historyOpen ? (
+                  <button
+                    type="button"
+                    className="button button-secondary wiki-page-find-toggle"
+                    onClick={openPageFind}
+                    disabled={loadingPage}
+                  >
+                    <Search size={14} aria-hidden="true" />
+                    <span>Find</span>
+                  </button>
+                ) : null}
                 {canWrite && !historyOpen ? (
                   <button
                     type="button"
@@ -3674,6 +4001,8 @@ export function WikiHub({
             ) : null}
           </div>
 
+          {renderPageFindBar()}
+
           {success ? <p className="alert alert-success">{success}</p> : null}
           {error ? <p className="alert alert-error">{error}</p> : null}
           {!loadingPage && !pageDetail && allPagePaths.length === 0 ? (
@@ -3692,6 +4021,8 @@ export function WikiHub({
               onOpenPath={(path) => void openPath(path)}
               activeWord={activeWikiWord?.normalized ?? null}
               activeWordOccurrenceIndex={activeWikiWord?.occurrenceIndex ?? 0}
+              pageFindQuery={pageFindActive ? normalizedPageFindQuery : null}
+              pageFindMatchIndex={activePageFindIndex}
               renderedMarkdownRef={readMarkdownRef}
               onRenderedWordDoubleClick={onRenderedWikiWordDoubleClick}
             />
@@ -3825,6 +4156,8 @@ export function WikiHub({
                       onNavigateWikiPath={(path) => void openPath(path)}
                       activeWord={activeWikiWord?.normalized ?? null}
                       activeWordOccurrenceIndex={activeWikiWord?.occurrenceIndex ?? 0}
+                      pageFindQuery={pageFindActive ? normalizedPageFindQuery : null}
+                      pageFindMatchIndex={activePageFindIndex}
                     />
                   </article>
                 </section>

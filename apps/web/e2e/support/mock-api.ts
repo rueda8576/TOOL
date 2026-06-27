@@ -13,6 +13,7 @@ import {
   repository,
   taskItems,
   wikiContaminantPage,
+  wikiFieldStudyPage,
   wikiPage,
   wikiResearchPage,
   wikiTree
@@ -61,19 +62,19 @@ function buildWikiSearchResults(query: string): JsonValue {
 
   const results = [
     {
-      pageId: wikiContaminantPage.page.id,
-      path: wikiContaminantPage.page.path,
-      title: wikiContaminantPage.page.title,
+      pageId: wikiFieldStudyPage.page.id,
+      path: wikiFieldStudyPage.page.path,
+      title: wikiFieldStudyPage.page.title,
       snippet:
-        "Contaminant deposition evidence connects the sputtering model, material path, and published project archive.",
+        "The sputtering model evidence links field-study context, material path, and published project archive.",
       score: 94,
       matches: {
-        title: true,
-        path: true,
+        title: false,
+        path: false,
         published: true,
         draft: false
       },
-      updatedAt: wikiContaminantPage.page.updatedAt
+      updatedAt: wikiFieldStudyPage.page.updatedAt
     },
     {
       pageId: wikiResearchPage.page.id,
@@ -210,7 +211,16 @@ export async function installMockApi(page: Page): Promise<void> {
     }
     if (method === "GET" && path === `/projects/${qaProject.id}/wiki-pages/by-path`) {
       const wikiPath = url.searchParams.get("path");
-      await json(route, wikiPath === "home" ? wikiPage : wikiPath === wikiContaminantPage.page.path ? wikiContaminantPage : wikiResearchPage);
+      await json(
+        route,
+        wikiPath === "home"
+          ? wikiPage
+          : wikiPath === wikiFieldStudyPage.page.path
+            ? wikiFieldStudyPage
+            : wikiPath === wikiContaminantPage.page.path
+              ? wikiContaminantPage
+              : wikiResearchPage
+      );
       return;
     }
     if (method === "GET" && path === `/projects/${qaProject.id}/wiki-pages/docs-sync/status`) {
